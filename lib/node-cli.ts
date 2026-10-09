@@ -53,12 +53,21 @@ export interface NodeCliInvocation {
  * `execFile`-spawnable invocation of a Node.js CLI, never routed through a
  * shell. Falls back to the bare command name when no bundled CLI script is
  * found, so behavior is unchanged on installs that ship none.
+ *
+ * Under Bun those bare names do not exist, so the two read-only commands Pi Web
+ * shells out to are mapped onto their Bun equivalents: `bun x` replaces npx and
+ * `bun pm view` emits npm's `view ... version --json`. Installs are left alone —
+ * `bun pm install` does not exist, so the SDK keeps using npm for those.
  */
 export function nodeCliInvocation(
   name: NodeCliName,
   args: string[],
   options: NodeCliLookupOptions = {},
 ): NodeCliInvocation {
+  if ("bun" in process.versions) {
+    if (name === "npx") return { command: execPath, args: ["x", ...args] };
+    if (name === "npm" && args[0] === "view") return { command: execPath, args: ["pm", ...args] };
+  }
   const script = findNodeCliScript(name, options);
   return script
     ? { command: execPath, args: [script, ...args] }

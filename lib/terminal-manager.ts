@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { closeSync, read } from "fs";
 import { homedir } from "os";
 import type { IPty } from "node-pty";
 import { samePath } from "./paths";
@@ -71,6 +72,84 @@ function dimension(value: number, fallback: number): number {
   return Math.min(1000, Math.max(2, Number.isFinite(value) ? Math.floor(value) : fallback));
 }
 
+function spawnPty(
+  spawn: typeof import("node-pty").spawn,
+  ...args: Parameters<typeof import("node-pty").spawn>
+): ReturnType<typeof import("node-pty").spawn> {
+  if (!("bun" in process.versions)) return spawn(...args);
+
+  // Bun's tty.ReadStream treats the first EAGAIN from node-pty's O_NONBLOCK pty
+  // master fd as fatal: it destroys the stream and closes the fd, so the shell
+  // is SIGHUPed before it writes a byte (oven-sh/bun#25822, unfixed through
+  // Bun 1.4.2). node-pty only touches tty.ReadStream while building its read
+  // stream, so swapping a polling reader in around spawn() is enough; its write,
+  // resize and exit paths already work under Bun.
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const tty = require("node:tty") as typeof import("node:tty");
+  const { Readable } = require("node:stream") as typeof import("node:stream");
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  const nativeReadStream = tty.ReadStream;
+
+  class PollingReadStream extends Readable {
+    private readonly buffer = Buffer.alloc(64 * 1024);
+    private retryDelayMs = 1;
+    private retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+    constructor(private readonly fd: number) {
+      super({ highWaterMark: 64 * 1024, autoDestroy: true });
+      this.poll();
+    }
+
+    _read(): void {}
+
+    private poll(): void {
+      read(this.fd, this.buffer, 0, this.buffer.length, null, (error, bytesRead) => {
+        if (this.destroyed) return;
+        if (error) {
+          // EAGAIN only means "nothing yet" on a non-blocking fd. The slave side
+          // going away (EIO) or an already closed fd (EBADF) ends the stream.
+          if (error.code === "EAGAIN") {
+            this.retryTimer = setTimeout(() => this.poll(), this.retryDelayMs);
+            this.retryDelayMs = Math.min(this.retryDelayMs * 2, 8);
+            return;
+          }
+          if (error.code === "EIO" || error.code === "EBADF") {
+            this.push(null);
+            return;
+          }
+          this.destroy(error);
+          return;
+        }
+        this.retryDelayMs = 1;
+        if (bytesRead === 0) {
+          this.push(null);
+          return;
+        }
+        // Copy: the next read overwrites buffer while this slice is still queued.
+        this.push(Buffer.from(this.buffer.subarray(0, bytesRead)));
+        setImmediate(() => this.poll());
+      });
+    }
+
+    _destroy(error: Error | null, callback: (error?: Error | null) => void): void {
+      if (this.retryTimer) clearTimeout(this.retryTimer);
+      try {
+        closeSync(this.fd);
+      } catch {
+        // The fd is already gone.
+      }
+      callback(error);
+    }
+  }
+
+  Object.defineProperty(tty, "ReadStream", { value: PollingReadStream, configurable: true, writable: true });
+  try {
+    return spawn(...args);
+  } finally {
+    Object.defineProperty(tty, "ReadStream", { value: nativeReadStream, configurable: true, writable: true });
+  }
+}
+
 export function createTerminal(cwd: string, cols: number, rows: number, id: string = randomUUID()): string {
   const existing = registry().get(id);
   if (existing) {
@@ -96,7 +175,7 @@ export function createTerminal(cwd: string, cols: number, rows: number, id: stri
     ? process.env.ComSpec ?? "cmd.exe"
     : process.env.SHELL || "/bin/sh";
   const args = process.platform === "win32" ? [] : ["-l"];
-  const pty = spawn(shell, args, {
+  const pty = spawnPty(spawn, shell, args, {
     name: "xterm-256color",
     cols: dimension(cols, 80),
     rows: dimension(rows, 24),
