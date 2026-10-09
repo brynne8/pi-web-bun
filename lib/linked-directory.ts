@@ -1,5 +1,5 @@
 import fs from "fs";
-import os from "os";
+import { homeDir } from "./home-dir";
 import path from "path";
 import { isExistingPathWithinRoots, isPathWithinRoots, resolveRealRoots } from "./path-security";
 import { samePath } from "./paths";
@@ -27,7 +27,7 @@ export function getOutsideLinkTarget(linkPath: string, realRoots: Set<string>): 
 function enclosesProjectOrHome(target: string, realRoots: Set<string>): boolean {
   const enclosed = [...realRoots];
   try {
-    enclosed.push(fs.realpathSync(os.homedir()));
+    enclosed.push(fs.realpathSync(homeDir()));
   } catch {
     // No resolvable home folder to protect.
   }

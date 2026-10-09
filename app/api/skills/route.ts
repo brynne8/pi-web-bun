@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { existsSync, readFileSync, writeFileSync } from "fs";
-import { homedir } from "os";
+import { homeDir } from "@/lib/home-dir";
 import path from "path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { SkillToggleResult } from "@/lib/api-types";
@@ -36,7 +36,7 @@ async function getSkillEditRoots(): Promise<Set<string>> {
   // the agent's skills dir; isExistingFilePathAllowed resolves the symlink, so
   // the real target sits outside getAgentDir(). Allow the global skills root
   // too (the SDK always treats ~/.agents/skills as trusted).
-  const globalSkillsDir = path.join(homedir(), ".agents", "skills");
+  const globalSkillsDir = path.join(homeDir(), ".agents", "skills");
   if (existsSync(globalSkillsDir)) allowedRoots.add(globalSkillsDir);
   return allowedRoots;
 }

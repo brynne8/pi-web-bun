@@ -1,5 +1,5 @@
 import { statSync } from "node:fs";
-import { homedir } from "node:os";
+import { homeDir } from "./home-dir";
 import { isAbsolute, resolve } from "node:path";
 import { getAgentDir, type McpServerConfig } from "@earendil-works/pi-coding-agent";
 import type { McpErrorResponse, McpRefusalReason, McpScope } from "./api-types";
@@ -227,7 +227,7 @@ export async function readConnectableMcpEntry(req: Request): Promise<McpConnecta
       sourcePath: read.sourcePath,
       configKey,
       config,
-      cwd: project?.cwd ?? homedir(),
+      cwd: project?.cwd ?? homeDir(),
     };
   } catch (error) {
     return mcpEntryRefusal(500, "internal", errorMessage(error));
