@@ -8,9 +8,8 @@ import {
   type McpServerEntry,
   type McpTransportFactory,
 } from "@earendil-works/pi-coding-agent";
-import { readFileSync, realpathSync } from "node:fs";
-import { findPackageJSON } from "node:module";
-import { join } from "node:path";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // MCP support the SDK ships but its package does not export (ADR 0006): the
@@ -320,13 +319,43 @@ function packageImportEntry(manifest: unknown): string | undefined {
 }
 
 /**
+ * The package.json of a dependency, as Node's resolver finds it: the
+ * `node_modules` of the importer's folder, then of every folder above it.
+ *
+ * `findPackageJSON()` from `node:module` is Node 22.14+ only and Bun does not
+ * implement it, and importing it there fails the whole module (named exports
+ * of `node:module` are checked at link time), turning every MCP feature off
+ * with `internals-unavailable`. The walk is short and plain, so both runtimes
+ * share it.
+ */
+function findPackageManifest(spec: string, fromFile: string): string | undefined {
+  // A scoped name keeps its scope folder; anything after the package's own
+  // path would be a subpath, which nothing here resolves.
+  const name = spec.split("/").slice(0, spec.startsWith("@") ? 2 : 1).join("/");
+  let dir = dirname(fromFile);
+  for (;;) {
+    const candidate = join(dir, "node_modules", name, "package.json");
+    try {
+      // statSync, not existsSync: a folder or a link to one where the
+      // manifest belongs is the same nothing to read.
+      if (statSync(candidate).isFile()) return candidate;
+    } catch {
+      // Missing or unreadable here: keep walking, as Node does.
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
+
+/**
  * pi-mcp is a dependency of the SDK, not of pi-web, so it is resolved from the
  * SDK file that imports it: the copy runtime.js uses, whether npm nested it
  * under the SDK or hoisted it.
  */
 function resolveMcpClientEntry(packageDir: string): string {
-  const importer = pathToFileURL(join(packageDir, SDK_MODULES.mcpRuntime)).href;
-  const manifestPath = findPackageJSON(MCP_PACKAGE, importer);
+  const importer = join(packageDir, SDK_MODULES.mcpRuntime);
+  const manifestPath = findPackageManifest(MCP_PACKAGE, importer);
   if (!manifestPath) throw new Error(`cannot resolve ${MCP_PACKAGE}`);
   const entry = packageImportEntry(JSON.parse(readFileSync(manifestPath, "utf8")));
   if (!entry) throw new Error(`${manifestPath} declares no import entry`);
@@ -336,7 +365,7 @@ function resolveMcpClientEntry(packageDir: string): string {
 function resolvedSdkPackageDir(cwd: string): string {
   // Next.js runs the server with the project as cwd, and resolves externals
   // from its build output inside the project, so both find the same package.
-  const manifestPath = findPackageJSON(SDK_PACKAGE, pathToFileURL(join(cwd, "package.json")).href);
+  const manifestPath = findPackageManifest(SDK_PACKAGE, join(cwd, "package.json"));
   if (!manifestPath) throw new Error(`cannot resolve ${SDK_PACKAGE} from ${cwd}`);
   return realpathSync(join(manifestPath, ".."));
 }
