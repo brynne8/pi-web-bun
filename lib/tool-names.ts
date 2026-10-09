@@ -42,3 +42,11 @@ const SHELL_TOOL_NAMES = new Set(["bash", "powershell", "bash (local)"]);
 export function isShellToolName(toolName: string): boolean {
   return SHELL_TOOL_NAMES.has(toolName.toLowerCase());
 }
+
+export function isReadToolName(toolName: string): boolean {
+  const name = toolName.toLowerCase();
+  return name === "read" ||
+    name.startsWith("read_") ||
+    name.endsWith(".read") ||
+    name.endsWith("_read");
+}
