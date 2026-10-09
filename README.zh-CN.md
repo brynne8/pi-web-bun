@@ -1,6 +1,8 @@
-# Pi Web
+# Pi Web（Bun 版）
 
 [English](./README.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
+
+> **这是 [agegr/pi-web](https://github.com/agegr/pi-web) 的 Bun 专用分支。**无需安装 Node.js、`npm` 或 `npx`，用 [Bun](https://bun.sh) 即可运行。改动内容见[与原版的区别](#与原版的区别)，安装方式见 [Bun 安装](#bun-安装)。其余部分沿用原版文档。
 
 [pi 编程智能体](https://github.com/earendil-works/pi)的本地浏览器界面。Pi Web 与 pi 共用本机配置和会话文件，可在浏览器中查找和继续对话、运行智能体、配置模型与资源，并查看项目文件。
 
@@ -19,7 +21,69 @@
 - **网页配置**：无需离开 Pi Web，即可管理 Provider 登录和 API Key、模型、模型测试、插件包及技能。
 - **英文、简体中文和繁体中文界面**：Pi Web 首次打开时跟随浏览器语言，也可从顶部栏切换语言。
 
-## 快速开始
+## Bun 安装
+
+本分支面向 Bun，不需要任何 Node.js 工具链。要求 [Bun](https://bun.sh) 1.4.2 或更高版本，可用 `bun --version` 检查。
+
+```bash
+git clone https://github.com/brynne8/pi-web-bun.git
+cd pi-web-bun
+bun install
+bun run dev
+```
+
+开发服务器启动在 [http://127.0.0.1:30141](http://127.0.0.1:30141)。
+
+本分支不发布 npm 包，按上面的方式从仓库运行即可。`bun.lock` 已加入忽略列表，因此每次 `bun install` 都会重新解析依赖。
+
+如果尚未配置模型 Provider，请打开**模型（Models）**面板登录或添加 API Key。`~/.pi/agent` 会在首次使用时自动创建。
+
+### 常用命令
+
+```bash
+bun install                            # 安装依赖
+bun run dev                            # 开发服务器，监听 127.0.0.1:30141
+bun run dev:lan                        # 开发服务器，监听 0.0.0.0:30141
+bun test                               # 运行测试
+bun x tsc --noEmit                     # 类型检查
+bun run lint                           # 代码检查
+```
+
+在 Bun 下运行检查命令有两点说明：
+
+- 用 `bun test` 代替 `npm test`。`package.json` 里的 `test` 脚本仍调用 Node 的测试运行器，Bun 无法展开它传入的 glob；测试本身可以正常运行。
+- 用 `bun x tsc --noEmit` 代替 `node_modules/.bin/tsc --noEmit`，因为 `.bin` 下的启动脚本带有 `#!/usr/bin/env node` shebang，没有 Node 时会执行失败。
+
+无论是否使用本分支，都有若干测试在 Bun 的测试运行器下失败，原因是 Bun 未实现测试套件依赖的部分 `node:test` 特性（尤其是 `t.mock.timers`）。判断是否引入回归时，请先与干净的原始版本对比。
+
+日常开发时不要运行 `next build` 或 `bun run build`。它们会写入 `.next/`，可能干扰开发服务器；仅在发布流程中执行构建。
+
+## 与原版的区别
+
+共四处改动，全部围绕 Bun 兼容性：
+
+| 部分 | 原版 | 本分支 |
+| --- | --- | --- |
+| 运行时 | Node.js 22.19.0+ | Bun 1.4.2+ |
+| 内置终端 | 通过 `node-pty` 正常工作 | 通过轮询式 pty 读取器实现（见下） |
+| 技能安装 | `npx skills add …` | `bun x skills add …` |
+| 插件更新检查 | `npm view … version --json` | `bun pm view … version --json` |
+
+**终端。** Bun 的 `tty.ReadStream` 会把 node-pty 非阻塞 pty master fd 的第一次 `EAGAIN` 当成致命错误：销毁流、关闭 fd，并在 shell 写出第一个字节前就 `SIGHUP` 掉它。该问题是 [oven-sh/bun#25822](https://github.com/oven-sh/bun/issues/25822)，在 Bun 1.4.2 上仍未修复。`lib/terminal-manager.ts` 在 `spawn()` 调用期间临时换上轮询读取器；node-pty 的写入、调整窗口大小和退出路径在 Bun 下本来就正常。代价是终端空闲时每 8 ms 轮询一次。等 Bun 合入上游修复后，可以直接删掉 `spawnPty`。
+
+**技能与插件检查。** `lib/node-cli.ts` 把两个只读的包管理器调用映射到 Bun 的等价命令（npx 用 `bun x`，`npm view` 用 `bun pm view`，后者输出的 JSON 与 npm 一致）。安装操作仍走 SDK 原有的 npm 路径。
+
+**插件安装**需要一项配置，写在 `~/.pi/agent/settings.json`：
+
+```json
+{ "npmCommand": ["bun"] }
+```
+
+pi SDK 会读取该设置，并按包管理器调整安装参数。请通过 SDK 设置（`SettingsManager.setNpmCommand(["bun"])`）而非手动编辑文件，以便遵守它自己的锁。如果该文件还不存在，可以先在**设置（Settings）**面板里创建。
+
+其余部分——会话、文件、Git、worktree、模型、MCP、扩展——与原版一致。
+
+## 快速开始（原版，Node.js）
 
 Pi Web 要求 Node.js 22.19.0 或更高版本。先用 `node --version` 检查版本，然后运行：
 
@@ -28,8 +92,6 @@ npx @agegr/pi-web@latest
 ```
 
 服务就绪后，命令行会尝试自动打开浏览器。如果没有打开，请访问 [http://127.0.0.1:30141](http://127.0.0.1:30141)。Pi Web 默认仅监听 `127.0.0.1`。
-
-如果尚未配置模型 Provider，请打开**模型（Models）**面板登录或添加 API Key。
 
 如需全局安装 `pi-web` 命令：
 
@@ -101,6 +163,8 @@ npx @agegr/pi-web@latest
 - **Git worktree**：切换器何时显示、如何创建 worktree，以及删除会产生什么影响，见 [Pi Web 里的 Worktree](./docs/worktrees.zh-CN.md)。
 
 ## 开发
+
+本节沿用原版，仅供参考。在 Bun 下请改用 [Bun 安装](#bun-安装) 中的命令。
 
 ```bash
 npm install

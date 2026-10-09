@@ -1,6 +1,8 @@
-# Pi Web
+# Pi Web (Bun)
 
 [中文文档](./README.zh-CN.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
+
+> **This is a Bun-focused fork of [agegr/pi-web](https://github.com/agegr/pi-web).** It runs on [Bun](https://bun.sh) with no Node.js, `npm` or `npx` installed. See [Differences from upstream](#differences-from-upstream) for what changed and [Bun setup](#bun-setup) to run it. The upstream README applies everywhere else.
 
 Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi). Pi Web uses the same local configuration and session files as pi, so you can browse and resume conversations, run agent turns, configure models and resources, and inspect project files from a browser.
 
@@ -17,7 +19,71 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 - **Web-based configuration**: manage provider login and API keys, models, model tests, plugin packages, and skills without leaving Pi Web.
 - **English, Simplified Chinese, and Traditional Chinese UI**: Pi Web follows the browser language initially and provides a language switcher in the top bar.
 
-## Quick Start
+## Bun setup
+
+This fork targets Bun and needs no Node.js toolchain. Requires [Bun](https://bun.sh) 1.4.2 or newer; check with `bun --version`.
+
+```bash
+git clone https://github.com/brynne8/pi-web-bun.git
+cd pi-web-bun
+bun install
+bun run dev
+```
+
+The development server starts at [http://127.0.0.1:30141](http://127.0.0.1:30141).
+
+There is no npm-published package for this fork; run it from a clone as above. `bun.lock` is gitignored, so `bun install` resolves fresh each time.
+
+If no model provider is configured yet, open the **Models** panel to sign in or add an API key. `~/.pi/agent` is created on first use.
+
+### Development commands
+
+```bash
+bun install                            # install dependencies
+bun run dev                            # dev server on 127.0.0.1:30141
+bun run dev:lan                        # dev server on 0.0.0.0:30141
+bun test                               # run the test suite
+bun x tsc --noEmit                     # typecheck
+bun run lint                           # lint
+```
+
+Two notes on running the checks under Bun:
+
+- `bun test` replaces `npm test`. The `test` script in `package.json` still calls Node's test runner, which Bun cannot expand the glob arguments for; the suite itself runs fine.
+- `bun x tsc --noEmit` replaces `node_modules/.bin/tsc --noEmit`, because the `.bin` shims have a `#!/usr/bin/env node` shebang and fail without Node on `PATH`.
+
+A number of tests fail under Bun's test runner regardless of this fork, because Bun does not implement every `node:test` feature the suite relies on (notably `t.mock.timers`). Compare against a clean checkout before treating a failure as a regression.
+
+Do not run `next build` or `bun run build` during normal development. It writes to `.next/` and can interfere with the development server; leave builds for release work.
+
+## Differences from upstream
+
+Four changes, all confined to Bun compatibility:
+
+| Area | Upstream | Here |
+| --- | --- | --- |
+| Runtime | Node.js 22.19.0+ | Bun 1.4.2+ |
+| Integrated terminal | Works via `node-pty` | Works via a polling pty reader (see below) |
+| Skills install | `npx skills add …` | `bun x skills add …` |
+| Plugin update check | `npm view … version --json` | `bun pm view … version --json` |
+
+**Terminal.** Bun's `tty.ReadStream` treats the first `EAGAIN` from node-pty's non-blocking pty master fd as fatal: it destroys the stream, closes the fd and `SIGHUP`s the shell before it can write a byte. The bug is [oven-sh/bun#25822](https://github.com/oven-sh/bun/issues/25822), still open against Bun 1.4.2. `lib/terminal-manager.ts` swaps in a polling reader for the duration of `spawn()`; node-pty's write, resize and exit paths already work under Bun. The cost is a poll every 8 ms while a terminal is idle. Delete `spawnPty` once Bun ships the upstream fix.
+
+**Skills and plugin checks.** `lib/node-cli.ts` maps the two read-only package-manager calls onto their Bun equivalents (`bun x` for npx, `bun pm view`, whose JSON matches npm's). Installs are left to the SDK's npm path.
+
+**Plugin installs** need one setting, written to `~/.pi/agent/settings.json`:
+
+```json
+{ "npmCommand": ["bun"] }
+```
+
+The pi SDK reads this and adapts its install arguments per package manager. Set it through the SDK (`SettingsManager.setNpmCommand(["bun"])`) rather than by hand-editing the file, so its lock is respected.
+
+Set that in the **Settings** panel if the file does not exist yet.
+
+Everything else — sessions, files, Git, worktrees, models, MCP, extensions — is unchanged from upstream and works the same way.
+
+## Quick Start (upstream, Node.js)
 
 Pi Web requires Node.js 22.19.0 or newer. Check your version with `node --version`, then run:
 
@@ -26,8 +92,6 @@ npx @agegr/pi-web@latest
 ```
 
 The CLI opens a browser after the server is ready. If it does not, open [http://127.0.0.1:30141](http://127.0.0.1:30141). Pi Web listens only on `127.0.0.1` by default.
-
-If no model provider is configured yet, open the **Models** panel to sign in or add an API key.
 
 To install the `pi-web` command globally:
 
@@ -153,6 +217,8 @@ affects automatic idle eviction; explicit shutdown and Stop fallback cleanup
 still take precedence.
 
 ## Development
+
+This section is upstream's, for reference. On Bun use the commands in [Bun setup](#bun-setup) instead.
 
 ```bash
 npm install
