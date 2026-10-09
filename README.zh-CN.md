@@ -98,7 +98,7 @@ pi SDK 会读取该设置，并按包管理器调整安装参数。请通过 SDK
 | CSV 和 TSV | 按纯文本源码打开 | 虚拟滚动表格，行号按每条记录起始的那一行动态标注（papaparse 加 TanStack Virtual）（[说明](./docs/agents/files-and-access.md#delimited-files-render-as-a-table)） |
 | shell 工具卡片 | 头部是一整条暗色的命令字符串，展开后是输入的 JSON | 头部和展开都显示命令本身并做语法高亮，`timeout` 以暗色 `(timeout Ns)` 附在后面（[说明](./docs/agents/sessions.md#a-shell-card-shows-the-command-itself-highlighted)） |
 | 中继断掉的 HTTP/2 流 | 该次 provider 调用失败，整个 run 停下 | 归类为可重试，这一轮改为重试（[说明](./docs/agents/sessions.md#a-relays-dropped-http2-stream-retries-instead-of-stopping-the-run)） |
-| 派生 subagent | `Agent` 工具给出十一个参数，每个都按 `request ?? profile` 解析，模型的猜测胜过配置好的 profile | 只给出模型能选对的六个参数，`model`、`thinking`、`max_turns`、`inherit_context` 一律只取 profile（[说明](./docs/agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)） |
+| 派生 subagent | `Agent` 工具给出十一个参数，每个都按 `request ?? profile` 解析，模型的猜测胜过配置好的 profile | 只给出模型能选对的参数，其中 `model` 可按次覆盖；`thinking`、`max_turns`、`inherit_context` 一律只取 profile（[说明](./docs/agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)） |
 | 已结束的 subagent 会话 | 它的 worktree 连同被记为 cwd 的目录一起被清掉，模型列表答 400、项目信任答 403 | 两处都改从它分叉出来的那个仓库回答（[说明](./docs/agents/files-and-access.md#worktrees-and-project-grouping)） |
 | 运行中的输入框 | Stop 与压缩按钮共用底部控制条，两者在每次 run 的边界交换位置 | Stop 移到输入框里，与合并成一个分裂按钮的 Steer 和 Follow-up 并排；底部控制条保持原样，只把这两个按钮置为不可用（[说明](./docs/agents/sessions.md#composer-action-row-nothing-moves-under-the-pointer-at-a-run-boundary)） |
 
