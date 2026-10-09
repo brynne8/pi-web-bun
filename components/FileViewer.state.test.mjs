@@ -3,11 +3,10 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import reactSyntaxHighlighter from "react-syntax-highlighter";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 
 const source = await readFile(new URL("./FileViewer.tsx", import.meta.url), "utf8");
 const cssSource = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
-const { Prism: SyntaxHighlighter } = reactSyntaxHighlighter;
 
 function functionBlock(name, nextName) {
   const start = source.indexOf(`function ${name}(`);

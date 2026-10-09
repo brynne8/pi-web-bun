@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { stripTypeScriptTypes } from "node:module";
+import { runStripped } from "../lib/__fixtures__/strip-types.mjs";
 import test from "node:test";
 import vm from "node:vm";
 
@@ -50,9 +50,9 @@ function runHandleSessionDeleted(capturedSelectedSession, active) {
     setActiveTopPanel() {},
     useCallback: (callback) => callback,
   });
-  vm.runInContext(stripTypeScriptTypes(`${handleSessionDeletedBody()}
+  runStripped(`${handleSessionDeletedBody()}
     handleSessionDeleted("gone-session");
-  `), context);
+  `, context);
   return state;
 }
 

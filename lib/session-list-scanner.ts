@@ -4,7 +4,7 @@
 // that changed, which a later normal listing hydrates.
 // ponytail: size/mtime fingerprints miss same-size edits with restored mtime;
 // use content hashes if detecting those edits becomes necessary.
-import { closeSync, createReadStream, existsSync, openSync, readFileSync, readSync } from "node:fs";
+import fs, { closeSync, existsSync, openSync, readFileSync, readSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { basename, join } from "node:path";
@@ -167,7 +167,7 @@ export async function scanSessionFileInfo(
 		let lastActivityTime: number | undefined;
 
 		const rl = createInterface({
-			input: createReadStream(filePath, { encoding: "utf8" }),
+			input: fs.createReadStream(filePath, { encoding: "utf8" }),
 			crlfDelay: Infinity,
 		});
 

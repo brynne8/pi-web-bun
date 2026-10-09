@@ -1,17 +1,36 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after } from "node:test";
+import { createRequire } from "node:module";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createJiti } from "jiti";
 
 // The hook runs against the React stand-in and a scripted fetch: each request
 // takes the next answer in line.
 const shimPath = fileURLToPath(new URL("./__fixtures__/react-hook-shim.mjs", import.meta.url));
-const jiti = createJiti(import.meta.url, { tsconfigPaths: true, alias: { react: shimPath } });
+// tryNative: false — Bun imports a .ts file natively and answers its `react` import
+// from node_modules, so jiti's alias to the hook shim would never apply.
+// Bun runs the whole suite in one process with one module registry, so an earlier
+// file may already have loaded the hook with the real React; drop that copy so this
+// file gets its own. Under Node each file runs in a process of its own.
+const nodeRequire = createRequire(import.meta.url);
+for (const id of ["./useSessionUiState.ts"]) {
+  delete nodeRequire.cache[realpathSync(fileURLToPath(new URL(id, import.meta.url)))];
+}
+const jiti = createJiti(import.meta.url, { tsconfigPaths: true, tryNative: false, alias: { react: shimPath } });
 const { renderHook } = await import(shimPath);
 const { useSessionUiState } = await jiti.import("./useSessionUiState.ts");
 
 const answers = [];
 const requests = [];
+// A fetch stub installed here outlives the file under a runner that keeps one
+// process for the whole suite, so every later file's requests would come here:
+// the MCP sign-in tests would ask this list for answers and fail on "no answer
+// scripted". Put the real fetch back when this file is done.
+const originalFetch = globalThis.fetch;
+after(() => {
+  globalThis.fetch = originalFetch;
+});
 globalThis.fetch = async (url, init = {}) => {
   const method = init.method ?? "GET";
   requests.push({ url, method, body: init.body === undefined ? undefined : JSON.parse(init.body) });

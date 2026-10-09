@@ -65,6 +65,16 @@ export function configureHttpDispatcher(
     throw new Error(`Invalid HTTP idle timeout: ${String(timeoutMs)}`);
   }
 
+  // Bun's fetch reads HTTP_PROXY / HTTPS_PROXY / NO_PROXY from the environment itself
+  // and never consults a dispatcher: the `undici` it serves is a runtime shim whose
+  // setGlobalDispatcher is inert and which has no `install`. There is nothing to
+  // configure — the proxy env is already honoured, from the values the process started
+  // with, so this is a no-op rather than a silently inert one.
+  if (typeof Bun !== "undefined") {
+    dispatcherGlobal.__piWebHttpDispatcherConfigured = true;
+    return;
+  }
+
   const dispatcher = withUndiciErrorListener(
     new undici.EnvHttpProxyAgent({
       allowH2: false,

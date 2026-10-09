@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { stripTypeScriptTypes } from "node:module";
+import { runStripped } from "../lib/__fixtures__/strip-types.mjs";
 import test from "node:test";
 import vm from "node:vm";
 import { createJiti } from "jiti";
@@ -109,11 +109,11 @@ test("New restores the draft after session navigation and workspace auto-restore
           context[state] = typeof value === "function" ? value(context[state]) : value;
         };
       }
-      vm.runInContext(stripTypeScriptTypes(`${parkedKeyHelper}\n${callbacks}
+      runStripped(`${parkedKeyHelper}\n${callbacks}
         globalThis.navigate = { handleCwdChange, handleSelectSession, handleNewSession };
-      `), context);
+      `, context);
       // Run the actual hook cleanup with the outgoing mount's captured draft key.
-      const makeCleanup = vm.runInContext(stripTypeScriptTypes(`((isNew, newSessionDraftKey) => {
+      const makeCleanup = runStripped(`((isNew, newSessionDraftKey) => {
         const sessionHookMountedRef = { current: true };
         const newSessionPromotedRef = { current: false };
         const sessionIdRef = { current: null };
@@ -127,7 +127,7 @@ test("New restores the draft after session navigation and workspace auto-restore
         const setSessionViewSnapshot = () => false;
         const deleteSessionViewSnapshot = () => {};
         ${hookSource.slice(cleanupStart, cleanupEnd)}
-      })`), context);
+      })`, context);
       let mountedKey = context.sessionKey;
       let cleanup = makeCleanup(true, context.activeNewSessionDraftKeyRef.current);
       async function commit() {
@@ -212,9 +212,9 @@ test("New in another project adopts it up front and parks the composer's draft",
       context[state] = typeof value === "function" ? value(context[state]) : value;
     };
   }
-  vm.runInContext(stripTypeScriptTypes(`${parkedKeyHelper}\n${callbacks}
+  runStripped(`${parkedKeyHelper}\n${callbacks}
     globalThis.navigate = { handleCwdChange, handleSelectSession, handleNewSession };
-  `), context);
+  `, context);
   const draft = { value: "half-written in p1", images: [] };
   draftStore.setDraft("new:first:/p1", draft);
 
@@ -293,9 +293,9 @@ test("the composer's bar moves the fresh composer's draft and model picks instea
       context[state] = typeof value === "function" ? value(context[state]) : value;
     };
   }
-  vm.runInContext(stripTypeScriptTypes(`${parkedKeyHelper}\n${callbacks}
+  runStripped(`${parkedKeyHelper}\n${callbacks}
     globalThis.navigate = { handleCwdChange, handleNewSession };
-  `), context);
+  `, context);
   const draft = { value: "half-written in p1", images: [{ data: "aGVsbG8=", mimeType: "image/png" }] };
   const parkedInP2 = { value: "parked in p2", images: [] };
   draftStore.setDraft("new:first:/p1", draft);
@@ -388,9 +388,9 @@ test("the bar of the new composer shows the bar's own move until the sidebar rep
     effectiveNewSessionCwd: "/work/app",
   });
   context.setSidebarNewSessionContext = (value) => { context.sidebarNewSessionContext = value; };
-  vm.runInContext(stripTypeScriptTypes(`${callbacks}
+  runStripped(`${callbacks}
     globalThis.bar = { handleSidebarNewSessionContext, handlePickNewSessionContext, handleCreateNewSessionWorktree };
-  `), context);
+  `, context);
   const app = { key: "app-key", root: "/work/app" };
   const main = { path: "/work/app", branch: "main", isMain: true };
   const report = { cwd: "/work/app", project: app, worktrees: [main], currentWorktreePath: main.path, projects: [app] };

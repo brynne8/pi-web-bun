@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import test from "node:test";
+import test, { after } from "node:test";
+import { createRequire } from "node:module";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createJiti } from "jiti";
 
@@ -8,7 +10,16 @@ import { createJiti } from "jiti";
 // component, effects run after each render) and a stand-in for the few DOM
 // objects it touches, so its gestures can be played out without a browser.
 const shimPath = fileURLToPath(new URL("./__fixtures__/react-hook-shim.mjs", import.meta.url));
-const jiti = createJiti(import.meta.url, { tsconfigPaths: true, alias: { react: shimPath } });
+// tryNative: false — Bun imports a .ts file natively and answers its `react` import
+// from node_modules, so jiti's alias to the hook shim would never apply.
+// Bun runs the whole suite in one process with one module registry, so a file that
+// ran earlier may already have loaded the hook natively, with the real React; drop
+// those copies so this file gets its own. Under Node each file has its own process.
+const nodeRequire = createRequire(import.meta.url);
+for (const id of ["./useGroupDrag.ts", "../lib/session-tree.ts"]) {
+  delete nodeRequire.cache[realpathSync(fileURLToPath(new URL(id, import.meta.url)))];
+}
+const jiti = createJiti(import.meta.url, { tsconfigPaths: true, tryNative: false, alias: { react: shimPath } });
 const { renderHook } = await import(shimPath);
 const {
   AUTO_SCROLL_MAX_STEP,
@@ -57,6 +68,20 @@ class FakeElement {
 
 const frames = new Map();
 let frameId = 0;
+// These globals outlive the file under a runner that keeps one process for the
+// whole suite (Bun), where Node gives each file its own: a later file that asks
+// whether it is in a browser, or wants the real animation frame queue, would get
+// this file's stand-ins. Put back what was here before.
+const originals = {
+  Element: globalThis.Element,
+  window: globalThis.window,
+  document: globalThis.document,
+  requestAnimationFrame: globalThis.requestAnimationFrame,
+  cancelAnimationFrame: globalThis.cancelAnimationFrame,
+};
+after(() => {
+  Object.assign(globalThis, originals);
+});
 globalThis.Element = FakeElement;
 globalThis.window = emitter({
   setTimeout: (fn, ms) => setTimeout(fn, ms),

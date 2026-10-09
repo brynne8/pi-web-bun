@@ -196,6 +196,17 @@ test("-builtin:tool-search is reported with the file that turns tool search off"
 
 test("Code mode reports the global preference and a self-test nobody has run yet", async (t) => {
   t.after(() => rm(settingsPath, { force: true }));
+  // The self-test runs once per process and remembers its result on this symbol,
+  // and Bun runs every file of the suite in one process — so a session an earlier
+  // file started may already have settled it. Node's runner gives each file a
+  // process of its own, where the symbol is always empty.
+  const sandboxKey = Symbol.for("pi-web.codemodeSandbox");
+  const previousSandbox = globalThis[sandboxKey];
+  delete globalThis[sandboxKey];
+  t.after(() => {
+    if (previousSandbox === undefined) delete globalThis[sandboxKey];
+    else globalThis[sandboxKey] = previousSandbox;
+  });
   let { body } = await get();
   assert.deepEqual(body.codemode, {
     sandbox: { state: "not-checked" },
