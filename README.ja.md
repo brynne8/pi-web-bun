@@ -2,6 +2,8 @@
 
 [English](./README.md) | [简体中文](./README.zh-CN.md) | [Русский](./README.ru.md)
 
+> **これは [agegr/pi-web](https://github.com/agegr/pi-web) の Bun 特化フォークです。** Node.js、`npm`、`npx` をインストールせずに [Bun](https://bun.sh) だけで動作します。変更点（Bun 互換の作業と、上流に追加した機能）は英語版の [Differences from upstream](./README.md#differences-from-upstream)、インストール手順は [Bun setup](./README.md#bun-setup) を参照してください。このページの本文はまだ上流のドキュメントで、フォーク固有の節は未翻訳です。
+
 [pi コーディングエージェント](https://github.com/earendil-works/pi) のローカルブラウザー UI です。Pi Web は pi と同じローカル設定とセッションファイルを使用し、ブラウザーから会話の検索と再開、エージェントの実行、モデルやリソースの設定、プロジェクトファイルの確認を行えます。
 
 **[インタラクティブデモを試す →](https://agegr.github.io/pi-web/)**：実際の Pi Web UI がブラウザー内だけで動作し、サンプルのセッション、ファイル、モデルを確認できます。インストールは不要です。返信はあらかじめ用意された内容で、モデルは呼び出しません。

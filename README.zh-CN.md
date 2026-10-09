@@ -2,7 +2,7 @@
 
 [English](./README.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
 
-> **这是 [agegr/pi-web](https://github.com/agegr/pi-web) 的 Bun 专用分支。**无需安装 Node.js、`npm` 或 `npx`，用 [Bun](https://bun.sh) 即可运行。改动内容见[与原版的区别](#与原版的区别)，安装方式见 [Bun 安装](#bun-安装)。其余部分沿用原版文档。
+> **这是 [agegr/pi-web](https://github.com/agegr/pi-web) 的 Bun 专用分支。**无需安装 Node.js、`npm` 或 `npx`，用 [Bun](https://bun.sh) 即可运行。改动内容见[与原版的区别](#与原版的区别)（Bun 兼容改造，以及我们在上游之上额外实现的功能），安装方式见 [Bun 安装](#bun-安装)。其余部分沿用原版文档。
 
 [pi 编程智能体](https://github.com/earendil-works/pi)的本地浏览器界面。Pi Web 与 pi 共用本机配置和会话文件，可在浏览器中查找和继续对话、运行智能体、配置模型与资源，并查看项目文件。
 
@@ -16,7 +16,10 @@
 
 - **会话工作区**：按项目查找、继续、重命名、导出和删除对话，并查看运行状态、上下文占用、花费和压缩信息。
 - **两种分支方式**：**新会话**会从较早的消息创建独立会话文件；**从此处编辑**会在当前会话内创建分支。
+- **后台 bash 任务**（默认关闭）：长时间运行的命令会移交成后台任务，结束后以一张已结算的卡片回来，而不是一直占着这一轮。
 - **项目文件工具**：浏览和上传文件、查看 Git Diff，并预览源码、Markdown、图片、音频、PDF 和 DOCX；文件变化后会自动刷新。
+- **侧栏里的读取切片与表格**：点开 `read` 工具卡片会在侧栏打开它真正读到的那一段——Markdown 按 Markdown 渲染，源码行号从读取的偏移接着往下数；CSV 和 TSV 以虚拟滚动表格打开，不再是一整片纯文本。
+- **命令高亮**：shell 工具卡片把命令按 token 着色，不再是一整条暗色字符串；展开后显示的是命令本身（附 `timeout`），而不是输入的 JSON。
 - **Git worktree**：从侧边栏切换 checkout，同时把同一仓库不同 worktree 的会话归在一起。
 - **网页配置**：无需离开 Pi Web，即可管理 Provider 登录和 API Key、模型、模型测试、插件包及技能。
 - **英文、简体中文和繁体中文界面**：Pi Web 首次打开时跟随浏览器语言，也可从顶部栏切换语言。
@@ -51,16 +54,18 @@ bun run lint                           # 代码检查
 
 在 Bun 下运行检查命令有两点说明：
 
-- 用 `bun test` 代替 `npm test`。`package.json` 里的 `test` 脚本仍调用 Node 的测试运行器，Bun 无法展开它传入的 glob；测试本身可以正常运行。
+- 用 `bun test` 代替 `npm test`。`package.json` 里的 `test` 脚本仍调用 Node 的测试运行器，Bun 无法展开它传入的 glob；`bun test` 不需要任何参数，会自己找出全部测试文件。
 - 用 `bun x tsc --noEmit` 代替 `node_modules/.bin/tsc --noEmit`，因为 `.bin` 下的启动脚本带有 `#!/usr/bin/env node` shebang，没有 Node 时会执行失败。
 
-无论是否使用本分支，都有若干测试在 Bun 的测试运行器下失败，原因是 Bun 未实现测试套件依赖的部分 `node:test` 特性（尤其是 `t.mock.timers`）。判断是否引入回归时，请先与干净的原始版本对比。
+整个测试套件在 `bun test` 下全部通过——`app/`、`components/`、`hooks/`、`lib/`、`public/` 下的每个文件都是。只有某个运行时才能观察到的行为，测试会说明并跳过不适用的那一半，而不是失败：Bun 的 `fetch` 不使用 undici 的全局 dispatcher（因此代理路由只在 Node 下断言），Bun 的 `node:module` 既不导出 `stripTypeScriptTypes` 也不导出 `registerHooks`，少数测试通过 `require` 加转译器回退来拿到它们。Bun 还让整个套件共用一个进程和一套模块注册表，而 Node 给每个文件独立进程，因此需要给模块或全局打桩的测试都写明了各自隔离的是什么。
 
-日常开发时不要运行 `next build` 或 `bun run build`。它们会写入 `.next/`，可能干扰开发服务器；仅在发布流程中执行构建。
+`bun run dev` 构建到 `.next-dev/`，`bun run build` 写入 `.next/`，两者互不干扰；构建仍只用于发布流程。
 
 ## 与原版的区别
 
-共四处改动，全部围绕 Bun 兼容性：
+分两类：[运行时与 Bun 兼容](#运行时与-bun-兼容)是不装 Node.js 工具链所必需的改造；[我们在上游之上额外实现的部分](#我们在上游之上额外实现的部分)是上游还没有的功能与修复。
+
+### 运行时与 Bun 兼容
 
 | 部分 | 原版 | 本分支 |
 | --- | --- | --- |
@@ -68,6 +73,7 @@ bun run lint                           # 代码检查
 | 内置终端 | 通过 `node-pty` 正常工作 | 通过一层薄薄的 node-pty 兼容封装使用 Bun 原生 PTY（见下） |
 | 技能安装 | `npx skills add …` | `bun x skills add …` |
 | 插件更新检查 | `npm view … version --json` | `bun pm view … version --json` |
+| 开发构建产物 | 开发服务器和 `next build` 共用 `.next/` | `bun run dev` 通过 `PI_WEB_DIST_DIR` 写入 `.next-dev/`，构建或 `next start` 不再污染开发服务器的目录 |
 
 **终端。** node-pty 的原生插件在 Bun 下无法维持 pty master fd 的生命周期：fd 在 `spawn()` 之后立即被关闭，子进程的 stdin 直接读到 EOF，交互式 shell 还没来得及打印提示符就退出了（[agegr/pi-web#745](https://github.com/agegr/pi-web/issues/745)，另见 [oven-sh/bun#7362](https://github.com/oven-sh/bun/issues/7362)）。Bun 原生的 PTY 支持（`Bun.spawn({ terminal })`）会为进程的整个生命周期持有该 fd，因此 `lib/terminal-bun-pty.ts` 实现了 `lib/terminal-manager.ts` 所需要的那一小部分 node-pty 兼容接口——`spawn`、`onData`、`onExit`、`write`、`resize`、`kill` 和 `pid`——Node.js 和 Windows 则继续使用 node-pty。没有轮询读取器，没有 fd 生命周期补丁，也没有额外依赖。
 
@@ -81,7 +87,24 @@ bun run lint                           # 代码检查
 
 pi SDK 会读取该设置，并按包管理器调整安装参数。请通过 SDK 设置（`SettingsManager.setNpmCommand(["bun"])`）而非手动编辑文件，以便遵守它自己的锁。如果该文件还不存在，可以先在**设置（Settings）**面板里创建。
 
-其余部分——会话、文件、Git、worktree、模型、MCP、扩展——与原版一致。
+### 我们在上游之上额外实现的部分
+
+下面这些都是本分支自己做的功能与修复，上游还没有。每条链接指向描述其实现和坑的开发者说明。
+
+| 部分 | 原版 | 本分支 |
+| --- | --- | --- |
+| 长时间运行的 shell 命令 | `bash` 工具调用会一直等到命令退出 | 可选开关：跑过 120 秒的命令移交成后台任务，结束后以一张已结算的卡片回来（[说明](./docs/agents/background-bash.md#two-ways-into-the-background)） |
+| `read` 工具调用 | 在卡片的展开区域里显示输出 | 在侧栏标签里打开它真正读到的那一段：Markdown 按 Markdown 渲染，其他语言高亮且行号从读取的偏移接着往下数（[说明](./docs/agents/sessions.md#a-read-call-opens-its-slice-in-the-side-panel-not-in-the-card-body)） |
+| CSV 和 TSV | 按纯文本源码打开 | 虚拟滚动表格，行号按每条记录起始的那一行动态标注（papaparse 加 TanStack Virtual）（[说明](./docs/agents/files-and-access.md#delimited-files-render-as-a-table)） |
+| shell 工具卡片 | 头部是一整条暗色的命令字符串，展开后是输入的 JSON | 头部和展开都显示命令本身并做语法高亮，`timeout` 以暗色 `(timeout Ns)` 附在后面（[说明](./docs/agents/sessions.md#a-shell-card-shows-the-command-itself-highlighted)） |
+| 中继断掉的 HTTP/2 流 | 该次 provider 调用失败，整个 run 停下 | 归类为可重试，这一轮改为重试（[说明](./docs/agents/sessions.md#a-relays-dropped-http2-stream-retries-instead-of-stopping-the-run)） |
+| 派生 subagent | `Agent` 工具给出十一个参数，每个都按 `request ?? profile` 解析，模型的猜测胜过配置好的 profile | 只给出模型能选对的六个参数，`model`、`thinking`、`max_turns`、`inherit_context` 一律只取 profile（[说明](./docs/agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)） |
+| 已结束的 subagent 会话 | 它的 worktree 连同被记为 cwd 的目录一起被清掉，模型列表答 400、项目信任答 403 | 两处都改从它分叉出来的那个仓库回答（[说明](./docs/agents/files-and-access.md#worktrees-and-project-grouping)） |
+| 运行中的输入框 | Stop 与压缩按钮共用底部控制条，两者在每次 run 的边界交换位置 | Stop 移到输入框里，与合并成一个分裂按钮的 Steer 和 Follow-up 并排；底部控制条保持原样，只把这两个按钮置为不可用（[说明](./docs/agents/sessions.md#composer-action-row-nothing-moves-under-the-pointer-at-a-run-boundary)） |
+
+不单独成行的小差异：自定义消息的折叠 chevron 挪到了标题最右侧。
+
+其余没有列出的部分——会话、文件、Git、worktree、模型、MCP、扩展——都是上游代码，行为与原版描述一致。
 
 ## 快速开始（原版，Node.js）
 

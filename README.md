@@ -2,7 +2,7 @@
 
 [中文文档](./README.zh-CN.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
 
-> **This is a Bun-focused fork of [agegr/pi-web](https://github.com/agegr/pi-web).** It runs on [Bun](https://bun.sh) with no Node.js, `npm` or `npx` installed. See [Differences from upstream](#differences-from-upstream) for what changed and [Bun setup](#bun-setup) to run it. The upstream README applies everywhere else.
+> **This is a Bun-focused fork of [agegr/pi-web](https://github.com/agegr/pi-web).** It runs on [Bun](https://bun.sh) with no Node.js, `npm` or `npx` installed. See [Differences from upstream](#differences-from-upstream) for the Bun compatibility work and the features we ship on top of upstream, and [Bun setup](#bun-setup) to run it. The upstream README applies everywhere else.
 
 Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi). Pi Web uses the same local configuration and session files as pi, so you can browse and resume conversations, run agent turns, configure models and resources, and inspect project files from a browser.
 
@@ -14,7 +14,10 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 
 - **Session workspace**: browse, resume, rename, export, and delete conversations grouped by project, with running state, context usage, cost, and compaction details.
 - **Two ways to branch**: **New session** creates an independent session file from an earlier message; **Edit from here** creates a branch inside the current session.
+- **Background bash tasks** (opt-in): a long-running command hands off to a background task and comes back as a settled card instead of holding the turn open.
 - **Project file tools**: browse and upload files, inspect Git diffs, and preview source, Markdown, images, audio, PDFs, and DOCX files with automatic refresh.
+- **Reads and tables in the side panel**: a `read` tool call opens the exact slice it returned — Markdown rendered, or source with line numbers continuing from the read's offset — and CSV or TSV opens as a virtualized table instead of plain text.
+- **Highlighted commands**: a shell tool card colours the command's tokens instead of showing it as one dim string, and its expanded body shows the command with its `timeout` rather than the input JSON.
 - **Git worktrees**: switch checkouts from the sidebar while keeping sessions from the same repository grouped together.
 - **Web-based configuration**: manage provider login and API keys, models, model tests, plugin packages, and skills without leaving Pi Web.
 - **English, Simplified Chinese, and Traditional Chinese UI**: Pi Web follows the browser language initially and provides a language switcher in the top bar.
@@ -49,16 +52,18 @@ bun run lint                           # lint
 
 Two notes on running the checks under Bun:
 
-- `bun test` replaces `npm test`. The `test` script in `package.json` still calls Node's test runner, which Bun cannot expand the glob arguments for; the suite itself runs fine.
+- `bun test` replaces `npm test`. The `test` script in `package.json` still calls Node's test runner, which Bun cannot expand the glob arguments for; `bun test` needs no arguments and picks up every test file itself.
 - `bun x tsc --noEmit` replaces `node_modules/.bin/tsc --noEmit`, because the `.bin` shims have a `#!/usr/bin/env node` shebang and fail without Node on `PATH`.
 
-A number of tests fail under Bun's test runner regardless of this fork, because Bun does not implement every `node:test` feature the suite relies on (notably `t.mock.timers`). Compare against a clean checkout before treating a failure as a regression.
+The whole suite passes under `bun test` — every file under `app/`, `components/`, `hooks/`, `lib/` and `public/`. Where a behaviour can only be observed on one runtime, the test says so and skips the half that does not apply rather than failing: Bun's `fetch` ignores undici's global dispatcher (so proxy routing is asserted on Node only), and Bun's `node:module` exports neither `stripTypeScriptTypes` nor `registerHooks`, which a few tests reach through `require` and a transpiler fallback. Bun also keeps one process and one module registry for the whole suite, where Node gives each file a process of its own, so the tests that stub a module or a global say what they isolate.
 
-Do not run `next build` or `bun run build` during normal development. It writes to `.next/` and can interfere with the development server; leave builds for release work.
+`bun run dev` builds into `.next-dev/` while `bun run build` writes `.next/`, so a build no longer disturbs a running dev server; leave builds for release work.
 
 ## Differences from upstream
 
-Four changes, all confined to Bun compatibility:
+Two kinds of difference: [Runtime and Bun compatibility](#runtime-and-bun-compatibility) is what it takes to run without a Node.js toolchain, and [Changes we ship on top of upstream](#changes-we-ship-on-top-of-upstream) are features and fixes we developed here that upstream does not have yet.
+
+### Runtime and Bun compatibility
 
 | Area | Upstream | Here |
 | --- | --- | --- |
@@ -66,6 +71,7 @@ Four changes, all confined to Bun compatibility:
 | Integrated terminal | Works via `node-pty` | Works via Bun's native PTY behind a small node-pty-compatible shim (see below) |
 | Skills install | `npx skills add …` | `bun x skills add …` |
 | Plugin update check | `npm view … version --json` | `bun pm view … version --json` |
+| Dev build output | The dev server and `next build` share `.next/` | `bun run dev` writes `.next-dev/` through `PI_WEB_DIST_DIR`, so a build or `next start` no longer pollutes the dev server's directory |
 
 **Terminal.** node-pty's native addon cannot keep the pty master fd alive under Bun: the fd is closed right after `spawn()`, the child reads EOF on stdin and an interactive shell exits before it can print a prompt ([agegr/pi-web#745](https://github.com/agegr/pi-web/issues/745), cf. [oven-sh/bun#7362](https://github.com/oven-sh/bun/issues/7362)). Bun's own PTY support (`Bun.spawn({ terminal })`) holds the fd for the process's lifetime, so `lib/terminal-bun-pty.ts` implements the small node-pty-compatible surface `lib/terminal-manager.ts` drives — spawn, `onData`, `onExit`, `write`, `resize`, `kill` and `pid` — and node-pty keeps serving Node.js and Windows. No polling reader, no fd lifetime hack, no extra dependency.
 
@@ -81,7 +87,24 @@ The pi SDK reads this and adapts its install arguments per package manager. Set 
 
 Set that in the **Settings** panel if the file does not exist yet.
 
-Everything else — sessions, files, Git, worktrees, models, MCP, extensions — is unchanged from upstream and works the same way.
+### Changes we ship on top of upstream
+
+These are features and fixes we developed in this fork; upstream does not have them. Each link goes to the contributor note that describes the mechanism and its pitfalls.
+
+| Area | Upstream | Here |
+| --- | --- | --- |
+| Long shell commands | The `bash` tool call holds the turn until the command exits | An opt-in switch hands a command running past 120 s to a background task, and its result returns as a settled card ([note](./docs/agents/background-bash.md#two-ways-into-the-background)) |
+| A `read` tool call | Shows its output in the card's expanded body | Opens exactly what the read returned in a side-panel tab: Markdown rendered, or other languages highlighted with line numbers continuing from the read's offset ([note](./docs/agents/sessions.md#a-read-call-opens-its-slice-in-the-side-panel-not-in-the-card-body)) |
+| CSV and TSV | Opens as plain source | A virtualized table whose gutter numbers each record by the line it starts on (`papaparse` plus TanStack Virtual) ([note](./docs/agents/files-and-access.md#delimited-files-render-as-a-table)) |
+| Shell tool cards | The command as one dim string in the header, the input JSON expanded | The command, syntax-highlighted, in both, with `timeout` kept as a dim `(timeout Ns)` ([note](./docs/agents/sessions.md#a-shell-card-shows-the-command-itself-highlighted)) |
+| A relay that drops the HTTP/2 stream | The provider call fails and the run stops | Classified as retryable, so the turn retries instead ([note](./docs/agents/sessions.md#a-relays-dropped-http2-stream-retries-instead-of-stopping-the-run)) |
+| Spawning a subagent | The `Agent` tool offers eleven parameters and resolves each as `request ?? profile`, so a model's guess beat a configured profile | The tool offers the six a model chooses correctly, and `model`, `thinking`, `max_turns` and `inherit_context` come from the profile alone ([note](./docs/agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)) |
+| A finished subagent's session | Its worktree was removed together with the directory recorded as its cwd, so models answered 400 and project trust 403 | Both answer from the repository the subagent branched from ([note](./docs/agents/files-and-access.md#worktrees-and-project-grouping)) |
+| The composer during a run | Stop shares the bottom control bar with the compaction button, and the two exchange places at every run boundary | Stop sits in the composer beside Steer and Follow-up, folded into one split button; the bottom bar keeps its buttons in place and marks them unavailable ([note](./docs/agents/sessions.md#composer-action-row-nothing-moves-under-the-pointer-at-a-run-boundary)) |
+
+Smaller drift not worth a row: a custom message's collapse chevron sits at the far right of its header.
+
+Everything else — sessions, files, Git, worktrees, models, MCP, extensions — is upstream code and behaves as upstream describes it.
 
 ## Quick Start (upstream, Node.js)
 

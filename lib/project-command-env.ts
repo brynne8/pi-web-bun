@@ -42,7 +42,7 @@ type ProjectCommandBashOperationsOptions = {
   localOperations?: BashOperations;
   platform?: NodeJS.Platform;
   shellPath?: string;
-  /** When set, foreground commands without an explicit timeout hand off to background after this long. */
+  /** When set, a foreground command hands off to background after this long, even with an explicit timeout, which stays the process's own hard limit. */
   autoBackgroundMs?: number;
   bgTask?: {
     sessionId: string;
