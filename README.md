@@ -63,11 +63,11 @@ Four changes, all confined to Bun compatibility:
 | Area | Upstream | Here |
 | --- | --- | --- |
 | Runtime | Node.js 22.19.0+ | Bun 1.4.2+ |
-| Integrated terminal | Works via `node-pty` | Works via a polling pty reader (see below) |
+| Integrated terminal | Works via `node-pty` | Works via Bun's native PTY behind a small node-pty-compatible shim (see below) |
 | Skills install | `npx skills add …` | `bun x skills add …` |
 | Plugin update check | `npm view … version --json` | `bun pm view … version --json` |
 
-**Terminal.** Bun's `tty.ReadStream` treats the first `EAGAIN` from node-pty's non-blocking pty master fd as fatal: it destroys the stream, closes the fd and `SIGHUP`s the shell before it can write a byte. The bug is [oven-sh/bun#25822](https://github.com/oven-sh/bun/issues/25822), still open against Bun 1.4.2. `lib/terminal-manager.ts` swaps in a polling reader for the duration of `spawn()`; node-pty's write, resize and exit paths already work under Bun. The cost is a poll every 8 ms while a terminal is idle. Delete `spawnPty` once Bun ships the upstream fix.
+**Terminal.** node-pty's native addon cannot keep the pty master fd alive under Bun: the fd is closed right after `spawn()`, the child reads EOF on stdin and an interactive shell exits before it can print a prompt ([agegr/pi-web#745](https://github.com/agegr/pi-web/issues/745), cf. [oven-sh/bun#7362](https://github.com/oven-sh/bun/issues/7362)). Bun's own PTY support (`Bun.spawn({ terminal })`) holds the fd for the process's lifetime, so `lib/terminal-bun-pty.ts` implements the small node-pty-compatible surface `lib/terminal-manager.ts` drives — spawn, `onData`, `onExit`, `write`, `resize`, `kill` and `pid` — and node-pty keeps serving Node.js and Windows. No polling reader, no fd lifetime hack, no extra dependency.
 
 **Skills and plugin checks.** `lib/node-cli.ts` maps the two read-only package-manager calls onto their Bun equivalents (`bun x` for npx, `bun pm view`, whose JSON matches npm's). Installs are left to the SDK's npm path.
 

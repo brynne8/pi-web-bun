@@ -65,11 +65,11 @@ bun run lint                           # 代码检查
 | 部分 | 原版 | 本分支 |
 | --- | --- | --- |
 | 运行时 | Node.js 22.19.0+ | Bun 1.4.2+ |
-| 内置终端 | 通过 `node-pty` 正常工作 | 通过轮询式 pty 读取器实现（见下） |
+| 内置终端 | 通过 `node-pty` 正常工作 | 通过一层薄薄的 node-pty 兼容封装使用 Bun 原生 PTY（见下） |
 | 技能安装 | `npx skills add …` | `bun x skills add …` |
 | 插件更新检查 | `npm view … version --json` | `bun pm view … version --json` |
 
-**终端。** Bun 的 `tty.ReadStream` 会把 node-pty 非阻塞 pty master fd 的第一次 `EAGAIN` 当成致命错误：销毁流、关闭 fd，并在 shell 写出第一个字节前就 `SIGHUP` 掉它。该问题是 [oven-sh/bun#25822](https://github.com/oven-sh/bun/issues/25822)，在 Bun 1.4.2 上仍未修复。`lib/terminal-manager.ts` 在 `spawn()` 调用期间临时换上轮询读取器；node-pty 的写入、调整窗口大小和退出路径在 Bun 下本来就正常。代价是终端空闲时每 8 ms 轮询一次。等 Bun 合入上游修复后，可以直接删掉 `spawnPty`。
+**终端。** node-pty 的原生插件在 Bun 下无法维持 pty master fd 的生命周期：fd 在 `spawn()` 之后立即被关闭，子进程的 stdin 直接读到 EOF，交互式 shell 还没来得及打印提示符就退出了（[agegr/pi-web#745](https://github.com/agegr/pi-web/issues/745)，另见 [oven-sh/bun#7362](https://github.com/oven-sh/bun/issues/7362)）。Bun 原生的 PTY 支持（`Bun.spawn({ terminal })`）会为进程的整个生命周期持有该 fd，因此 `lib/terminal-bun-pty.ts` 实现了 `lib/terminal-manager.ts` 所需要的那一小部分 node-pty 兼容接口——`spawn`、`onData`、`onExit`、`write`、`resize`、`kill` 和 `pid`——Node.js 和 Windows 则继续使用 node-pty。没有轮询读取器，没有 fd 生命周期补丁，也没有额外依赖。
 
 **技能与插件检查。** `lib/node-cli.ts` 把两个只读的包管理器调用映射到 Bun 的等价命令（npx 用 `bun x`，`npm view` 用 `bun pm view`，后者输出的 JSON 与 npm 一致）。安装操作仍走 SDK 原有的 npm 路径。
 

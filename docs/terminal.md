@@ -43,9 +43,21 @@ writer; restart explicitly replaces the process.
 `bin/prepare-terminal.js` repairs node-pty 1.1.0's macOS spawn-helper executable
 bits during installation, including published/npm-installed Pi Web packages.
 
-Pi Web pins node-pty to `1.2.0-beta.15`, which includes Linux x64 and ARM64
-prebuilt binaries. Native module loading is deferred until terminal creation,
-so missing or incompatible binaries produce a JSON error with repair instructions.
+Pi Web loads its terminal backend when a terminal is created. Node.js and
+Windows use node-pty, pinned to `1.2.0-beta.15`, which includes Linux x64 and
+ARM64 prebuilt binaries. Bun (except Windows) uses `lib/terminal-bun-pty.ts`,
+a small node-pty-compatible shim over Bun's native PTY
+(`Bun.spawn({ terminal })`): it covers spawn, `onData`, `onExit`, `write`,
+`resize`, `kill` and `pid`, which is all the terminal manager drives.
+node-pty's native addon cannot hold the pty master fd open under Bun — the
+child reads EOF on stdin and an interactive shell exits before printing a
+prompt (agegr/pi-web#745, cf. oven-sh/bun#7362) — while Bun's runtime owns the
+fd for the process's lifetime. Windows keeps node-pty: its ConPTY transport
+runs on pipes rather than the broken non-blocking fd, and Bun's Windows
+terminal passes input `\r` through untranslated where POSIX `ICRNL` would map
+the Enter key to `\n`. A Bun build that cannot allocate the pty fails creation
+with an error instead of a shell that dies silently.
+
 Empty or non-JSON API errors show the HTTP status and direct users to the server log.
 
 If a native binary cannot load, run
