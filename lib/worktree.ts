@@ -78,7 +78,7 @@ function realPathOrSelf(filePath: string): string {
  * under the main repo instead of letting them dangle as a phantom project.
  * The dir name is the sanitized branch name — close enough for display.
  */
-function inferRemovedWorktree(cwd: string): ProjectInfo | null {
+export function inferRemovedWorktree(cwd: string): ProjectInfo | null {
   const parent = dirname(cwd);
   if (!parent.endsWith("-worktrees")) return null;
   const repoRoot = parent.slice(0, -"-worktrees".length);
