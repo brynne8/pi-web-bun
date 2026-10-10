@@ -1,4 +1,4 @@
-import { homedir } from "os";
+import { homeDir } from "./home-dir";
 import { join, sep } from "path";
 import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -202,7 +202,7 @@ export interface EnabledModelsSettings {
 
 /** `~/.pi/agent/settings.json` reads better in a banner than the full path. */
 export function displaySettingsPath(path: string): string {
-  const home = homedir();
+  const home = homeDir();
   if (!home || !path.startsWith(home)) return path;
   const rest = path.slice(home.length);
   return rest === "" || rest.startsWith(sep) ? `~${rest}` : path;

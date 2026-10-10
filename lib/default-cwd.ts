@@ -1,4 +1,4 @@
-import { homedir } from "os";
+import { homeDir } from "./home-dir";
 import path from "path";
 
 // "Use default directory" opens a fresh folder per day, ~/pi-cwd/<YYYYMMDD>.
@@ -14,6 +14,6 @@ export function localDateStamp(now = new Date()): string {
   return `${year}${month}${day}`;
 }
 
-export function defaultCwdPath(now = new Date(), home = homedir()): string {
+export function defaultCwdPath(now = new Date(), home = homeDir()): string {
   return path.join(home, DEFAULT_CWD_PARENT, localDateStamp(now));
 }

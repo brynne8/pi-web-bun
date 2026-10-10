@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { homedir } from "os";
+import { homeDir } from "./home-dir";
 import type { PtyProcess, PtySpawn } from "./terminal-bun-pty";
 import { samePath } from "./paths";
 
@@ -121,7 +121,7 @@ export function createTerminal(cwd: string, cols: number, rows: number, id: stri
     name: "xterm-256color",
     cols: dimension(cols, 80),
     rows: dimension(rows, 24),
-    cwd: cwd || homedir(),
+    cwd: cwd || homeDir(),
     env: shellEnvironment(),
   });
   const record: TerminalRecord = {

@@ -1,5 +1,5 @@
 import { mkdir, readdir, realpath, stat } from "fs/promises";
-import { homedir } from "os";
+import { homeDir } from "./home-dir";
 import path from "path";
 
 export interface BrowsableDirectory {
@@ -15,7 +15,7 @@ export function shouldShowWindowsDrivePicker(
 }
 
 export function getBrowseStartDirectory(directory?: string): string {
-  return directory || homedir();
+  return directory || homeDir();
 }
 
 export function getWindowsDriveCandidates(): BrowsableDirectory[] {
@@ -39,8 +39,8 @@ export async function listWindowsDrives(): Promise<BrowsableDirectory[]> {
 }
 
 export function normalizeDirectory(directory: string): string {
-  if (directory === "~") return homedir();
-  if (directory.startsWith("~/")) return path.resolve(homedir(), directory.slice(2));
+  if (directory === "~") return homeDir();
+  if (directory.startsWith("~/")) return path.resolve(homeDir(), directory.slice(2));
   return path.resolve(directory);
 }
 

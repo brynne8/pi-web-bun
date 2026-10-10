@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, beforeEach } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -24,6 +24,7 @@ await mkdir(outside, { recursive: true });
 
 const jiti = createJiti(import.meta.url, { alias: { "@": process.cwd() } });
 const { allowFileRoot } = await jiti.import("../../../../lib/file-access.ts");
+const { homeDir } = await jiti.import("../../../../lib/home-dir.ts");
 const { clearMcpStatuses } = await jiti.import("../../../../lib/mcp-status.ts");
 const { POST } = await jiti.import("./route.ts");
 const { GET } = await jiti.import("../route.ts");
@@ -94,7 +95,7 @@ test("a global server is tested from its file and answers with what it found", a
   const home = join(root, "home");
   await mkdir(home, { recursive: true });
   setEnvFor(t, "HOME", home);
-  assert.equal(homedir(), home);
+  assert.equal(homeDir(), home);
   const { status, body } = await post({ scope: "global", name: "lint" });
   assert.equal(status, 200);
   assert.equal(body.scope, "global");

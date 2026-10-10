@@ -1,5 +1,5 @@
 import { lstatSync, readdirSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { homeDir } from "./home-dir";
 import { dirname, join, resolve } from "node:path";
 import {
   hasTrustRequiringProjectResources,
@@ -208,7 +208,7 @@ function somethingAt(path: string): boolean {
  * skips a link to nothing: such a link starts counting the moment its target
  * appears, after the folder was trusted as one with nothing in it.
  */
-export function hasTrustRelevantEntries(cwd: string, home: string = process.env.HOME || homedir()): boolean {
+export function hasTrustRelevantEntries(cwd: string, home: string = homeDir()): boolean {
   const folder = realPathOr(cwd);
   if (hasOwnTrustEntries(folder)) return true;
   const userSkills = join(realPathOr(home), ".agents", "skills");
@@ -319,7 +319,7 @@ export function freshFolderTrustBreadth(
 ): FreshFolderTrustBreadth | undefined {
   const folder = realPathOr(cwd);
   if (dirname(folder) === folder) return { kind: "root", path: folder };
-  const home = realPathOr(options.home ?? (process.env.HOME || homedir()));
+  const home = realPathOr(options.home ?? homeDir());
   if (samePath(folder, home)) return { kind: "home", path: folder };
   if (within(home, folder)) return { kind: "contains-home", path: home };
   const agentDir = realPathOr(options.agentDir);
