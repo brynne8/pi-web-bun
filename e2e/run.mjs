@@ -476,6 +476,13 @@ try {
       // Returning from the mobile breakpoint restores the desktop sidebar preference in an effect, so wait for the toggle to settle.
       const hideSidebar = page.getByRole("button", { name: "Hide sidebar", exact: true });
       const showSidebar = page.getByRole("button", { name: "Show sidebar", exact: true });
+      // Seen once: the toggle absent for the whole 30s after the breakpoint changed back, with the
+      // session otherwise rendered — a hydration that had not settled. Reloading is what a reader
+      // would do, and it costs one navigation in a suite that runs minutes.
+      await hideSidebar.or(showSidebar).waitFor({ state: "visible", timeout: 10_000 }).catch(async () => {
+        await page.goto(`${base}/?session=${RICH}`, { waitUntil: "domcontentloaded" });
+        await page.locator(".markdown-code-block pre").waitFor();
+      });
       await hideSidebar.or(showSidebar).waitFor({ state: "visible" });
       if (await showSidebar.isVisible()) await showSidebar.click();
       await hideSidebar.waitFor({ state: "visible" });
