@@ -105,6 +105,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **运行时按钮不挪位。** 「停止」放在输入框里，与「引导」和「后续消息」并排，输入框下方那一排在运行中和结束后只有一套摆法——你正要点的东西不会在这次运行结束的一瞬变成别的东西。上下文真的装满时，「压缩」那颗按钮就是「停止压缩」，所以你需要的操作就在手底下。原版的处理是挡住一次运行结束后 600 毫秒内的误点（[#1131](https://github.com/agegr/pi-web/pull/1131)、`0a38de9`）；本分支把这道守卫留着，而在桌面上，它所要防的那种按钮替换已经不存在了。（[说明](./docs/agents/sessions.md#composer-action-row-nothing-moves-under-the-pointer-at-a-run-boundary)）
 
+**工具参数按行显示，不再是一段 JSON。** 参数都是单个值的工具卡片，会一个参数一行地列出来——`write` 写下的路径和正文、子代理的 profile 和 prompt、MCP 工具的 query 和 limit——本身带换行的值保留成一块可以滚动的文本。规则是全部参数都上表，否则一个也不上：只要有一个值是嵌套的，比如 `edit` 的 `edits[]`、或者 MCP 参数里装着列表，这张卡片就照旧显示 JSON，因为一行漏掉子树就等于一个谁也看不见的参数。原版的处理是每个工具都把参数显示成缩进 JSON。
+
 **子代理由 profile 配置，不由模型猜。** 子代理的思考档位、轮次上限、是否继承这段对话，都由它的 profile 决定，于是一次运行可以从产出它的那份 profile 复现。`model` 是调用方唯一还能指定的参数，因为换某个模型跑一次是常见且明确的需求，而工具描述里列着每个 profile 自己的模型。要让子代理看哪些文件，就写在 `prompt` 里，它用自己的 `read` 去打开——被委派出去的会话因此只占它真正需要的上下文；把整份文件内联进任务里，正是让刚打开的子代理直接就去做压缩的原因。原版另外接受调用上的 `input_files` 列表（[#1138](https://github.com/agegr/pi-web/pull/1138)、`fb6df88`）。（[说明](./docs/agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）
 
 ### 不算 fork 差异的部分

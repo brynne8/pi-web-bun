@@ -134,7 +134,7 @@ test("keeps streamed tool input out of collapsed markup while counting it", () =
   assert.equal(getTokenEstimateText(block), block.rawInput);
 });
 
-test("renders write tool content as readable file text", () => {
+test("renders a write as its arguments, not as a JSON blob", () => {
   const block = {
     type: "toolCall",
     toolCallId: "call-write-file",
@@ -151,30 +151,100 @@ test("renders write tool content as readable file text", () => {
       content: [block],
     });
 
+    // The path was the argument this card never showed.
     assert.ok(html.includes("src/example.ts"));
     assert.match(html, /first line\nsecond line\n/);
     assert.doesNotMatch(html, /"content":/);
+    assert.ok(html.includes("<table"));
   } finally {
     clearExpandedToolCalls();
   }
 });
 
-test("keeps the input JSON for a write with another argument, an empty file or streamed input", () => {
+test("every flat argument gets a row, so an extra one cannot hide", () => {
   const cases = [
-    { id: "call-write-mode", input: { path: "notes.md", content: "text", mode: "append" } },
-    { id: "call-write-empty", input: { path: "empty.txt", content: "" } },
-    { id: "call-write-streaming", input: {}, rawInput: "{\"path\":\"a.ts\",\"content\":\"one\\ntwo" },
+    { id: "call-write-mode", input: { path: "notes.md", content: "text", mode: "append"}, expect: "append" },
+    { id: "call-write-empty", input: { path: "empty.txt", content: "" }, expect: "(empty)" },
   ];
-  for (const { id, input, rawInput } of cases) {
-    const block = { type: "toolCall", toolCallId: id, toolName: "write", input, ...(rawInput === undefined ? {} : { rawInput }) };
+  for (const { id, input, expect } of cases) {
+    const block = { type: "toolCall", toolCallId: id, toolName: "write", input };
     clearExpandedToolCalls();
     setToolCallExpanded(id, true);
     try {
       const html = renderMessage({ role: "assistant", provider: "anthropic", model: "claude-test", content: [block] });
-      assert.equal(textOf(html).includes(getToolCallInputText(block)), true, id);
+      assert.ok(textOf(html).includes(expect), id);
+      assert.doesNotMatch(html, /"path":/, id);
     } finally {
       clearExpandedToolCalls();
     }
+  }
+});
+
+test("input that is still streaming keeps its raw text", () => {
+  const rawInput = "{\"path\":\"a.ts\",\"content\":\"one\\ntwo";
+  const block = { type: "toolCall", toolCallId: "call-write-streaming", toolName: "write", input: {}, rawInput };
+  clearExpandedToolCalls();
+  setToolCallExpanded(block.toolCallId, true);
+  try {
+    const html = renderMessage({ role: "assistant", provider: "anthropic", model: "claude-test", content: [block] });
+    assert.equal(textOf(html).includes(getToolCallInputText(block)), true);
+    assert.ok(!html.includes("<table"));
+  } finally {
+    clearExpandedToolCalls();
+  }
+});
+
+test("a nested argument keeps the JSON body: a row cannot hold a subtree", () => {
+  const block = {
+    type: "toolCall",
+    toolCallId: "call-mcp-nested",
+    toolName: "mcp__issues__search",
+    input: { query: "open bugs", filter: { labels: ["bug"], assignee: "me" }, limit: 10 },
+  };
+  clearExpandedToolCalls();
+  setToolCallExpanded(block.toolCallId, true);
+  try {
+    const html = renderMessage({ role: "assistant", provider: "anthropic", model: "claude-test", content: [block] });
+    assert.ok(!html.includes("<table"));
+    assert.ok(textOf(html).includes('"filter"'));
+    assert.ok(textOf(html).includes('"labels"'));
+  } finally {
+    clearExpandedToolCalls();
+  }
+});
+
+test("an edit call shows no table: its arguments are a list of patches", () => {
+  const input = {
+    path: "src/app/page.tsx",
+    edits: [{ oldText: "const a = 1", newText: "const a = 2" }],
+  };
+  const block = { type: "toolCall", toolCallId: "call-edit-nested", toolName: "edit", input };
+  clearExpandedToolCalls();
+  setToolCallExpanded(block.toolCallId, true);
+  try {
+    const html = renderMessage({ role: "assistant", provider: "anthropic", model: "claude-test", content: [block] });
+    assert.ok(!html.includes("<table"));
+  } finally {
+    clearExpandedToolCalls();
+  }
+});
+
+test("a shell card keeps the highlighted command in place of a table", () => {
+  // Flat arguments would table, but this card's own view is the command itself.
+  const block = {
+    type: "toolCall",
+    toolCallId: "call-bash-flat-args",
+    toolName: "bash",
+    input: { command: "bun test", timeout: 120, run_in_background: false },
+  };
+  clearExpandedToolCalls();
+  setToolCallExpanded(block.toolCallId, true);
+  try {
+    const html = renderMessage({ role: "assistant", provider: "anthropic", model: "claude-test", content: [block] });
+    assert.ok(!html.includes("<table"));
+    assert.ok(textOf(html).includes("bun test"));
+  } finally {
+    clearExpandedToolCalls();
   }
 });
 
@@ -670,7 +740,12 @@ test("keeps the generic view for a codemode call whose input is still streaming 
   const other = { type: "toolCall", toolCallId: "call-codemode-other", toolName: "codemode", input: { script: "x" } };
   setToolCallExpanded(other.toolCallId, true);
   t.after(() => setToolCallExpanded(other.toolCallId, false));
-  assert.match(textOf(renderCodemode(other)), /"script": "x"/);
+  // An argument this view does not understand is still an argument: no script box,
+  // but the flat row shows it.
+  const otherHtml = renderCodemode(other);
+  assert.match(otherHtml, /<table/);
+  assert.match(otherHtml, />x<\/td>/);
+  assert.doesNotMatch(textOf(otherHtml), /"script": "x"/);
 });
 
 test("labels an MCP call server/tool and indents a JSON result", (t) => {
