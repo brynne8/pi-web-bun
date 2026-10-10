@@ -9,7 +9,7 @@ bun run dev   # port 30141
 
 Tests: `bun test` · Typecheck: `bun x tsc --noEmit` · Lint: `bun run lint`
 
-Bun is the target runtime: `bun x tsc` because the `node_modules/.bin` shims carry a `#!/usr/bin/env node` shebang, and `bun test` because the `test` script in `package.json` calls Node's runner. `bun install` writes only the gitignored `bun.lock`; the tracked `package-lock.json` is what CI installs from with `npm ci`, which refuses a `package.json` the lock does not match — so after a dependency change run `bun x npm install --package-lock-only` and commit the result. Read [docs/agents/tests.md](docs/agents/tests.md) before touching a test or after rebasing onto upstream.
+Bun is the target runtime: `bun x tsc` because the `node_modules/.bin` shims carry a `#!/usr/bin/env node` shebang, and `bun test` because the `test` script in `package.json` calls Node's runner. **Both runners are supported here and both must stay green**: `bun test` is the target, `npm test` (with a real Node.js 22.19.0+ on `PATH`) is upstream's only runner and therefore the one to compare against after a rebase onto upstream. They count differently, so compare failures, never totals. `bun install` writes only `bun.lock`, which is gitignored and never committed; the tracked `package-lock.json` is what CI installs from with `npm ci`, which refuses a `package.json` the lock does not match — so after a dependency change run `bun x npm install --package-lock-only` and commit the result. Read [docs/agents/tests.md](docs/agents/tests.md) before touching a test or after rebasing onto upstream.
 
 ### Dev server troubleshooting
 
@@ -92,6 +92,7 @@ app/api/
 lib/
   agent-client.ts           typed fetch helper for /api/agent commands
   rpc-manager.ts            AgentSessionWrapper, registry, startRpcSession
+  retry-http2-stream-drops.ts temporary wrap over AgentSession._isRetryableError, so a relay's dropped HTTP/2 stream retries (the private name is pinned by its test)
   session-reader.ts         SessionManager wrappers, path cache, buildSessionContext adapter
   session-fork.ts           forkSessionBranch(): the sidebar's Fork, a leaf-branch copy on a fresh SessionManager named after its source, typed refusals
   session-fork-name.ts      client-safe Fork naming: source title + " · " + 4 hex; splitting the suffix off for the row and toast
@@ -102,6 +103,9 @@ lib/
   sidebar-actions.ts        session row menu entries, a project group's name entries and rename request, fork refusal messages
   new-session-context.ts    client-safe: what the project/worktree pickers show (project, worktrees, project list), lag-safe contextForCwd
   bash-highlight.ts         tokenizeBash(): shell scanner behind the tool card's command
+  project-command-env.ts    the registered bash tool: project env, the timeout sanitizer, background wiring
+  bash-bg-tasks.ts          opt-in background bash: the 120 s handoff, log files, live tasks per session
+  bg-tasks-settings.ts      the bgTasksEnabled switch in global settings.json (only /api/tools/settings writes it)
   normalize.ts              normalizeToolCalls(): file-format vs our toolCall field names
   types.ts                  shared TypeScript types
   pi-types.ts               local structural types for pi SDK objects
@@ -128,6 +132,7 @@ lib/
   file-tree-visibility.ts   which entries the file tree lists (git check-ignore, name-list fallback)
   display-path.ts           display-only ~ / ./ path shortening for settings panels
   default-cwd.ts            dated ~/pi-cwd/YYYYMMDD path for "Use default directory"
+  home-dir.ts               homeDir(): $HOME before the user database, which is all Bun's os.homedir() reads
   worktree.ts               project/worktree resolution and git worktree operations
   draft-store.ts            local draft persistence
   extension-ui-queue.ts     FIFO queues for extension dialogs and custom panels, by request id; isBlockingExtensionUiRequest() (which method a run waits on)
@@ -135,6 +140,7 @@ lib/
   gfm-autolink-email-loader.cjs  bundler loader: remark-gfm's email regex without a lookbehind literal
   node-cli.ts               locate bundled npm-cli.js / npx-cli.js to spawn npm/npx without a shell (Windows)
   npx.ts                    npx runner for skill install
+  terminal-bun-pty.ts       node-pty-compatible PTY over Bun.spawn({ terminal }), loaded instead of node-pty on Bun
   plugin-updates.ts         npm view update checks for /api/plugins/check
   jsonc.ts                  JSON with comments and trailing commas (models.json is read through it)
   shell-words.ts            split a pasted command line into words without a shell; refuses | && ; redirects $(…)
@@ -199,7 +205,7 @@ components/
   FileExplorer.tsx         file tree in the sidebar
   FileIcons.tsx            file icon helpers
   FileViewer.tsx           file content in a tab
-  DelimitedTable.tsx       a CSV/TSV file's Preview: virtualized table, gutter of file lines
+  DelimitedTable.tsx       a CSV/TSV file's Preview: virtualized table, gutter of file lines; a read slice too (firstLine / hasHeader)
   ReadSnapshotViewer.tsx   one read call's slice in a right-panel tab: markdown, table, or source numbered from the offset
   TabBar.tsx               file panel tab bar (file, terminal, subagent and read snapshot tabs)
 
@@ -220,8 +226,8 @@ hooks/
 
 Design decisions and traps live in `docs/agents/`, one note per area. Read every note whose files a change touches before making it. Add new notes to the area's file, not here.
 
-- [sessions.md](docs/agents/sessions.md): AgentSession lifecycle and shutdown, fork vs in-session branching, the sidebar's on-disk Fork, session file rewrites, toolCall normalization, SSE reconnect and tool events, transcript system / usage / context-edit entries, running-state polling, bash card highlighting, custom-message collapsing, a read card's slice in the right panel, the composer's run-control row, the session sidebar (toolbar row, project groups, their order and display names, pins, archive, new-session project adoption, files tab), the project/worktree bar in a fresh composer's header row and what it carries across the remount, exported HTML, the extension status bar and its `command:` buttons. Files: `lib/rpc-manager.ts`, `lib/session-reader.ts`, `lib/session-fork*.ts`, `lib/normalize.ts`, `lib/session-tree.ts`, `lib/session-ui-state*.ts`, `lib/sidebar-prefs.ts`, `lib/sidebar-actions.ts`, `lib/new-session-context.ts`, `hooks/useAgentSession.ts`, `hooks/useSessionUiState.ts`, `hooks/useGroupDrag.ts`, `app/api/agent/**`, `app/api/sessions/**`, `components/SessionSidebar.tsx`, `components/SessionTree.tsx`, `components/SidebarMenu.tsx`, `components/SidebarToast.tsx`, `components/SidebarIcons.tsx`, `components/ProjectWorktreePicker.tsx`, `components/NewSessionContextBar.tsx`, `components/WorktreeCreateForm.tsx`, `handleNewSession`, `handleSelectSession` and the bar's handlers in `components/AppShell.tsx`, `components/BranchNavigator.tsx`, `components/MessageView.tsx`, `components/BashCommand.tsx`, `components/CodemodeToolView.tsx`, `components/ChatInput.tsx`, `components/ExtensionStatusBar.tsx`, `components/ExtensionWidgets.tsx`, `lib/read-snapshot.ts`, `components/ReadSnapshotViewer.tsx`.
-- [tools.md](docs/agents/tools.md): tool presets and Chat only, exact system prompts, tool exposure, the codemode / tool-search / mcp built-ins, the read-only MCP policy, the Code mode and PowerShell `defaultTools` switches. Files: `lib/tool-presets.ts`, `lib/tool-preset-preference.ts`, `lib/chat-only.ts`, `lib/exact-system-prompt.ts`, `lib/builtin-extensions.ts`, `lib/mcp-read-only-policy.ts`, `lib/codemode-settings.ts`, `lib/powershell-settings.ts`, `lib/global-settings-file.ts`, `app/api/agent/new/route.ts`, `app/api/tools/settings/route.ts`, tool selection in `lib/rpc-manager.ts`.
+- [sessions.md](docs/agents/sessions.md): AgentSession lifecycle and shutdown, fork vs in-session branching, the sidebar's on-disk Fork, session file rewrites, toolCall normalization, SSE reconnect and tool events, a relay's dropped HTTP/2 stream retrying instead of stopping the run, transcript system / usage / context-edit entries, running-state polling, bash card highlighting, custom-message collapsing, a read card's slice in the right panel, the composer's run-control row, the session sidebar (toolbar row, project groups, their order and display names, pins, archive, new-session project adoption, files tab), the project/worktree bar in a fresh composer's header row and what it carries across the remount, exported HTML, the extension status bar and its `command:` buttons. Files: `lib/rpc-manager.ts`, `lib/retry-http2-stream-drops.ts`, `lib/session-reader.ts`, `lib/session-fork*.ts`, `lib/normalize.ts`, `lib/bash-highlight.ts`, `lib/session-tree.ts`, `lib/session-ui-state*.ts`, `lib/sidebar-prefs.ts`, `lib/sidebar-actions.ts`, `lib/new-session-context.ts`, `hooks/useAgentSession.ts`, `hooks/useSessionUiState.ts`, `hooks/useGroupDrag.ts`, `app/api/agent/**`, `app/api/sessions/**`, `components/SessionSidebar.tsx`, `components/SessionTree.tsx`, `components/SidebarMenu.tsx`, `components/SidebarToast.tsx`, `components/SidebarIcons.tsx`, `components/ProjectWorktreePicker.tsx`, `components/NewSessionContextBar.tsx`, `components/WorktreeCreateForm.tsx`, `handleNewSession`, `handleSelectSession` and the bar's handlers in `components/AppShell.tsx`, `components/BranchNavigator.tsx`, `components/MessageView.tsx`, `components/BashCommand.tsx`, `components/CodemodeToolView.tsx`, `components/ChatInput.tsx`, `components/ExtensionStatusBar.tsx`, `components/ExtensionWidgets.tsx`, `lib/read-snapshot.ts`, `components/ReadSnapshotViewer.tsx`.
+- [tools.md](docs/agents/tools.md): tool presets and Chat only, exact system prompts, tool exposure, the codemode / tool-search / mcp built-ins, the read-only MCP policy, the Code mode, PowerShell and background-bash switches `/api/tools/settings` owns. Files: `lib/tool-presets.ts`, `lib/tool-preset-preference.ts`, `lib/chat-only.ts`, `lib/exact-system-prompt.ts`, `lib/builtin-extensions.ts`, `lib/mcp-read-only-policy.ts`, `lib/codemode-settings.ts`, `lib/powershell-settings.ts`, `lib/global-settings-file.ts`, `app/api/agent/new/route.ts`, `app/api/tools/settings/route.ts`, tool selection in `lib/rpc-manager.ts`.
 - [background-bash.md](docs/agents/background-bash.md): the opt-in background bash switch, the 120 s auto-background handoff, Stop versus a handed-off process, and the completion report's model-only prefix. Files: `lib/bash-bg-tasks.ts`, `lib/bg-task-notification.ts`, `lib/bg-tasks-settings.ts`, `lib/project-command-env.ts`, `components/BgTaskNotificationView.tsx`, the report's body and collapsed preview in `components/MessageView.tsx`, bg wiring in `lib/rpc-manager.ts`.
 - [mcp-runtime.md](docs/agents/mcp-runtime.md): the per-session MCP host (when servers register and connect, reported states, trust read on every sync, idle release); `/mcp` in the composer. Files: `lib/mcp-host.ts`, `lib/mcp-transport.ts`, `lib/mcp-status.ts`, `lib/mcp-command.ts`, `lib/mcp-config-key.ts`, MCP wiring in `lib/rpc-manager.ts` and `lib/builtin-extensions.ts`, `/mcp` handling in `hooks/useAgentSession.ts`.
 - [mcp-settings.md](docs/agents/mcp-settings.md): Settings › MCP reads without running anything, masking, the trust dialog's server list, row states, notices, Code mode choice, trust from Settings, Escape stacking, every `mcp.json` write and undo. Files: `app/api/mcp/route.ts`, `app/api/project-trust/route.ts`, `lib/mcp-config-read.ts`, `lib/mcp-config-file.ts`, `lib/mcp-override.ts`, `lib/mcp-undo.ts`, `lib/mcp-secrets.ts`, `lib/mcp-server-display.ts`, `lib/mcp-json-error.ts`, `lib/project-trust.ts`, `lib/regular-file.ts`, `lib/stacked-dialog.ts`, `lib/settings-navigation.ts`, `components/McpConfig.tsx`, `components/mcp-config-helpers.ts`, `components/ProjectTrustDialog.tsx`, `components/SettingsPanel.tsx`.
