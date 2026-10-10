@@ -1,6 +1,6 @@
 # Tests
 
-`bun test` is the target; `npm test` (Node's runner, the `test` script) is the second opinion, and upstream only has that one — so a rebase onto upstream always brings the work in this note. Compare failures, never totals: Node counts subtests and suites of its own accord, so the same tree reads roughly 2,870 tests on Bun and 2,910 on Node — 321 files and one skip either way.
+`bun test` is the target; `npm test` (Node's runner, the `test` script) is the second opinion, and upstream only has that one — so a rebase onto upstream always brings the work in this note. Compare failures, never totals: Node counts subtests and suites of its own accord, so the same tree reads roughly 2,885 tests on Bun and 2,925 on Node — 322 files and one skip either way.
 
 ## What behaves differently under Bun, and what to use instead
 
@@ -27,3 +27,11 @@
 ## Writing one
 
 One `*.test.mjs` per area beside its file, the `.ts` under test loaded through jiti with `tsconfigPaths: true`. Never write to `globalThis` at module scope without the matching `after()`, and never assume the file has the process to itself.
+
+## Documentation is under test
+
+`lib/markdown-emphasis.test.mjs` renders every `*.md` in the repository with CommonMark and fails the suite if a `**` survives into the prose: `**…全绿。**下面` is neither left- nor right-flanking, so GitHub prints the asterisks. The rules are quoted in `lib/markdown-emphasis.ts`.
+
+Two things make this more than a grep for `**`. The app forgives this shape — `lib/markdown.ts` loads `remark-cjk-friendly`, pinned by `components/MarkdownBody.test.mjs` — so the gate renders with no remark plugins. And a pairing heuristic misfires in both directions: `**Two ways to branch**: **New session** … **Edit from here** …` is ordinary Markdown, while `请打开**（模型）**面板登录。` refuses both roles and has no partner to name. So the parser judges and the rules only say which role was refused.
+
+Ask git for the file list with `execFileSync("git", ["ls-files", "-z", "--", "*.md"])`: through a shell the glob expands in the repository root first, and the scan shrinks to six files without failing anything.

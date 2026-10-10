@@ -9,6 +9,8 @@ bun run dev   # port 30141
 
 Tests: `bun test` · Typecheck: `bun x tsc --noEmit` · Lint: `bun run lint`
 
+A documentation-only change still runs a test: `bun test lib/markdown-emphasis.test.mjs` checks every Markdown file here against CommonMark/GFM's delimiter-flanking rules, which is where `**…全绿。**下面` fails to become bold on GitHub (the closing run sits after punctuation and before a letter, so it cannot close). Rendered Markdown is the product of these files, so they are not exempt from a gate.
+
 Bun is the target runtime: `bun x tsc` because the `node_modules/.bin` shims carry a `#!/usr/bin/env node` shebang, and `bun test` because the `test` script in `package.json` calls Node's runner. **Both runners are supported here and both must stay green**: `bun test` is the target, `npm test` (with a real Node.js 22.19.0+ on `PATH`) is upstream's only runner and therefore the one to compare against after a rebase onto upstream. They count differently, so compare failures, never totals. `bun install` writes only `bun.lock`, which is gitignored and never committed; the tracked `package-lock.json` is what CI installs from with `npm ci`, which refuses a `package.json` the lock does not match — so after a dependency change run `bun x npm install --package-lock-only` and commit the result. Read [docs/agents/tests.md](docs/agents/tests.md) before touching a test or after rebasing onto upstream.
 
 ### Dev server troubleshooting
@@ -137,6 +139,7 @@ lib/
   draft-store.ts            local draft persistence
   extension-ui-queue.ts     FIFO queues for extension dialogs and custom panels, by request id; isBlockingExtensionUiRequest() (which method a run waits on)
   markdown.ts               shared markdown helpers
+  markdown-emphasis.ts      CommonMark/GFM flanking rules, for the test that keeps our own Markdown free of literal `**`
   gfm-autolink-email-loader.cjs  bundler loader: remark-gfm's email regex without a lookbehind literal
   node-cli.ts               locate bundled npm-cli.js / npx-cli.js to spawn npm/npx without a shell (Windows)
   npx.ts                    npx runner for skill install
