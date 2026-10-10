@@ -3,16 +3,19 @@
 ## Quick Start
 
 ```bash
-npm run dev   # port 30141
+bun install   # bun.lock is gitignored and resolves fresh; never `npm install` here
+bun run dev   # port 30141
 ```
 
-Typecheck: `node_modules/.bin/tsc --noEmit` · Lint: `npm run lint`
+Tests: `bun test` · Typecheck: `bun x tsc --noEmit` · Lint: `bun run lint`
+
+Bun is the target runtime: `bun x tsc` because the `node_modules/.bin` shims carry a `#!/usr/bin/env node` shebang, and `bun test` because the `test` script in `package.json` calls Node's runner. `bun install` writes only the gitignored `bun.lock`; the tracked `package-lock.json` is what CI installs from with `npm ci`, which refuses a `package.json` the lock does not match — so after a dependency change run `bun x npm install --package-lock-only` and commit the result. Read [docs/agents/tests.md](docs/agents/tests.md) before touching a test or after rebasing onto upstream.
 
 ### Dev server troubleshooting
 
 - First run `lsof -nP -iTCP:30141 -sTCP:LISTEN` and reuse a healthy Pi Web process. A second `next dev` on another port is no workaround: both contend for `.next-dev/dev/lock`.
 - A browser-only `Module ... factory is not available` overlay usually means that tab has a stale Turbopack/HMR graph, not a broken server or source. Use the browser's explicit reload, then compare the server log and a direct HTTP/API request.
-- Restart only when the failure reproduces from a fresh page and the server-side checks fail too: stop that exact dev process gracefully, move `.next-dev` into a `mktemp -d` backup, restart with `npm run dev`.
+- Restart only when the failure reproduces from a fresh page and the server-side checks fail too: stop that exact dev process gracefully, move `.next-dev` into a `mktemp -d` backup, restart with `bun run dev`.
 - Never fall back to `next dev --webpack`: the dev graph can fail on `undici` imports such as `node:console`. Development uses Turbopack.
 - `next dev` may append a generated `BEGIN:nextjs-agent-rules` block to `AGENTS.md`. It is tooling output: check `git status` and keep it out of unrelated commits.
 
@@ -222,6 +225,7 @@ Design decisions and traps live in `docs/agents/`, one note per area. Read every
 - [settings-ui.md](docs/agents/settings-ui.md): Plugins and Skills routes, sidebar group switches, the shared `SettingsUi` blocks every settings panel and add pane uses. Files: `app/api/plugins/**`, `app/api/skills/**`, `components/SettingsUi.tsx`, `components/settings-ui-helpers.ts`, `components/SkillsConfig.tsx`, `components/PluginsConfig.tsx`; also before adding a settings section or add pane.
 - [subagents.md](docs/agents/subagents.md): the built-in subagent setting, profiles and their files, run status, completion notifications, the subagent viewer tab. Files: `lib/subagent*.ts`, `app/api/subagents/**`, `components/AgentsConfig.tsx`, `components/SubagentViewer.tsx`, `components/subagent-viewer-state.ts`.
 - [client-platform.md](docs/agents/client-platform.md): mobile software keyboard and viewport height, completion sound. Files: `hooks/useViewportHeight.ts`, `hooks/useAudio.ts`, the keyboard-open CSS.
+- [tests.md](docs/agents/tests.md): what behaves differently under Bun and what to use instead — one `globalThis`, one module registry and one set of product globals on `globalThis` for the whole suite instead of one per file, jiti's `tryNative`, frozen named builtin imports, the `node:module` exports Bun does not have and the `runStripped` replacement, Bun's own `fetch` and its proxy, the 5 s test timeout; how to read a failure and how to tell an upstream one from a fork regression. Files: every `**/*.test.mjs`, `lib/__fixtures__/strip-types.mjs`, `lib/__fixtures__/session-scan-index.mjs`, `hooks/__fixtures__/react-hook-shim.mjs`, the `test` script in `package.json`. Read it before touching a test and after any rebase onto upstream.
 
 ---
 
