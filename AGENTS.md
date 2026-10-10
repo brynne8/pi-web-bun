@@ -30,6 +30,8 @@ Bun is the target runtime: `bun x tsc` because the `node_modules/.bin` shims car
 - **Browsing** (read-only, no AgentSession): `GET /api/sessions` lists `~/.pi/agent/sessions/`; `GET /api/sessions/[id]` reads the `.jsonl` through SDK `SessionManager` helpers and `lib/session-reader.ts`, or an open wrapper's in-memory `SessionManager`. `GET /api/agent/running` snapshots the running ids.
 - **Sending**: `POST /api/agent/[id]` → `startRpcSession()` (`lib/rpc-manager.ts`) creates the AgentSession in-process (`createAgentSessionFromServices()`); `session.send(cmd)` → `session.prompt()`.
 - **Events**: `GET /api/agent/[id]/events` streams SSE `data: {...}` from `session.onEvent()`, fed by `session.subscribe()`.
+- **Every difference from upstream is written down.** This branch is a delta on upstream `main`, so a change is not finished when it works: it is finished when a reader can tell what upstream does instead. Anything the user can see belongs in the README's *Differences from upstream* section, ending with what upstream does (dry fact, PR or commit link); anything the model or a developer can see belongs in the `docs/agents` note that owns that behaviour. A rebase onto upstream re-lands our deleted files and reopens our closed questions, so check the delta list after one — and the note list above is where each area's detail lives, not a second index to keep in step.
+
 - **Extension compatibility (principle)**: extensions written for the pi CLI must behave the same here. Fix display problems in the web client; never add pi-web-only options or fields to the extension API (`ctx.ui.*` options, `extension_ui_request`). pi's TUI (`node_modules/@earendil-works/pi-tui`) is the reference for what an extension asking for something means.
 
 ---
