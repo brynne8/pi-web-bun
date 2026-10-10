@@ -1,6 +1,8 @@
-# Pi Web
+# Pi Web (Bun)
 
 [中文文档](./README.zh-CN.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
+
+> **This is a Bun-focused fork of [agegr/pi-web](https://github.com/agegr/pi-web).** It runs on [Bun](https://bun.sh) with no Node.js, `npm` or `npx` installed, and it has its own opinion about how a coding agent should read in a browser: a long command hands off instead of holding the turn open, a `read` call opens the exact slice it returned, the composer never changes what is under your finger, and a relay dropping its HTTP/2 stream no longer costs you the run. [Differences from upstream](#differences-from-upstream) says what still differs — and what upstream has since taken over; [Bun setup](#bun-setup) gets it running. Everything else below is upstream's documentation.
 
 Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi). Pi Web uses the same local configuration and session files as pi, so you can browse and resume conversations, run agent turns, configure models and resources, and inspect project files from a browser.
 
@@ -12,12 +14,104 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 
 - **Session workspace**: browse, resume, rename, export, and delete conversations grouped by project, with running state, context usage, cost, and compaction details.
 - **Two ways to branch**: **New session** creates an independent session file from an earlier message; **Edit from here** creates a branch inside the current session.
+- **Background bash tasks** (off by default): a long-running command hands off to a background task and comes back as a settled card instead of holding the turn open.
 - **Project file tools**: browse and upload files, inspect Git diffs, and preview source, Markdown, images, audio, PDFs, and DOCX files with automatic refresh.
+- **Reads and tables in the side panel**: a `read` tool call opens the exact slice it returned — Markdown rendered, or source with line numbers continuing from the read's offset — and a `.csv` or `.tsv` slice opens as a table with the file's own line numbers in the gutter.
+- **Highlighted commands**: a shell tool card colours the command's tokens instead of showing it as one dim string, and keeps its `timeout` and its background flag beside it.
 - **Git worktrees**: switch checkouts from the sidebar while keeping sessions from the same repository grouped together.
 - **Web-based configuration**: manage provider login and API keys, models, model tests, plugin packages, and skills without leaving Pi Web.
 - **English, Simplified Chinese, and Traditional Chinese UI**: Pi Web follows the browser language initially and provides a language switcher in the top bar.
 
-## Quick Start
+## Bun setup
+
+This fork targets Bun and needs no Node.js toolchain. Requires [Bun](https://bun.sh) 1.4.2 or newer; check with `bun --version`.
+
+```bash
+git clone https://github.com/brynne8/pi-web-bun.git
+cd pi-web-bun
+bun install
+bun run dev
+```
+
+The development server starts at [http://127.0.0.1:30141](http://127.0.0.1:30141).
+
+There is no npm-published package for this fork; run it from a clone as above. `bun.lock` is gitignored, so `bun install` resolves fresh each time — and it stays out of the repository. The tracked `package-lock.json` is what upstream's CI installs from, so a dependency change is recorded with `bun x npm install --package-lock-only` and committed.
+
+If no model provider is configured yet, open the **Models** panel to sign in or add an API key. `~/.pi/agent` is created on first use.
+
+### Development commands
+
+```bash
+bun install                            # install dependencies
+bun run dev                            # dev server on 127.0.0.1:30141
+bun run dev:lan                        # dev server on 0.0.0.0:30141
+bun test                               # run the test suite
+bun x tsc --noEmit                     # typecheck
+bun run lint                           # lint
+```
+
+Three notes on running the checks:
+
+- `bun test` replaces `npm test`. The `test` script in `package.json` still calls Node's test runner, which Bun cannot expand the glob arguments for; `bun test` needs no arguments and picks up every test file itself. Likewise `bun x tsc --noEmit` replaces `node_modules/.bin/tsc --noEmit`, because the `.bin` shims carry a `#!/usr/bin/env node` shebang and fail without Node on `PATH`.
+- **Both runners are supported here, and both are kept green.** `npm test` on a real Node.js 22.19.0+ is the second opinion, and the only one upstream has, so it is the runner to compare after a rebase onto upstream. The two do not count alike — Node counts subtests and suites of its own accord — so compare failures, never totals. [docs/agents/tests.md](./docs/agents/tests.md) records what behaves differently under Bun and what to write instead.
+- The whole suite passes under `bun test` as well: every file under `app/`, `components/`, `hooks/`, `lib/` and `public/`. Where a behaviour can only be observed on one runtime the test says so and skips that half instead of failing — Bun's `fetch` ignores undici's global dispatcher, and Bun's `node:module` exports neither `stripTypeScriptTypes` nor `registerHooks`.
+
+### Plugin installs on Bun
+
+One setting, written to `~/.pi/agent/settings.json`:
+
+```json
+{ "npmCommand": ["bun"] }
+```
+
+The pi SDK reads it and adapts its install arguments per package manager (`npm`, `pnpm`, `bun`). Set it through the SDK (`SettingsManager.setNpmCommand(["bun"])`) or the **Settings** panel rather than by hand-editing the file, so the lock pi takes on that file is respected.
+
+## Differences from upstream
+
+Three kinds of difference. [Running on Bun](#running-on-bun) is what it takes to run without a Node.js toolchain. [Features this fork adds](#features-this-fork-adds) is the behaviour it ships on top of upstream, with one line on what upstream does where the two differ. [Not fork differences](#not-fork-differences) lists what upstream wrote and this checkout merely carries.
+
+### Running on Bun
+
+| Area | Upstream | Here |
+| --- | --- | --- |
+| Runtime | Node.js 22.19.0+ | Bun 1.4.2+ |
+| Integrated terminal | Works via `node-pty` | Works via Bun's native PTY behind a small node-pty-compatible shim (see below, and [docs/terminal.md](./docs/terminal.md)) |
+| SDK package resolution | `findPackageJSON()` from `node:module` | `findPackageManifest()` in `lib/pi-sdk-internals.ts` walks `node_modules` upward, because Bun implements none of `node:module`'s named exports |
+| Home directory | `os.homedir()` | `$HOME` first (`homeDir()` in `lib/home-dir.ts`) — the agent directory, the default cwd, the browser's root, `~` in a path, and the agent directory the HTTP dispatcher reads its timeouts from |
+| Skills install | `npx skills add …` | `bun x skills add …` |
+| Plugin update check | `npm view … version --json` | `bun pm view … version --json` |
+| Test suite | Node's runner (`npm test`) | Both runners, both green: `bun test` and `npm test` |
+| Dev build output | The dev server and `next build` share `.next/` | `PI_WEB_DIST_DIR` points the dev script at `.next-dev/`, so a build or `next start` no longer pollutes the dev server's directory |
+| Lockfiles | `package-lock.json` | `bun.lock` is gitignored; `bun-types` is recorded in the tracked `package-lock.json`, because CI's `npm ci` refuses a `package.json` the lock does not match |
+| CI | `.github/workflows/ci.yml` on Node.js | the same `ci.yml`, untouched — this fork adds no Bun job, so the Bun checks above are run locally |
+
+**Terminal.** node-pty's native addon cannot keep the pty master fd alive under Bun: the fd is closed right after `spawn()`, the child reads EOF on stdin and an interactive shell exits before it can print a prompt ([agegr/pi-web#745](https://github.com/agegr/pi-web/issues/745), cf. [oven-sh/bun#7362](https://github.com/oven-sh/bun/issues/7362)). Bun's own PTY support (`Bun.spawn({ terminal })`) holds the fd for the process's lifetime, so `lib/terminal-bun-pty.ts` implements the small node-pty-compatible surface `lib/terminal-manager.ts` drives — spawn, `onData`, `onExit`, `write`, `resize`, `kill` and `pid` — and node-pty keeps serving Node.js and Windows. No polling reader, no fd lifetime hack, no extra dependency.
+
+**Skills and plugin checks.** `lib/node-cli.ts` maps the two read-only package-manager calls onto their Bun equivalents (`bun x` for npx; `bun pm view`, whose JSON matches npm's). Installs are left to the SDK's package-manager path, which the `npmCommand` setting above points at bun.
+
+### Features this fork adds
+
+Useful on the first run; none of it needs configuring unless the entry says otherwise. Each entry ends with what upstream does instead, for anyone comparing the two.
+
+**Long-running commands in the background.** A shell command that passes two minutes hands off to a background task: the agent keeps working, and the command comes back as a finished card with its log file when it ends. Turn it on in **Settings → General → Background bash tasks**; it is off by default, and with the switch off the tool is upstream's bash tool exactly. The model is offered `run_in_background` only while the switch is on. Upstream would take background execution from pi itself rather than from the web wrapper ([#1132](https://github.com/agegr/pi-web/pull/1132)). ([How the hand-off works](./docs/agents/background-bash.md#two-ways-into-the-background))
+
+**A run that survives a dropped stream.** Some relays cut the HTTP/2 stream in the middle of a response, which reaches pi as an error it treats as fatal: the answer stops half-written and nothing retries. This fork retries it, with pi's own attempt limit and backoff, and still treats a Stop you pressed, a quota refusal and a full context as fatal. Upstream's position is that the browser should retry exactly what pi in a terminal retries, and that the error text belongs in pi's retry table ([#1134](https://github.com/agegr/pi-web/pull/1134)); until pi lists it, the fork reads pi's classification from the outside, and a test fails the build if pi renames the method it reads, so the fix cannot die quietly. ([What is retried and what is not](./docs/agents/sessions.md#agentsession-lifecycle-librpc-managerts))
+
+**Shell commands you can read at a glance.** The command in a bash tool card is highlighted as a shell command rather than shown as one dim string, and its expanded body shows the command with its timeout instead of the raw JSON — so `grep -rl "foo" src | xargs rm` reads as a pipeline. Commands running in the background carry a `(background)` marker. It adds no syntax-highlighting dependency: 245 lines of scanner plus a renderer, and the palette is six CSS variables. Upstream keeps tool cards unstyled ([#1135](https://github.com/agegr/pi-web/pull/1135)). ([Note](./docs/agents/sessions.md#tool-execution-events-on-the-sse-stream))
+
+**Read a file's slice beside the conversation.** Click a completed `read` card and the panel on the right opens the exact slice that call returned: Markdown rendered as Markdown, source numbered from the line the read started on, CSV and TSV as a table with real file line numbers, even when the slice is cut from the middle of the file. It shows what the model was given, not the file as it stands now — nothing is fetched or re-read, so the panel and the transcript can be checked against each other. The card keeps its own output; the panel is one click away, not a detour. Upstream keeps a read's output inside the card and uses its delimited table in the file viewer ([#1136](https://github.com/agegr/pi-web/pull/1136), [#1150](https://github.com/agegr/pi-web/pull/1150)). ([Note](./docs/agents/sessions.md#a-read-card-opens-its-slice-in-the-right-panel-toolcallblock-componentsreadsnapshotviewertsx))
+
+**Controls that stay put during a run.** Stop sits in the composer beside Steer and Follow-up, and the row below the input has one layout whether a run is live or finished — nothing you are about to click turns into something else when the run ends. When the context is actually full, Compact is the button that aborts compaction, so the control you need is the one already under your hand. Upstream guards against a click made within 600 ms of a run ending ([#1131](https://github.com/agegr/pi-web/pull/1131), `0a38de9`); this fork keeps that guard, and on a desktop the button swap it guards against no longer exists. ([Note](./docs/agents/sessions.md#composer-action-row-nothing-moves-under-the-pointer-at-a-run-boundary))
+
+**Subagents configured by profile, not by guess.** A subagent's thinking level, turn limit and whether it inherits the conversation come from its profile, so a run is reproducible from the profile that produced it. `model` is the one parameter a call can still set, because running once on a different model is a routine, deliberate request and the tool description lists each profile's model. Files a subagent should look at are named in the `prompt` and it opens them with its own `read`, which keeps a delegated session's context the size it needs to be; inlining whole files into the task is what pushed freshly opened subagents straight into compaction. Upstream also accepts an `input_files` list on the call ([#1138](https://github.com/agegr/pi-web/pull/1138), `fb6df88`). ([Note](./docs/agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent))
+
+### Not fork differences
+
+These came from upstream, and this checkout has them because upstream wrote them: keeping Stop clear of the slot compaction lands in after a stray double click (`0a38de9`, [#1131](https://github.com/agegr/pi-web/pull/1131)), collapsing a custom message from its header (`574cbba`, [#1133](https://github.com/agegr/pi-web/pull/1133)), answering a removed subagent worktree from the repository it branched from (`f9a370e`, [#1137](https://github.com/agegr/pi-web/pull/1137)), letting the profile decide a subagent's spawn parameters (`fb6df88`, [#1138](https://github.com/agegr/pi-web/pull/1138)), and the file viewer's delimited CSV/TSV table (`f87afbb`, [#1150](https://github.com/agegr/pi-web/pull/1150)). An earlier version of this README listed some of these as fork work; this one does not.
+
+Everything else — sessions, files, Git, worktrees, models, MCP, extensions — is upstream code and behaves as upstream describes it.
+
+## Quick Start (upstream, Node.js)
 
 Pi Web requires Node.js 22.19.0 or newer. Check your version with `node --version`, then run:
 
@@ -26,8 +120,6 @@ npx @agegr/pi-web@latest
 ```
 
 The CLI opens a browser after the server is ready. If it does not, open [http://127.0.0.1:30141](http://127.0.0.1:30141). Pi Web listens only on `127.0.0.1` by default.
-
-If no model provider is configured yet, open the **Models** panel to sign in or add an API key.
 
 To install the `pi-web` command globally:
 
@@ -167,6 +259,8 @@ still take precedence.
 
 ## Development
 
+This section is upstream's, for reference. On Bun use the commands in [Bun setup](#bun-setup) instead.
+
 ```bash
 npm install
 npm run dev
@@ -180,7 +274,7 @@ node_modules/.bin/tsc --noEmit
 npm run lint
 ```
 
-Do not run `next build` or `npm run build` during normal development. It writes to `.next/` and can interfere with the development server; leave builds for release work.
+Do not run `next build` or `npm run build` during normal development. Upstream's dev server and build share `.next/`, so a build can interfere with a running dev server; leave builds for release work. Here the dev script sets `PI_WEB_DIST_DIR=.next-dev`, which parts them, so a build no longer disturbs the dev server — but builds still belong to release work.
 
 Contributor guides: [Internationalization](./docs/i18n.md) and [Release process](./docs/release.md).
 
