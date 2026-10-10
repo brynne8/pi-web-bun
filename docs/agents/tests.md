@@ -28,6 +28,10 @@
 
 One `*.test.mjs` per area beside its file, the `.ts` under test loaded through jiti with `tsconfigPaths: true`. Never write to `globalThis` at module scope without the matching `after()`, and never assume the file has the process to itself.
 
+## Assertions an engine cannot all produce
+
+Some messages come from the engine, not from us, and the two engines word them differently: V8 quotes the text around a `JSON.parse` break and gives a position, JavaScriptCore words the same break differently and quotes less. A test that pins one engine's exact rewording fails the other runner and pins nothing about us. So the guarantee is asserted engine-independently — `jsonErrorMessage()` names the format and none of the file's text, which is often a literal secret — and the exact wording is pinned only where that engine parses. The same split covers ICU: zh-TW assertions accept either spacing. An absence check reads the message the module produced rather than the string it expected, so the invariant is really exercised on both runners. (`9e49400`; upstream's suite never meets this, because it only runs on one engine.)
+
 ## Documentation is under test
 
 `lib/markdown-emphasis.test.mjs` renders every `*.md` in the repository with CommonMark and fails the suite if a `**` survives into the prose: `**…全绿。**下面` is neither left- nor right-flanking, so GitHub prints the asterisks. The rules are quoted in `lib/markdown-emphasis.ts`.
