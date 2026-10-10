@@ -18,6 +18,7 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 - **Project file tools**: browse and upload files, inspect Git diffs, and preview source, Markdown, images, audio, PDFs, and DOCX files with automatic refresh.
 - **Reads and tables in the side panel**: a `read` tool call opens the exact slice it returned — Markdown rendered, or source with line numbers continuing from the read's offset — and a `.csv` or `.tsv` slice opens as a table with the file's own line numbers in the gutter.
 - **Highlighted commands**: a shell tool card colours the command's tokens instead of showing it as one dim string, and keeps its `timeout` and its background flag beside it.
+- **Flat arguments on tool cards**: a tool call whose arguments are all plain values shows them as one row per argument instead of a block of JSON — nothing to count quotes through. One nested value takes the card back to JSON, because a row that hides a subtree is an argument you never see.
 - **A turn you can read in order**: the model's sentences stay on screen where it wrote them, each run of thinking and tool calls folds into its own "Process details" group, and the turn ends with one line of its own — its token counts, the files it changed, and a copy of everything it wrote.
 - **Git worktrees**: switch checkouts from the sidebar while keeping sessions from the same repository grouped together.
 - **Web-based configuration**: manage provider login and API keys, models, model tests, plugin packages, and skills without leaving Pi Web.
