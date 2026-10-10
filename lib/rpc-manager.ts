@@ -29,6 +29,7 @@ import type {
   SessionMessageEntry,
 } from "./types";
 import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS, type HeadlessCustomUiTui } from "./custom-ui-terminal";
+import { createPendingNotificationsExtension } from "./pending-notifications-extension";
 import {
   createSubagentExtension,
   preferPiWebSubagentExtension,
@@ -2500,6 +2501,7 @@ export async function startRpcSession(
                 settings: settingsManager,
                 ...(isBgTasksEnabled() ? { bgTasks: { notify: BG_TASK_NOTIFIER.notify } } : {}),
               }),
+              createPendingNotificationsExtension(),
               createSubagentExtension(
                 SUBAGENT_CONTROLLER.extensionRuntime,
                 () => listSubagentProfiles(sessionCwd),

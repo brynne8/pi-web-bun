@@ -1,8 +1,17 @@
 import { mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { BG_TASK_NOTIFICATION_CUSTOM_TYPE } from "./bg-task-notification";
+import { basename, join } from "node:path";
+import {
+  BG_TASK_NOTIFICATION_CUSTOM_TYPE,
+  describeBgTaskOutcome,
+  type BgTaskOutcome,
+} from "./bg-task-notification";
+import {
+  pendingNotificationDetails,
+  pendingTitleFrom,
+  recordPendingNotification,
+} from "./pending-notifications";
 import { deliverSettledReport } from "./settled-report-delivery";
 
 /**
@@ -90,12 +99,27 @@ export interface BgTaskNotifierDependencies {
 }
 
 export interface BgTaskNotifier {
-  notify(sessionId: string, text: string): Promise<void>;
+  /** Deliver a finished task's report; `outcome` is what the report was built from. */
+  notify(sessionId: string, text: string, outcome: BgTaskOutcome): Promise<void>;
 }
 
 export function createBgTaskNotifier(deps: BgTaskNotifierDependencies): BgTaskNotifier {
   return {
-    async notify(sessionId, text) {
+    async notify(sessionId, text, outcome) {
+      // Listed for the parent to look up before the report reaches it, which under a long run is
+      // the whole point: `pending_notifications` answers "what finished while I was working".
+      const markerId = randomBytes(4).toString("hex");
+      recordPendingNotification({
+        kind: "bash",
+        id: basename(outcome.logPath),
+        title: pendingTitleFrom(outcome.command),
+        outcome: describeBgTaskOutcome(outcome),
+        finishedAtMs: outcome.finishedAtMs,
+        parentSessionId: sessionId,
+        customType: BG_TASK_NOTIFICATION_CUSTOM_TYPE,
+        markerId,
+        fetchHint: `read("${outcome.logPath}")`,
+      });
       let session = deps.getSession(sessionId);
       if (!session?.isAlive()) {
         const sessionFile = await deps.resolveSessionPath(sessionId);
@@ -109,7 +133,7 @@ export function createBgTaskNotifier(deps: BgTaskNotifierDependencies): BgTaskNo
         customType: BG_TASK_NOTIFICATION_CUSTOM_TYPE,
         content: text,
         display: true,
-        details: undefined,
+        details: pendingNotificationDetails(markerId),
       });
     },
   };

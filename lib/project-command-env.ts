@@ -17,7 +17,7 @@ import {
   trackBgTask,
   untrackBgTask,
 } from "./bash-bg-tasks";
-import { buildBgTaskNotification } from "./bg-task-notification";
+import { buildBgTaskNotification, type BgTaskOutcome } from "./bg-task-notification";
 
 const HOST_EXTENSION_NAME = "pi-web-project-command-environment";
 const HOST_EXTENSION_PATH = `<inline:${HOST_EXTENSION_NAME}>`;
@@ -32,7 +32,7 @@ type ProjectShellSettings = {
 
 type BgTaskOptions = {
   /** Delivers the completion notification into the parent session. */
-  notify(sessionId: string, text: string): Promise<void>;
+  notify(sessionId: string, text: string, outcome: BgTaskOutcome): Promise<void>;
 };
 
 type ProjectCommandBashOperationsOptions = {
@@ -250,9 +250,10 @@ async function reportBgTask(
   await drainLog(logStream);
   const tail = await readLogTail(logPath);
   try {
-    await bgTask.notify(bgTask.sessionId, buildBgTaskNotification({
+    const outcome: BgTaskOutcome = {
       command, logPath, startedAtMs, finishedAtMs: Date.now(), exitCode, error,
-    }, tail));
+    };
+    await bgTask.notify(bgTask.sessionId, buildBgTaskNotification(outcome, tail), outcome);
   } catch (cause) {
     console.error("[pi-web] failed to deliver bg task notification:", cause instanceof Error ? cause.message : cause);
   }
@@ -270,7 +271,7 @@ async function readLogTail(path: string, maxBytes = 4096): Promise<string> {
 export function createProjectCommandBashExtension(options: {
   cwd: string;
   settings: ProjectShellSettings;
-  bgTasks?: { notify(sessionId: string, text: string): Promise<void> };
+  bgTasks?: { notify(sessionId: string, text: string, outcome: BgTaskOutcome): Promise<void> };
 }): InlineExtension {
   return {
     name: HOST_EXTENSION_NAME,
@@ -331,7 +332,7 @@ export function createProjectCommandBashExtension(options: {
 }
 
 function startBackgroundCommand(
-  options: { cwd: string; settings: ProjectShellSettings; bgTasks?: { notify(sessionId: string, text: string): Promise<void> } },
+  options: { cwd: string; settings: ProjectShellSettings; bgTasks?: { notify(sessionId: string, text: string, outcome: BgTaskOutcome): Promise<void> } },
   params: { command: string; timeout?: number },
   context?: { cwd?: string; sessionManager?: { getSessionId(): string } },
 ) {
@@ -366,9 +367,10 @@ function startBackgroundCommand(
     if (sessionId && options.bgTasks) {
       try {
         const tail = await readLogTail(logPath);
-        await options.bgTasks.notify(sessionId, buildBgTaskNotification({
+        const outcome: BgTaskOutcome = {
           command: params.command, logPath, startedAtMs, finishedAtMs: Date.now(), exitCode, error,
-        }, tail));
+        };
+        await options.bgTasks.notify(sessionId, buildBgTaskNotification(outcome, tail), outcome);
       } catch (cause) {
         console.error("[pi-web] failed to deliver bg task notification:", cause instanceof Error ? cause.message : cause);
       }

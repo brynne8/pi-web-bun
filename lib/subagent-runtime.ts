@@ -39,6 +39,11 @@ import { createSubagentCodemodeExtension } from "./builtin-extensions";
 import { resolveShellTools } from "./powershell-settings";
 import { isBuiltInSubagentsEnabled, readSubagentSettings } from "./subagent-settings";
 import { deliverSettledReport } from "./settled-report-delivery";
+import {
+  pendingNotificationDetails,
+  pendingTitleFrom,
+  recordPendingNotification,
+} from "./pending-notifications";
 import { SubagentQueue } from "./subagent-queue";
 import { addWorktree, removeWorktree } from "./worktree";
 import { randomUUID } from "node:crypto";
@@ -795,11 +800,25 @@ export function createSubagentController(
     await awaitSubagentResultCollection(run.sessionId, RESULT_COLLECTION_GRACE_MS);
     if (takeResultConsumed(run)) return;
     if (!parent.isAlive()) throw new Error(`Parent session is no longer available: ${run.parentSessionId}`);
+    // Indexed while the parent has not seen it yet, which is exactly the window the report cannot
+    // cover on its own: under a long run it lands at the run's end, not when the run settled.
+    const markerId = randomUUID().slice(0, 8);
+    recordPendingNotification({
+      kind: "subagent",
+      id: run.sessionId,
+      title: pendingTitleFrom(run.description || run.task),
+      outcome: run.status,
+      finishedAtMs: run.completedAt ? Date.parse(run.completedAt) : Date.now(),
+      parentSessionId: run.parentSessionId,
+      customType: "pi-web:subagent-notification",
+      markerId,
+      fetchHint: `get_subagent_result("${run.sessionId}")`,
+    });
     await deliverSettledReport(parent, {
       customType: "pi-web:subagent-notification",
       content: subagentNotificationText(run),
       display: true,
-      details: subagentToolDetails(run),
+      details: { ...subagentToolDetails(run), ...pendingNotificationDetails(markerId) },
     });
   }
 
