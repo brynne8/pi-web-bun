@@ -182,16 +182,15 @@ export function createProjectCommandBashOperations(
             handedOff = true;
             released = true;
             const logPath = bgLogPath();
-            bgStream = createWriteStream(logPath);
-            for (const chunk of buffer.dump()) bgStream.write(chunk);
+            const stream = createWriteStream(logPath);
+            bgStream = stream;
+            for (const chunk of buffer.dump()) stream.write(chunk);
             execution.then(
               (result) => {
-                bgStream?.end();
-                void reportBgTask(bgTask, command, logPath, startedAtMs, result.exitCode ?? null, undefined);
+                void reportBgTask(bgTask, command, logPath, startedAtMs, result.exitCode ?? null, undefined, stream);
               },
               (error: unknown) => {
-                bgStream?.end();
-                void reportBgTask(bgTask, command, logPath, startedAtMs, null, error instanceof Error ? error.message : String(error));
+                void reportBgTask(bgTask, command, logPath, startedAtMs, null, error instanceof Error ? error.message : String(error), stream);
               },
             );
             release();
@@ -229,6 +228,14 @@ export function createProjectCommandBashOperations(
   };
 }
 
+/** Closes a task's log and waits for the buffered bytes to reach the file. */
+async function drainLog(logStream: ReturnType<typeof createWriteStream>): Promise<void> {
+  await new Promise<void>((resolve) => {
+    logStream.once("error", () => resolve());
+    logStream.end(() => resolve());
+  });
+}
+
 async function reportBgTask(
   bgTask: { sessionId: string; notify: BgTaskOptions["notify"] },
   command: string,
@@ -236,7 +243,11 @@ async function reportBgTask(
   startedAtMs: number,
   exitCode: number | null,
   error: string | undefined,
+  logStream: ReturnType<typeof createWriteStream>,
 ): Promise<void> {
+  // A chatty command still has its output queued in the writer when the process ends,
+  // so reading now would report a tail from somewhere in the middle of it.
+  await drainLog(logStream);
   const tail = await readLogTail(logPath);
   try {
     await bgTask.notify(bgTask.sessionId, buildBgTaskNotification({
@@ -281,6 +292,7 @@ export function createProjectCommandBashExtension(options: {
                 ...(displayDefinition.promptGuidelines ?? []),
                 "When you can already expect a command to run for a long time (dev server, watcher, long build, large download), do NOT force a timeout: set run_in_background=true and continue with other work.",
                 "A foreground command auto-backgrounds after 120 seconds; treat that as a handoff, not a failure.",
+                "Do not add redirection to a command (2>&1, | tail, > out.log): stdout and stderr are already combined, and a backgrounded command's report already carries the end of its log — a pipe throws that output away before the log sees it.",
                 "After starting a background command you are notified on completion — do not wait, poll, or sleep for it; do work that does not depend on its result, like an async request.",
               ],
             }
@@ -349,7 +361,7 @@ function startBackgroundCommand(
       if (error === "aborted") error = "aborted (session stopped)";
       else if (error.startsWith("timeout:")) error = `timed out after ${error.split(":")[1]}s`;
     }
-    stream.end();
+    await drainLog(stream);
     if (sessionId) untrackBgTask(sessionId, controller);
     if (sessionId && options.bgTasks) {
       try {
