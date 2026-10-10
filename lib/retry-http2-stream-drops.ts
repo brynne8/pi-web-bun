@@ -34,6 +34,8 @@ export function retryHttp2StreamDrops(session: object): void {
   const original = host._isRetryableError;
   // An SDK release that renames the judge leaves this installing a method nothing
   // calls, so the bug comes back on its own instead of breaking session startup.
+  // lib/retry-http2-stream-drops.test.mjs pins that name against the installed SDK so
+  // it comes back as a red suite, not as a quiet regression.
   if (typeof original !== "function") return;
   host._isRetryableError = function (this: unknown, message: AssistantMessage): boolean {
     // Ask pi first: its verdict is only ever overruled on the way to `true` for a
