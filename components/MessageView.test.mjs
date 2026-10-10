@@ -19,7 +19,7 @@ const {
   getToolCallInputText,
   replaceUserMessageText,
 } = await jiti.import("./MessageView.tsx");
-const { BG_TASK_NOTIFICATION_CUSTOM_TYPE, buildBgTaskNotification } = await jiti.import("@/lib/bg-task-notification");
+const { BG_TASK_NOTIFICATION_CUSTOM_TYPE, BG_TASK_NOTIFICATION_PREFIX, buildBgTaskNotification } = await jiti.import("@/lib/bg-task-notification");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 const { splitFinalAssistantBlocks } = await jiti.import("@/lib/message-display");
 const { clearExpandedToolCalls, setToolCallExpanded } = await jiti.import("@/lib/tool-call-expansion");
@@ -797,3 +797,19 @@ test("keeps chat markdown for a custom message that is not a background report",
   assert.match(html, /<strong>note<\/strong>/);
 });
 
+test("shows a background report this build cannot parse as its raw text", () => {
+  // A report written by a newer build: this one's parser does not know the shape,
+  // and rendering nothing would drop the only thing worth reading.
+  const newer = `${BG_TASK_NOTIFICATION_PREFIX}Background bash task finished in 3s.\nOutcome: ok\nOutput:\n\`\`\`\nstill running\n\`\`\``;
+  const text = textOf(renderMessage({
+    role: "custom",
+    customType: BG_TASK_NOTIFICATION_CUSTOM_TYPE,
+    content: newer,
+    display: true,
+    timestamp: Date.now(),
+  }));
+  assert.match(text, /Background bash task finished in 3s\./);
+  assert.match(text, /still running/);
+  // Raw, but still without the paragraph only the model is meant to read.
+  assert.doesNotMatch(text, /Pi Web|Treat it as tool output/);
+});
