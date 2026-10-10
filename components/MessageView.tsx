@@ -1138,6 +1138,17 @@ function recordedDurationMs(value: unknown): number | undefined {
 /** Below this a tool card shows no time: it would read 0.0s on every quick read or search. */
 const TOOL_DURATION_MIN_MS = 100;
 
+/**
+ * A shell `timeout` the process actually gets, or null when there is none to show.
+ * The same guard `lib/project-command-env.ts` applies before forwarding the value to
+ * pi exec: models write `timeout: 0` for "no limit", and that call runs with no
+ * timeout at all — so printing `(timeout 0s)` here would claim a hard limit the
+ * command does not have.
+ */
+function shellTimeoutSeconds(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
 /** A tool's run time as the pi CLI's "Took" writes it: 2.4s, then 3m 5s, then 1h 2m 5s. */
 export function formatToolDuration(ms: number): string {
   const seconds = ms / 1000;
@@ -1175,7 +1186,7 @@ function ToolCallBlock({ block, result, duration, onOpenSubagent, onOpenReadSnap
   // tokens read as a command in the collapsed header as well as expanded.
   const shellInput = !isStreamingInput && isShellToolName(block.toolName) && block.input ? block.input : null;
   const shellCommand = typeof shellInput?.command === "string" ? shellInput.command : null;
-  const shellTimeout = typeof shellInput?.timeout === "number" ? shellInput.timeout : null;
+  const shellTimeout = shellTimeoutSeconds(shellInput?.timeout);
   // What the tool was actually asked for, not only what it ran: with the
   // background-bash switch on, `run_in_background: true` hands the command over
   // immediately, and until now the only trace of it was the result text, which

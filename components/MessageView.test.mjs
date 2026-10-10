@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createJiti } from "jiti";
 
@@ -778,6 +779,39 @@ test("marks a shell call that asked to run in the background, collapsed and expa
     }, { toolResults: new Map() }));
     assert.ok(!plain.includes("(background)"), `${JSON.stringify(input)} is not a background call`);
   }
+});
+
+test("prints a timeout only where the command gets one", (t) => {
+  // lib/project-command-env.ts forwards a timeout to pi exec only when it is a
+  // finite positive number, so anything else runs with no limit at all. A dim
+  // `(timeout 0s)` on such a card promises a hard limit the process does not have.
+  const expandedTextOf = (timeout) => {
+    const block = {
+      type: "toolCall",
+      toolCallId: `call-bash-timeout-${String(timeout)}`,
+      toolName: "bash",
+      input: { command: "sleep 1", timeout },
+    };
+    setToolCallExpanded(block.toolCallId, true);
+    t.after(() => setToolCallExpanded(block.toolCallId, false));
+    const html = renderMessage({
+      role: "assistant",
+      provider: "anthropic",
+      model: "claude-test",
+      content: [block],
+    }, { toolResults: new Map() });
+    return textOf(html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/)[1]);
+  };
+
+  assert.equal(expandedTextOf(30), "sleep 1 (timeout 30s)");
+  assert.equal(expandedTextOf(0.5), "sleep 1 (timeout 0.5s)");
+  for (const timeout of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, "30", null, undefined]) {
+    assert.equal(expandedTextOf(timeout), "sleep 1", `${String(timeout)} is no timeout`);
+  }
+
+  // The display and the sanitizer are one rule, not two that happen to agree.
+  const sanitizer = readFileSync(new URL("../lib/project-command-env.ts", import.meta.url), "utf8");
+  assert.match(sanitizer, /typeof timeout === "number" && Number\.isFinite\(timeout\) && timeout > 0/);
 });
 
 test("keeps the registered name where no result names the server and tool", (t) => {
