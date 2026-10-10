@@ -36,8 +36,8 @@
   ],
   "scripts": {
     "postinstall": "node bin/prepare-terminal.js",
-    "dev": "next dev -H 127.0.0.1 -p 30141",
-    "dev:lan": "next dev -H 0.0.0.0 -p 30141",
+    "dev": "PI_WEB_DIST_DIR=.next-dev next dev -H 127.0.0.1 -p 30141",
+    "dev:lan": "PI_WEB_DIST_DIR=.next-dev next dev -H 0.0.0.0 -p 30141",
     "build": "next build --webpack",
     "start": "next start -H 127.0.0.1 -p 30141",
     "start:lan": "next start -H 0.0.0.0 -p 30141",
