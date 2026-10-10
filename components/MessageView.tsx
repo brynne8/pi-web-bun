@@ -1176,6 +1176,11 @@ function ToolCallBlock({ block, result, duration, onOpenSubagent, onOpenReadSnap
   const shellInput = !isStreamingInput && isShellToolName(block.toolName) && block.input ? block.input : null;
   const shellCommand = typeof shellInput?.command === "string" ? shellInput.command : null;
   const shellTimeout = typeof shellInput?.timeout === "number" ? shellInput.timeout : null;
+  // What the tool was actually asked for, not only what it ran: with the
+  // background-bash switch on, `run_in_background: true` hands the command over
+  // immediately, and until now the only trace of it was the result text, which
+  // needs the card expanded to be seen.
+  const shellBackground = shellInput?.run_in_background === true;
 
   // `server/tool` instead of the registered `mcp__server__tool`, as pi's TUI shows it.
   const mcpLabel = mcpToolLabel(block.toolName, result?.details);
@@ -1258,6 +1263,9 @@ function ToolCallBlock({ block, result, duration, onOpenSubagent, onOpenReadSnap
                 ? <BashCommand command={shellCommand} limit={TOOL_PREVIEW_LENGTH} />
                 : (patchLabel ?? (codemode ? codemodeScriptPreview(codemode.code) : getToolPreview(block)))}
           </span>
+          {shellBackground && (
+            <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>(background)</span>
+          )}
           {codemodeCallCount > 0 && (
             <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
               {codemodeCallCount === 1 ? t("codemode.callCountOne") : t("codemode.callCount", { count: codemodeCallCount })}
@@ -1310,7 +1318,7 @@ function ToolCallBlock({ block, result, duration, onOpenSubagent, onOpenReadSnap
           {codemode
             ? codemode.code.replace(/\r/g, "").trimEnd()
             : shellCommand !== null
-              ? <><BashCommand command={shellCommand} />{shellTimeout !== null && <span style={{ color: "var(--text-dim)" }}>{` (timeout ${shellTimeout}s)`}</span>}</>
+              ? <><BashCommand command={shellCommand} />{shellTimeout !== null && <span style={{ color: "var(--text-dim)" }}>{` (timeout ${shellTimeout}s)`}</span>}{shellBackground && <span style={{ color: "var(--text-dim)" }}>{` (background)`}</span>}</>
               : inputStr}
         </pre>
       )}

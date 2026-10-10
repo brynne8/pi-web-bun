@@ -734,6 +734,52 @@ test("colors a shell command in place, without a pre or code element", (t) => {
   assert.doesNotMatch(html, /&quot;command&quot;/);
 });
 
+test("marks a shell call that asked to run in the background, collapsed and expanded", (t) => {
+  // `{command, timeout?, run_in_background?}` is what the tool takes with the
+  // background-bash switch on (lib/project-command-env.ts); the card prints the
+  // command itself, so the parameter has to be shown or it is simply lost.
+  const block = {
+    type: "toolCall",
+    toolCallId: "call-bash-background",
+    toolName: "bash",
+    input: { command: "npm run dev", timeout: 60, run_in_background: true },
+  };
+  const render = () => renderMessage({
+    role: "assistant",
+    provider: "anthropic",
+    model: "claude-test",
+    content: [block],
+  }, { toolResults: new Map() });
+
+  const collapsed = textOf(render());
+  const markerAt = collapsed.indexOf("(background)");
+  assert.notEqual(markerAt, -1, "a collapsed header hints at the background handoff");
+  assert.ok(collapsed.indexOf("npm run dev") < markerAt, "the marker follows its command");
+
+  setToolCallExpanded(block.toolCallId, true);
+  t.after(() => setToolCallExpanded(block.toolCallId, false));
+  const html = render();
+  assert.equal(
+    textOf(html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/)[1]),
+    "npm run dev (timeout 60s) (background)",
+  );
+  // Only the parameter itself marks it: the same command without it, and one
+  // that says so with any other value, read as a plain foreground call.
+  for (const input of [
+    { command: "npm run dev", timeout: 60 },
+    { command: "npm run dev", run_in_background: false },
+    { command: "npm run dev", run_in_background: "true" },
+  ]) {
+    const plain = textOf(renderMessage({
+      role: "assistant",
+      provider: "anthropic",
+      model: "claude-test",
+      content: [{ ...block, input }],
+    }, { toolResults: new Map() }));
+    assert.ok(!plain.includes("(background)"), `${JSON.stringify(input)} is not a background call`);
+  }
+});
+
 test("keeps the registered name where no result names the server and tool", (t) => {
   // Sanitizing maps docs.v2/search.pages and docs_v2/search_pages to one name, so it is not split.
   const block = { type: "toolCall", toolCallId: "call-mcp-running", toolName: "mcp__docs_v2__search_pages", input: {} };
