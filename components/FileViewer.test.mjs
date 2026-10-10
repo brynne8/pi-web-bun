@@ -83,6 +83,28 @@ test("lightweight source rows are skipped for highlighted, diff, and preview vie
   assert.equal(render(large, "source", false, false, true)[0].props.children[1].props.style.whiteSpace, "pre-wrap");
 });
 
+test("the source gutter stays pinned and shares the code line's height", () => {
+  const codeBlock = source.slice(source.indexOf("export const FILE_CODE_STYLE"), source.indexOf("export const fileViewerDarkTheme"));
+  const gutterBlock = source.slice(source.indexOf("export const FILE_LINE_NUMBER_STYLE"), source.indexOf("type SourceCodeRendererProps"));
+  assert.notEqual(source.indexOf("export const FILE_LINE_NUMBER_STYLE"), -1);
+  assert.notEqual(source.indexOf("type SourceCodeRendererProps"), -1);
+
+  // The gutter is a fixed column: it sticks to the scroller's left edge (that box
+  // is `overflow: auto` in both viewers) instead of sliding away with the text.
+  assert.match(gutterBlock, /position: "sticky"/);
+  assert.match(gutterBlock, /left: 0/);
+  // Sticky needs room to travel, so every row spans the widest line.
+  assert.match(source, /className="file-source-line"[\s\S]{0,160}minWidth: "100%"/);
+
+  // The gutter repeats its height in px, so a code-font change without it puts
+  // the numbers off the line boxes they belong to.
+  const fontSize = Number(codeBlock.match(/fontSize: (\d+)/)?.[1]);
+  const lineHeightFactor = Number(codeBlock.match(/lineHeight: ([\d.]+)/)?.[1]);
+  const gutterLineHeight = Number(gutterBlock.match(/lineHeight: "([\d.]+)px"/)?.[1]);
+  assert.ok(Number.isFinite(fontSize) && Number.isFinite(lineHeightFactor), "code style sets a numeric font size and factor");
+  assert.equal(gutterLineHeight, Number((fontSize * lineHeightFactor).toFixed(1)));
+});
+
 test("markdown preview keeps app links and opens web and app links in a new tab (#1108)", () => {
   assert.match(source, /urlTransform=\{onOpenFile \? markdownUrlTransform : markdownAppUrlTransform\}/);
   assert.match(

@@ -80,7 +80,7 @@ const DISPLAY_MODE_LABELS: Record<DisplayMode, string> = {
 export const FILE_CODE_STYLE: CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontWeight: "var(--font-mono-weight)",
-  fontSize: 13,
+  fontSize: 12,
   lineHeight: 1.6,
 };
 
@@ -97,7 +97,15 @@ export const fileViewerDarkTheme = {
 };
 delete fileViewerDarkTheme['pre[class*="language-"]'].background;
 
+// The gutter stays put while the source scrolls sideways: `position: sticky`
+// against the viewer's own scrolling box. It has room to travel because every
+// row spans the widest line (the <pre> or wrapper is `width: max-content` and a
+// row is `min-width: 100%`), so no line's number scrolls away behind its text.
+// `lineHeight` is FILE_CODE_STYLE's 12px * 1.6 so both columns share one line box.
 export const FILE_LINE_NUMBER_STYLE: CSSProperties = {
+  position: "sticky",
+  left: 0,
+  zIndex: 1,
   width: 48,
   minWidth: 48,
   padding: "0 10px",
@@ -110,7 +118,7 @@ export const FILE_LINE_NUMBER_STYLE: CSSProperties = {
   fontSize: 11,
   fontStyle: "normal",
   fontVariantNumeric: "tabular-nums",
-  lineHeight: "20.8px",
+  lineHeight: "19.2px",
   userSelect: "none",
   flexShrink: 0,
   verticalAlign: "top",
