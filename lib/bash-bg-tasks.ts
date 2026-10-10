@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,9 +16,36 @@ const BUFFER_CAP_BYTES = 4 * 1024 * 1024;
 
 const BG_LOG_DIR = join(tmpdir(), "pi-web-bg-tasks");
 
+/** A background log goes this long after its last write. */
+const BG_LOG_RETENTION_MS = 24 * 60 * 60 * 1000;
+
 export function bgLogPath(): string {
   mkdirSync(BG_LOG_DIR, { recursive: true });
+  pruneBgLogs();
   return join(BG_LOG_DIR, `${Date.now().toString(36)}-${randomBytes(4).toString("hex")}.log`);
+}
+
+/**
+ * A log is read again only by the report that names its path, so a task's log is worth a day.
+ * The sweep keys on mtime, which a task still running keeps fresh by writing.
+ */
+export function pruneBgLogs(dir: string = BG_LOG_DIR): void {
+  const deadline = Date.now() - BG_LOG_RETENTION_MS;
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.endsWith(".log")) continue;
+    try {
+      const path = join(dir, name);
+      if (statSync(path).mtimeMs < deadline) unlinkSync(path);
+    } catch {
+      // Windows refuses an unlink while the writer still holds the file; the next sweep gets it.
+    }
+  }
 }
 
 /** Raw stdout/stderr chunks captured before a foreground command hands off to background. */
