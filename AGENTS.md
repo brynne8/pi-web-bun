@@ -216,9 +216,9 @@ components/
   mcp-add-helpers.ts       pure helpers and the add request for McpAddServer
   FileExplorer.tsx         file tree in the sidebar
   FileIcons.tsx            file icon helpers
-  FileViewer.tsx           file content in a tab
+  FileViewer.tsx           file content in a tab; exports the shared code/line-number styles (FILE_CODE_STYLE, FILE_LINE_NUMBER_STYLE)
   DelimitedTable.tsx       a CSV/TSV file's Preview: virtualized table, gutter of file lines; a read slice too (firstLine / hasHeader)
-  ReadSnapshotViewer.tsx   one read call's slice in a right-panel tab: markdown, table, or source numbered from the offset
+  ReadSnapshotViewer.tsx   one read call's slice in a right-panel tab: markdown, table, or source numbered from the offset (source styles shared with FileViewer)
   TabBar.tsx               file panel tab bar (file, terminal, subagent and read snapshot tabs)
 
 hooks/
