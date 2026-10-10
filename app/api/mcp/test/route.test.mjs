@@ -205,7 +205,11 @@ test("what loadMcpConfig skips is refused too: a project's auth, and a name anot
   assert.equal(clash.body.error, 'server "lint_x" conflicts with "lint-x"');
 });
 
-test("a failure says why without the literal values in the entry", async () => {
+// The entry is unreachable on purpose (port 9 answers nothing). On a machine or shell that
+// configures `http_proxy`, Bun's fetch sends even 127.0.0.1 through it and the proxy takes a
+// while to give up on a dead upstream, so the bound is generous: what is asserted is the
+// error, not how fast it arrives.
+test("a failure says why without the literal values in the entry", { timeout: 30_000 }, async () => {
   const { status, body } = await post({ scope: "global", name: "docs" });
   assert.equal(status, 200);
   assert.equal(body.result.state, "failed");

@@ -3,8 +3,9 @@ import { appendFileSync, readFileSync, unlinkSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
 import { createJiti } from "jiti";
+import { resetSessionScanIndex } from "../../../lib/__fixtures__/session-scan-index.mjs";
 
 const routeSource = await readFile(new URL("./[id]/fork/route.ts", import.meta.url), "utf8");
 const jiti = createJiti(import.meta.url, {
@@ -22,6 +23,12 @@ const {
 } = await jiti.import("../../../lib/session-reader.ts");
 const { buildSessionTree } = await jiti.import("../../../lib/session-tree.ts");
 const { SessionManager } = await jiti.import("@earendil-works/pi-coding-agent");
+
+// The scan index is a module global, so under a runner that keeps one process for the
+// whole suite (Bun) a listing here shares it with every other file's listings. Start and
+// end with an empty one, which is what Node's per-file process gives this file.
+await resetSessionScanIndex();
+after(resetSessionScanIndex);
 
 /** A scratch agent dir with one branched session: u1 → a1, then u1 → a2 (the file's leaf). */
 async function scratchSession(t) {

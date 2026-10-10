@@ -1,20 +1,26 @@
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
+import { createRequire } from "node:module";
 import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createJiti } from "jiti";
 
-registerHooks({
-  load(url, context, nextLoad) {
-    if (!url.endsWith(".module.css")) return nextLoad(url, context);
-    return {
-      format: "module",
-      shortCircuit: true,
-      source: "export default new Proxy({}, { get: (_, key) => String(key) });",
-    };
-  },
-});
+// Node needs the hook to answer the component's `.module.css` import with class names; Bun
+// loads CSS modules itself, and exports no `registerHooks`, so the hook is installed only
+// where it exists. Reached through `require` so a runtime without it does not fail the import.
+const { registerHooks } = createRequire(import.meta.url)("node:module");
+if (typeof registerHooks === "function") {
+  registerHooks({
+    load(url, context, nextLoad) {
+      if (!url.endsWith(".module.css")) return nextLoad(url, context);
+      return {
+        format: "module",
+        shortCircuit: true,
+        source: "export default new Proxy({}, { get: (_, key) => String(key) });",
+      };
+    },
+  });
+}
 
 const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },

@@ -46,6 +46,14 @@ await initRepo("repo");
 const jiti = createJiti(import.meta.url, { alias: { "@": process.cwd() } });
 const { allowFileRoot } = await jiti.import("../../../lib/file-access.ts");
 const { GET } = await jiti.import("./route.ts");
+// `lib/deferred-provider-models.ts` remembers every provider seen in any ModelRuntime of
+// this process on a global, so a listing can show a provider that registers late. Under a
+// runner that keeps one process for the whole suite (Bun) that memory holds the extension
+// providers other files started sessions with — faux, a claude-bridge, an alpha-provider —
+// and they appear in the list below. A process of its own, which is what Node's runner
+// gives each file, starts with no memory; drop what other files left, and what this one
+// learns, so the list asserted here is the one this file's models.json gives.
+delete globalThis.__piWebProviderModelCatalog;
 // The repo of the removed worktree below is a project some session named, which is what
 // makes it an allowed root; the fallback never adds one of its own.
 allowFileRoot(repo);
@@ -56,6 +64,7 @@ after(async () => {
   if (previousOffline === undefined) delete process.env.PI_OFFLINE;
   else process.env.PI_OFFLINE = previousOffline;
   await rm(root, { recursive: true, force: true });
+  delete globalThis.__piWebProviderModelCatalog;
 });
 
 async function models(cwd) {

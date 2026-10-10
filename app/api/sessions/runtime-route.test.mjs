@@ -3,8 +3,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
-import test from "node:test";
+import test, { after } from "node:test";
 import { createJiti } from "jiti";
+import { resetSessionScanIndex } from "../../../lib/__fixtures__/session-scan-index.mjs";
 
 const listRoute = await readFile(new URL("./route.ts", import.meta.url), "utf8");
 const detailRoute = await readFile(new URL("./[id]/route.ts", import.meta.url), "utf8");
@@ -30,6 +31,12 @@ const {
   resetSessionUiStateCacheForTests,
   updateSessionUiState,
 } = await jiti.import("../../../lib/session-ui-state.ts");
+
+// The scan index is a module global, so under a runner that keeps one process for the
+// whole suite (Bun) a listing here shares it with every other file's listings. Start and
+// end with an empty one, which is what Node's per-file process gives this file.
+await resetSessionScanIndex();
+after(resetSessionScanIndex);
 
 test("list versions expose idle session creation, rename and deletion to other windows", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "pi-web-list-sync-"));

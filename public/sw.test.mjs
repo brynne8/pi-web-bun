@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test, { mock } from "node:test";
+import test, { after, mock } from "node:test";
 
 const listeners = new Map();
 globalThis.self = {
@@ -12,6 +12,15 @@ globalThis.self = {
 };
 
 await import("./sw.js");
+
+// A fetch stub installed here outlives the file under a runner that keeps one
+// process for the whole suite (Bun's does) and then answers every later file's
+// requests; Node's runner gives each file a process of its own. Put the real
+// fetch back, so what a later file connects to is the network again.
+const originalFetch = globalThis.fetch;
+after(() => {
+  globalThis.fetch = originalFetch;
+});
 
 function dispatchNotificationClick(data) {
   let pending;

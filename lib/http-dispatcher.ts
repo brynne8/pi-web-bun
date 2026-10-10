@@ -129,6 +129,17 @@ export function configureHttpDispatcher(
     throw new Error(`Invalid HTTP idle timeout: ${String(timeoutMs)}`);
   }
 
+  // Bun's fetch is Bun's own HTTP client. It reads HTTP_PROXY / HTTPS_PROXY / NO_PROXY from
+  // the environment itself and never consults an undici dispatcher, and the `undici` its
+  // module loader hands out exposes no `install` (jiti's CJS interop finds it on Node, Bun's
+  // named-export resolution does not), so there is no way even to point global fetch at one
+  // from here. The proxy env is already honoured, from the values the process started with;
+  // making the no-op explicit beats installing a dispatcher that nothing would read.
+  if (typeof Bun !== "undefined") {
+    dispatcherGlobal.__piWebHttpDispatcherConfigured = true;
+    return;
+  }
+
   const dispatcher = withUndiciErrorListener(
     new undici.EnvHttpProxyAgent({
       allowH2: false,

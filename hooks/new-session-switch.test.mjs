@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after } from "node:test";
+import { createRequire } from "node:module";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createJiti } from "jiti";
 
@@ -7,9 +9,35 @@ import { createJiti } from "jiti";
 // each step of its startup (#1146). Switching unmounts the composer, which
 // closes its event stream; the prompt must still reach the new session.
 const shimPath = fileURLToPath(new URL("./__fixtures__/react-hook-shim.mjs", import.meta.url));
-const jiti = createJiti(import.meta.url, { tsconfigPaths: true, alias: { react: shimPath } });
+// tryNative: false — Bun imports a .ts file natively and answers its `react` import
+// from node_modules, so jiti's alias to the hook shim would never apply and every
+// render would fail as an invalid hook call.
+// Bun runs the whole suite in one process with one module registry, so a file that
+// ran earlier may already have loaded the hook natively, with the real React; drop
+// that copy so this file gets its own. Under Node each file runs in a process of
+// its own and the cache is empty.
+const nodeRequire = createRequire(import.meta.url);
+for (const id of ["./useAgentSession.ts"]) {
+  delete nodeRequire.cache[realpathSync(fileURLToPath(new URL(id, import.meta.url)))];
+}
+const jiti = createJiti(import.meta.url, { tsconfigPaths: true, tryNative: false, alias: { react: shimPath } });
 const { renderHook } = await import(shimPath);
 const { useAgentSession } = await jiti.import("./useAgentSession.ts");
+
+// These stand-ins outlive the file under a runner that keeps one process for the whole
+// suite, where Node gives each file its own: the fetch stub would answer a later file's
+// real requests with "unexpected fetch" (it did, for the MCP sign-in flows), and a file
+// that asks whether it is in a browser would find this one's document. Put back what
+// was here before.
+const originals = {
+  document: globalThis.document,
+  window: globalThis.window,
+  fetch: globalThis.fetch,
+  EventSource: globalThis.EventSource,
+};
+after(() => {
+  Object.assign(globalThis, originals);
+});
 
 globalThis.document ??= Object.assign(new EventTarget(), { visibilityState: "visible" });
 globalThis.window ??= new EventTarget();
