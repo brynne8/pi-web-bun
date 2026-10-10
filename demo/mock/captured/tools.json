@@ -299,14 +299,6 @@
      "type": "string",
      "description": "Existing subagent session ID to continue instead of creating a new session."
     },
-    "input_files": {
-     "type": "array",
-     "items": {
-      "type": "string"
-     },
-     "description": "UTF-8 text files under the session cwd to include with the task.",
-     "maxItems": 8
-    },
     "description": {
      "type": "string",
      "description": "Short activity label shown in the UI."

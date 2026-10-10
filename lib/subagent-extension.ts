@@ -11,7 +11,6 @@ import {
   type SubagentProfile,
   type SubagentRunInfo,
 } from "./subagents";
-import { MAX_SUBAGENT_INPUT_FILES } from "./subagent-input";
 
 export const HOST_SUBAGENT_EXTENSION_NAME = "pi-web-subagents";
 const HOST_SUBAGENT_EXTENSION_PATH = `<inline:${HOST_SUBAGENT_EXTENSION_NAME}>`;
@@ -47,7 +46,6 @@ export interface StartSubagentRequest {
   parentToolCallId: string;
   profile: string;
   task: string;
-  inputFiles?: string[];
   description: string;
   runInBackground?: boolean;
   model?: string;
@@ -170,14 +168,16 @@ export function createSubagentExtension(
           "Do not duplicate work already delegated to a running subagent.",
         ],
         executionMode: "parallel",
+        // Only the parameters a model can choose from the information this tool gives it. A profile
+        // decides `thinking`, `max_turns` and `inherit_context`, and there is no `input_files`: a
+        // per-call list inlined whole files into the delegated task even though the child already
+        // has `read` and `bash`, which filled the child's context and pushed a freshly opened
+        // subagent straight into compaction. pi's validator allows keys the schema does not name, so
+        // a call written against the old schema still validates and the extra key is ignored.
         parameters: Type.Object({
           subagent_type: Type.Optional(Type.String({ description: `Configured agent profile. Available types: ${availableTypes}. Default: general-purpose.` })),
           prompt: Type.String({ description: "The complete task for the subagent." }),
           resume: Type.Optional(Type.String({ description: "Existing session ID to continue with its current profile, model, thinking, and context. Omit new-session options." })),
-          input_files: Type.Optional(Type.Array(Type.String(), {
-            description: "UTF-8 text files under the session cwd to include with the task.",
-            maxItems: MAX_SUBAGENT_INPUT_FILES,
-          })),
           description: Type.String({ description: "Short activity label shown in the UI." }),
           run_in_background: Type.Optional(Type.Boolean({ description: "Return immediately and notify this session when complete." })),
           model: Type.Optional(Type.String({ description: "Optional provider/modelId override." })),
@@ -189,7 +189,6 @@ export function createSubagentExtension(
             if (resume) {
               const creationOptions = [
                 params.model?.trim() && "model",
-                params.input_files?.length && "input_files",
                 params.isolation?.trim() && "isolation",
               ].filter(Boolean);
               if (creationOptions.length > 0) {
@@ -215,7 +214,6 @@ export function createSubagentExtension(
               parentToolCallId: toolCallId,
               profile: params.subagent_type ?? "general-purpose",
               task: params.prompt,
-              ...(params.input_files ? { inputFiles: params.input_files } : {}),
               description: params.description,
               ...(params.run_in_background !== undefined ? { runInBackground: params.run_in_background } : {}),
               ...(params.model ? { model: params.model } : {}),
