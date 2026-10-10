@@ -5,8 +5,10 @@ import {
   type ToolExposure,
 } from "@earendil-works/pi-coding-agent";
 import {
+  PENDING_POINTER_CUSTOM_TYPE,
   PENDING_TOOL_NAME,
   formatPendingNotifications,
+  formatPendingPointer,
   pendingNotificationsFor,
 } from "./pending-notifications";
 
@@ -31,6 +33,33 @@ export function createPendingNotificationsExtension(): InlineExtension {
     name: PENDING_NOTIFICATIONS_EXTENSION_NAME,
     hidden: true,
     factory: (pi) => {
+      // The reminder. A report waits for the run to end, which is the whole run — a model ten
+      // tool calls into a refactor learns about a finished build only when it stops. So at every
+      // turn boundary, while results are still waiting, one model-only line is steered: it says
+      // how many there are and names the tool, and says nothing about what to do next.
+      //
+      // Steered rather than queued, so it lands before the next response instead of at the end of
+      // the run; `display: false` because pi's `convertToLlm` replays a custom message whatever
+      // `display` says, while the chat skips it — the model always reads it and no card appears.
+      const announced = new Set<string>();
+      pi.on("turn_end", (_event, ctx) => {
+        const sessionId = ctx?.sessionManager?.getSessionId?.();
+        if (!sessionId) return;
+        const entries = ctx.sessionManager.getEntries?.() ?? [];
+        const waiting = pendingNotificationsFor(sessionId, entries as readonly unknown[])
+          .filter((entry) => !announced.has(entry.messageId));
+        if (waiting.length === 0) return;
+        for (const entry of waiting) announced.add(entry.messageId);
+        pi.sendMessage({
+          customType: PENDING_POINTER_CUSTOM_TYPE,
+          display: false,
+          content: formatPendingPointer(waiting),
+          // No `notificationId` here: the index clears on a report's own message, and a reminder
+          // must never be mistaken for one.
+          details: { kind: "pi-web-pending-pointer", messageIds: waiting.map((entry) => entry.messageId) },
+        }, { deliverAs: "steer" });
+      });
+
       pi.registerTool(defineTool({
         name: PENDING_TOOL_NAME,
         label: "Pending background results",

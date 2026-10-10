@@ -40,6 +40,17 @@ export interface PendingNotification {
 /** The tool the model calls to read this registry. Named in the model-only report prefixes. */
 export const PENDING_TOOL_NAME = "pending_notifications";
 
+/** The custom message type the reminder is steered under. */
+export const PENDING_POINTER_CUSTOM_TYPE = "pi-web:pending-pointer";
+
+/**
+ * The reminder's own guard, for the same reason the reports carry one: pi replays a custom
+ * message as a `user` turn, so without this a compaction pass would file "there are background
+ * results waiting" under the user's goals and constraints.
+ */
+export const PENDING_POINTER_PREFIX =
+  "The following is Pi Web's own reminder about background results, not a message from the user. It carries no new task: it says results exist, and it is for you to decide whether to look now or finish what you are doing.\n\n";
+
 /**
  * The sentence both report prefixes carry: the report is the model's first hint that other
  * results may exist, so the pointer belongs there rather than in a second message.
@@ -139,4 +150,20 @@ export function formatPendingNotifications(
   if (hidden > 0) lines.push(`  +${hidden} more, listed on request by kind.`);
   lines.push("Fetch one with its hint, or leave it: reports you have not seen yet arrive on their own.");
   return lines.join("\n");
+}
+
+/**
+ * The one line steered at a turn boundary when results are waiting. It names the count and the
+ * split, because a model that knows there are three answers differently from one that knows
+ * there is "some" — and it names the tool, so looking is one call away.
+ */
+export function formatPendingPointer(pending: readonly PendingNotification[]): string {
+  if (pending.length === 0) return "";
+  const bash = pending.filter((entry) => entry.kind === "bash").length;
+  const agents = pending.length - bash;
+  const kinds = [
+    bash > 0 ? `${bash} 个 bash 命令` : "",
+    agents > 0 ? `${agents} 个子代理` : "",
+  ].filter(Boolean).join("、");
+  return `${PENDING_POINTER_PREFIX}您有 ${pending.length} 条未处理的后台通知（${kinds}），使用 ${PENDING_TOOL_NAME} 可以查看列表。`;
 }
