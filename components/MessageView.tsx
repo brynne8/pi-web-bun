@@ -21,6 +21,8 @@ import type { SubagentToolDetails } from "@/lib/subagent-extension";
 import { CODEMODE_TOOL_NAME, codemodeCalls, codemodeScript, codemodeScriptPreview, stripCodemodeHeader } from "@/lib/codemode-view";
 import { CodemodeCallList } from "./CodemodeToolView";
 import { mcpToolLabel, prettyMcpResultText } from "@/lib/mcp-tool-display";
+import { BgTaskNotificationView } from "./BgTaskNotificationView";
+import { BG_TASK_NOTIFICATION_CUSTOM_TYPE, stripBgTaskNotificationPrefix } from "@/lib/bg-task-notification";
 import { streamRateKey, streamRateStart, streamTokensPerSecond, type StreamRateStart } from "@/lib/stream-token-rate";
 import type {
   AgentMessage,
@@ -1792,6 +1794,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
   const hasDetails = message.details !== undefined;
   const detailsText = hasDetails ? safeJson(message.details) : "";
   const title = formatCustomType(message.customType);
+  const isBgTaskNotification = message.customType === BG_TASK_NOTIFICATION_CUSTOM_TYPE;
   const time = formatTime(message.timestamp);
 
   const copyContent = () => {
@@ -1848,7 +1851,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
             </span>
             {!contentExpanded && text && (
               <span style={{ color: "var(--text-dim)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-                {text.slice(0, 300).replace(/\s+/g, " ").trim()}
+                {getCustomMessagePreview(text)}
               </span>
             )}
             {time && <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10, flexShrink: 0 }}>{time}</span>}
@@ -1879,7 +1882,11 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
                   })}
                 </div>
               )}
-              {text ? <MarkdownBody className="markdown-custom-message" cwd={cwd} onOpenFile={onOpenFile}>{text}</MarkdownBody> : <span style={{ color: "var(--text-dim)", fontSize: 12 }}>{t("i18n.noMessage")}</span>}
+              {text
+                ? isBgTaskNotification
+                  ? <BgTaskNotificationView text={text} />
+                  : <MarkdownBody className="markdown-custom-message" cwd={cwd} onOpenFile={onOpenFile}>{text}</MarkdownBody>
+                : <span style={{ color: "var(--text-dim)", fontSize: 12 }}>{t("i18n.noMessage")}</span>}
             </div>
 
             <div
@@ -2001,6 +2008,15 @@ function getWrittenFileText(block: ToolCallContent): string | null {
 
 function formatCustomType(type: string): string {
   return type || "extension";
+}
+
+/**
+ * The collapsed card's one-line preview of a custom message. A background
+ * report's first paragraph is a guard for the model alone, so the preview reads
+ * the text with it taken back off: the header is on screen like any body is.
+ */
+export function getCustomMessagePreview(text: string): string {
+  return stripBgTaskNotificationPrefix(text).slice(0, 300).replace(/\s+/g, " ").trim();
 }
 
 

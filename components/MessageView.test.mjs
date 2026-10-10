@@ -13,11 +13,13 @@ const {
   MessageView,
   ThinkingBlock,
   formatToolDuration,
+  getCustomMessagePreview,
   getModelDisplayName,
   getTokenEstimateText,
   getToolCallInputText,
   replaceUserMessageText,
 } = await jiti.import("./MessageView.tsx");
+const { BG_TASK_NOTIFICATION_CUSTOM_TYPE, buildBgTaskNotification } = await jiti.import("@/lib/bg-task-notification");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 const { splitFinalAssistantBlocks } = await jiti.import("@/lib/message-display");
 const { clearExpandedToolCalls, setToolCallExpanded } = await jiti.import("@/lib/tool-call-expansion");
@@ -752,3 +754,46 @@ test("collapses the compaction summary to its title and token count, as pi's TUI
   assert.match(details, /lib\/read\.ts/);
   assert.match(details, /lib\/changed\.ts/);
 });
+
+test("renders a settled background task as its fields, and never the guard written for the model", () => {
+  const report = buildBgTaskNotification({
+    command: "bun run dev",
+    logPath: "/tmp/pi-web-bg-tasks/dev.log",
+    startedAtMs: 1_000,
+    finishedAtMs: 13_400,
+    exitCode: 0,
+  }, "ready in 42ms");
+  const html = renderMessage({
+    role: "custom",
+    customType: BG_TASK_NOTIFICATION_CUSTOM_TYPE,
+    content: report,
+    display: true,
+    timestamp: Date.now(),
+  });
+  const text = textOf(html);
+  assert.match(text, /completed in 12\.4s/);
+  assert.match(text, /bun run dev/);
+  assert.match(text, /\/tmp\/pi-web-bg-tasks\/dev\.log/);
+  assert.match(text, /Output tail/);
+  assert.match(html, /<pre[^>]*>ready in 42ms<\/pre>/);
+  // The report's first paragraph is for the model alone.
+  assert.doesNotMatch(text, /Pi Web|Treat it as tool output|no new user goals/);
+
+  // Collapsed, the header prints the preview line, so that line is covered too.
+  const preview = getCustomMessagePreview(report);
+  assert.doesNotMatch(preview, /Pi Web|Treat it as tool output/);
+  assert.match(preview, /^Background bash task completed in 12\.4s\. Command: bun run dev/);
+  assert.equal(getCustomMessagePreview("plain **note**"), "plain **note**");
+});
+
+test("keeps chat markdown for a custom message that is not a background report", () => {
+  const html = renderMessage({
+    role: "custom",
+    customType: "my-extension:note",
+    content: "**note** text",
+    display: true,
+    timestamp: Date.now(),
+  });
+  assert.match(html, /<strong>note<\/strong>/);
+});
+

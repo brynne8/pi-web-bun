@@ -44,6 +44,8 @@ import {
 } from "./subagents";
 import { createSubagentController } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
+import { isBgTasksEnabled } from "./bg-tasks-settings";
+import { createBgTaskNotifier, killBgTasksForSession } from "./bash-bg-tasks";
 import { resolveShellTools } from "./powershell-settings";
 import { CHAT_ONLY_RESOURCE_LOADER_OPTIONS, contextFilesSystemPrompt } from "./chat-only";
 import { createExactSystemPromptExtension } from "./exact-system-prompt";
@@ -2013,6 +2015,7 @@ function registerRpcWrapper(wrapper: AgentSessionWrapper): void {
   // the closing wrapper must not unregister that replacement.
   wrapper.onDestroy(() => {
     if (registry.get(sessionId) === wrapper) registry.delete(sessionId);
+    killBgTasksForSession(sessionId);
   });
   // A wrapper registered before a hot reload still unregisters by id alone.
   const previous = registry.get(sessionId);
@@ -2041,6 +2044,13 @@ const SUBAGENT_CONTROLLER = createSubagentController({
   resolveSessionPath,
   invalidateSessionList: invalidateSessionListCache,
   isBuiltInSubagentsEnabled,
+});
+
+const BG_TASK_NOTIFIER = createBgTaskNotifier({
+  getSession: (sessionId) => getRegistry().get(sessionId),
+  reopenSession: async (sessionId, sessionFile) =>
+    (await startRpcSession(sessionId, sessionFile, undefined)).session,
+  resolveSessionPath,
 });
 
 export function getSubagentRun(sessionId: string) {
@@ -2486,6 +2496,7 @@ export async function startRpcSession(
               createProjectCommandBashExtension({
                 cwd: sessionCwd,
                 settings: settingsManager,
+                ...(isBgTasksEnabled() ? { bgTasks: { notify: BG_TASK_NOTIFIER.notify } } : {}),
               }),
               createSubagentExtension(
                 SUBAGENT_CONTROLLER.extensionRuntime,
