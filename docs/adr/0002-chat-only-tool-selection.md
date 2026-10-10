@@ -63,6 +63,16 @@ SDK rebuilds its base prompt immediately before the model call.
 >
 > The current rules are in `docs/agents/tools.md`.
 
+> **Updates (2026-10-10).** The `input_files` paragraph above describes a step
+> that no longer exists. `Agent` no longer offers the parameter: the host reads
+> nothing on a child's behalf, and the delegated user task is the model's
+> `prompt` alone. A per-call list inlined whole files into that task even though
+> a subagent's own tools already include `read` and `bash`; it inflated the
+> child's context and in practice pushed a freshly opened subagent straight into
+> compaction. The decision above stands unchanged — with no input preparation
+> left to perform, neither the active tool list nor the exact Chat-only system
+> prompt is affected. The current rules are in `docs/agents/subagents.md`.
+
 Changing among nonempty tool presets can update an existing wrapper. Crossing
 the Chat-only boundary must append the new selection and rebuild the wrapper:
 normal wrappers have already loaded extensions, while Chat-only wrappers do not
