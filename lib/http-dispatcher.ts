@@ -1,8 +1,8 @@
 import { EventEmitter } from "node:events";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as undici from "undici";
+import { homeDir } from "./home-dir";
 import { readRegularFileText } from "./regular-file";
 
 export const DEFAULT_HTTP_IDLE_TIMEOUT_MS = 300_000;
@@ -34,17 +34,25 @@ function parseHttpIdleTimeoutMs(value: unknown): number | undefined {
  * `getAgentDir()` resolves it. It is resolved here instead of through the SDK
  * because this module runs in Next.js instrumentation: importing the SDK there
  * costs about a second of startup time, while `undici` costs a tenth of one.
+ *
+ * The one place it does not follow the SDK is the home folder: that comes from
+ * `homeDir()`, the app's own rule of `$HOME` first, because Bun's `os.homedir()` —
+ * what the SDK calls — ignores `$HOME` and reads the user database. Every other
+ * home-based path in pi-web goes through `homeDir()`; reading this one from the
+ * runtime would leave the HTTP idle timeout being read from the account's home on a
+ * machine that relocated it. Where `$HOME` is the home the user database reports,
+ * which is the normal case and the only one Node distinguishes at all, the two agree.
  */
 export function defaultAgentDir(): string {
   let configured = process.env.PI_CODING_AGENT_DIR;
-  if (!configured) return join(homedir(), ".pi", "agent");
+  if (!configured) return join(homeDir(), ".pi", "agent");
 
   // pi's normalizePath(): Git Bash, MSYS, Cygwin and WSL drive paths on
   // Windows, then `~`, then file: URLs. The value is not trimmed.
   if (process.platform === "win32") configured = windowsShellPath(configured);
-  if (configured === "~") return homedir();
+  if (configured === "~") return homeDir();
   if (configured.startsWith("~/") || (process.platform === "win32" && configured.startsWith("~\\"))) {
-    return join(homedir(), configured.slice(2));
+    return join(homeDir(), configured.slice(2));
   }
   if (/^file:\/\//.test(configured)) return fileURLToPath(configured);
   return configured;
