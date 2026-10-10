@@ -1,7 +1,6 @@
 import { randomUUID } from "crypto";
-import { closeSync, read } from "fs";
 import { homedir } from "os";
-import type { IPty } from "node-pty";
+import type { PtyProcess, PtySpawn } from "./terminal-bun-pty";
 import { samePath } from "./paths";
 
 export type TerminalEvent =
@@ -12,7 +11,7 @@ export type TerminalEvent =
 type TerminalListener = (event: TerminalEvent) => void;
 
 interface TerminalRecord {
-  pty: IPty;
+  pty: PtyProcess;
   cwd: string;
   listeners: Set<TerminalListener>;
   backlog: string;
@@ -72,95 +71,30 @@ function dimension(value: number, fallback: number): number {
   return Math.min(1000, Math.max(2, Number.isFinite(value) ? Math.floor(value) : fallback));
 }
 
-function spawnPty(
-  spawn: typeof import("node-pty").spawn,
-  ...args: Parameters<typeof import("node-pty").spawn>
-): ReturnType<typeof import("node-pty").spawn> {
-  if (!("bun" in process.versions)) return spawn(...args);
-
-  // Bun's tty.ReadStream treats the first EAGAIN from node-pty's O_NONBLOCK pty
-  // master fd as fatal: it destroys the stream and closes the fd, so the shell
-  // is SIGHUPed before it writes a byte (oven-sh/bun#25822, unfixed through
-  // Bun 1.4.2). node-pty only touches tty.ReadStream while building its read
-  // stream, so swapping a polling reader in around spawn() is enough; its write,
-  // resize and exit paths already work under Bun.
-  /* eslint-disable @typescript-eslint/no-require-imports */
-  const tty = require("node:tty") as typeof import("node:tty");
-  const { Readable } = require("node:stream") as typeof import("node:stream");
-  /* eslint-enable @typescript-eslint/no-require-imports */
-  const nativeReadStream = tty.ReadStream;
-
-  class PollingReadStream extends Readable {
-    private readonly buffer = Buffer.alloc(64 * 1024);
-    private retryDelayMs = 1;
-    private retryTimer: ReturnType<typeof setTimeout> | undefined;
-
-    constructor(private readonly fd: number) {
-      super({ highWaterMark: 64 * 1024, autoDestroy: true });
-      this.poll();
-    }
-
-    _read(): void {}
-
-    private poll(): void {
-      read(this.fd, this.buffer, 0, this.buffer.length, null, (error, bytesRead) => {
-        if (this.destroyed) return;
-        if (error) {
-          // EAGAIN only means "nothing yet" on a non-blocking fd. The slave side
-          // going away (EIO) or an already closed fd (EBADF) ends the stream.
-          if (error.code === "EAGAIN") {
-            this.retryTimer = setTimeout(() => this.poll(), this.retryDelayMs);
-            this.retryDelayMs = Math.min(this.retryDelayMs * 2, 8);
-            return;
-          }
-          if (error.code === "EIO" || error.code === "EBADF") {
-            this.push(null);
-            return;
-          }
-          this.destroy(error);
-          return;
-        }
-        this.retryDelayMs = 1;
-        if (bytesRead === 0) {
-          this.push(null);
-          return;
-        }
-        // Copy: the next read overwrites buffer while this slice is still queued.
-        this.push(Buffer.from(this.buffer.subarray(0, bytesRead)));
-        setImmediate(() => this.poll());
-      });
-    }
-
-    _destroy(error: Error | null, callback: (error?: Error | null) => void): void {
-      if (this.retryTimer) clearTimeout(this.retryTimer);
-      try {
-        closeSync(this.fd);
-      } catch {
-        // The fd is already gone.
-      }
-      callback(error);
-    }
+/**
+ * Pick the pty backend at creation time.
+ *
+ * node-pty's native addon cannot work under Bun: it does not keep the pty
+ * master fd alive, so the fd is closed right after spawn, the child reads EOF
+ * on stdin and an interactive shell exits before printing a prompt
+ * (agegr/pi-web#745, cf. oven-sh/bun#7362). Bun's own PTY support holds the fd
+ * for the process's lifetime, so `spawnBunPty` takes over there.
+ *
+ * Windows stays on node-pty for two documented reasons: its ConPTY transport
+ * runs on pipes rather than the broken non-blocking fd, and Bun's Windows
+ * terminal passes input `\r` through untranslated, while POSIX `ICRNL` maps
+ * the web terminal's Enter key to `\n` for the shell.
+ */
+function loadPtySpawn(): PtySpawn {
+  if (typeof Bun !== "undefined" && process.platform !== "win32") {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return (require("./terminal-bun-pty") as typeof import("./terminal-bun-pty")).spawnBunPty;
   }
-
-  Object.defineProperty(tty, "ReadStream", { value: PollingReadStream, configurable: true, writable: true });
-  try {
-    return spawn(...args);
-  } finally {
-    Object.defineProperty(tty, "ReadStream", { value: nativeReadStream, configurable: true, writable: true });
-  }
-}
-
-export function createTerminal(cwd: string, cols: number, rows: number, id: string = randomUUID()): string {
-  const existing = registry().get(id);
-  if (existing) {
-    if (!samePath(existing.cwd, cwd)) throw new Error("Terminal belongs to a different workspace");
-    return id;
-  }
-  let spawn: typeof import("node-pty").spawn;
   try {
     // Load inside creation so native module failures reach the API's JSON error handler.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    ({ spawn } = require("node-pty") as typeof import("node-pty"));
+    const { spawn } = require("node-pty") as typeof import("node-pty");
+    return spawn as unknown as PtySpawn;
   } catch (error) {
     throw new Error(
       `Cannot load the node-pty native terminal module for ${process.platform}-${process.arch}. ` +
@@ -171,11 +105,19 @@ export function createTerminal(cwd: string, cols: number, rows: number, id: stri
       { cause: error },
     );
   }
+}
+
+export function createTerminal(cwd: string, cols: number, rows: number, id: string = randomUUID()): string {
+  const existing = registry().get(id);
+  if (existing) {
+    if (!samePath(existing.cwd, cwd)) throw new Error("Terminal belongs to a different workspace");
+    return id;
+  }
   const shell = process.platform === "win32"
     ? process.env.ComSpec ?? "cmd.exe"
     : process.env.SHELL || "/bin/sh";
   const args = process.platform === "win32" ? [] : ["-l"];
-  const pty = spawnPty(spawn, shell, args, {
+  const pty = loadPtySpawn()(shell, args, {
     name: "xterm-256color",
     cols: dimension(cols, 80),
     rows: dimension(rows, 24),
