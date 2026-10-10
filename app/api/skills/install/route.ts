@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { runNpx } from "@/lib/npx";
+import { nodeCliInvocation } from "@/lib/node-cli";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { getProjectTrustStatus } from "@/lib/project-trust";
@@ -8,6 +9,10 @@ import { getProjectTrustStatus } from "@/lib/project-trust";
 export const dynamic = "force-dynamic";
 
 const ANSI_RE = /\x1B\[[0-9;]*m/g;
+
+function runNpxLabel(): string {
+  return nodeCliInvocation("npx", []).command === "npx" ? "npx" : "bun x";
+}
 
 // POST /api/skills/install  body: { package: string; scope: "global" | "project"; cwd?: string }
 export async function POST(req: Request) {
@@ -39,7 +44,7 @@ export async function POST(req: Request) {
     const args = ["skills", "add", pkg.trim(), "-y", "--agent", "pi"];
     if (isGlobal) args.push("-g");
 
-    console.log(`[skills/install] running: npx ${args.join(" ")}`);
+    console.log(`[skills/install] running: ${runNpxLabel()} ${args.join(" ")}`);
     const { stdout, stderr } = await runNpx(args, {
       timeout: 60000,
       cwd: !isGlobal && cwd ? cwd : undefined,
