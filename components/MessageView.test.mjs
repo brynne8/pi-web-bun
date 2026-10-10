@@ -22,7 +22,7 @@ const {
 } = await jiti.import("./MessageView.tsx");
 const { BG_TASK_NOTIFICATION_CUSTOM_TYPE, BG_TASK_NOTIFICATION_PREFIX, buildBgTaskNotification } = await jiti.import("@/lib/bg-task-notification");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
-const { splitFinalAssistantBlocks } = await jiti.import("@/lib/message-display");
+const { splitTurnSegments } = await jiti.import("@/lib/turn-segments");
 const { clearExpandedToolCalls, setToolCallExpanded } = await jiti.import("@/lib/tool-call-expansion");
 
 function renderMessage(message, props = {}) {
@@ -35,10 +35,12 @@ function renderMessage(message, props = {}) {
   );
 }
 
-test("updates a reused message when its written files change", () => {
+test("updates a reused message when it gains or loses its place in a turn", () => {
   const props = { message: { role: "assistant", content: [] } };
   assert.equal(MessageView.compare(props, props), true);
-  assert.equal(MessageView.compare(props, { ...props, writtenFiles: [{ path: "/tmp/result.txt" }] }), false);
+  // A cached message copy is the same object whether or not the turn was split
+  // into segments: ignoring this would keep a footer painted that no longer belongs.
+  assert.equal(MessageView.compare({ ...props, isTurnPart: true }, props), false);
 });
 
 test("matches response model aliases and otherwise includes the provider", () => {
@@ -87,7 +89,7 @@ test("shows deferred thinking previews without loading the full content", () => 
   assert.match(html, /aria-expanded="false"/);
 });
 
-test("marks only the matched text block after splitting thinking and the final answer", () => {
+test("marks only the matched text block in the part of the turn that carries it", () => {
   const message = {
     role: "assistant",
     content: [
@@ -99,19 +101,26 @@ test("marks only the matched text block after splitting thinking and the final a
       { type: "text", text: "Matched pi-cwd-spark answer" },
     ],
   };
-  const { processBlocks, answerBlocks } = splitFinalAssistantBlocks(message);
-  for (const index of [2, 4, 5]) {
-    const searchBlock = message.content[index];
-    for (const content of [processBlocks, answerBlocks]) {
+  // A turn renders as the segments the chat shows: two text parts here, with the
+  // text written before the tool call in a part of its own rather than in a fold.
+  const parts = splitTurnSegments([message], 0, 1)
+    .filter((segment) => segment.kind === "answer")
+    .flatMap((segment) => segment.parts);
+  assert.deepEqual(parts.map((part) => [part.start, part.end]), [[2, 3], [4, 6]]);
+
+  for (const part of parts) {
+    const content = message.content.slice(part.start, part.end);
+    for (const index of [2, 4, 5]) {
+      const searchBlock = message.content[index];
       const html = renderMessage({ ...message, content }, { searchBlock });
-      assert.equal((html.match(/data-search-target="true"/g) ?? []).length, content.includes(searchBlock) ? 1 : 0);
-      if (content.includes(searchBlock)) {
+      const owned = index >= part.start && index < part.end;
+      assert.equal((html.match(/data-search-target="true"/g) ?? []).length, owned ? 1 : 0);
+      if (owned) {
         assert.match(html, new RegExp(`data-search-target="true">(?:(?!data-message-text)[\\s\\S])*${searchBlock.text}`));
       }
     }
   }
 });
-
 test("keeps streamed tool input out of collapsed markup while counting it", () => {
   const block = {
     type: "toolCall",
@@ -370,22 +379,41 @@ test("keeps the follow-up hint when a truncated response already has text", () =
   assert.doesNotMatch(html, /Compact context/);
 });
 
-test("offers compaction on an unanswered truncation and keeps its error with the reply", () => {
+test("offers compaction on an unanswered truncation and keeps its error with the reply", async () => {
+  const { AssistantNotice } = await jiti.import("@/components/MessageView");
   let compacted = 0;
-  const html = renderMessage({
-    role: "assistant",
-    provider: "anthropic",
-    model: "claude-test",
-    content: [],
-    stopReason: "length",
-  }, {
-    onCompact: () => { compacted += 1; },
-    compactError: "Summarization failed: generation hit the token cap",
-  });
+  const html = renderToStaticMarkup(React.createElement(I18nProvider, null,
+    React.createElement(AssistantNotice, {
+      message: { role: "assistant", provider: "anthropic", model: "claude-test", content: [], stopReason: "length" },
+      onCompact: () => { compacted += 1; },
+      compactError: "Summarization failed: generation hit the token cap",
+    })));
 
   assert.match(html, /Compact context/);
   assert.match(html, /generation hit the token cap/);
+  // Static markup cannot fire the click handler; the wiring is what is pinned.
   assert.equal(compacted, 0);
+});
+
+test("a part of a turn shows no failure notice, because the turn shows it once", async () => {
+  // ChatWindow renders the notice at the turn's end, below a folded group. A part
+  // that printed its own would put it back where the fold hides it (#906).
+  const message = {
+    role: "assistant",
+    provider: "anthropic",
+    model: "claude-test",
+    content: [{ type: "toolCall", toolCallId: "call-notice", toolName: "read", input: { path: "a.ts" } }],
+    stopReason: "error",
+    errorMessage: "429: rate limited",
+  };
+  assert.doesNotMatch(renderMessage(message, { isTurnPart: true }), /rate limited/);
+  assert.match(renderMessage(message), /rate limited/);
+
+  const { AssistantNotice } = await jiti.import("@/components/MessageView");
+  assert.equal(
+    renderToStaticMarkup(React.createElement(I18nProvider, null,
+      React.createElement(AssistantNotice, { message: { ...message, stopReason: "stop" } }))),
+    "");
 });
 
 test("renders partial assistant content before the provider error", () => {
@@ -1001,4 +1029,73 @@ test("shows a background report this build cannot parse as its raw text", () => 
   assert.match(text, /still running/);
   // Raw, but still without the paragraph only the model is meant to read.
   assert.doesNotMatch(text, /Pi Web|Treat it as tool output/);
+});
+
+test("no part of a segmented turn shows the turn's footer", async () => {
+  const content = [
+    { type: "text", text: "First sentence." },
+    { type: "toolCall", toolCallId: "call-footer", toolName: "bash", input: { command: "ls" } },
+    { type: "text", text: "Last sentence." },
+  ];
+  const usage = { input: 213902, output: 725, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } };
+  const message = { role: "assistant", provider: "anthropic", model: "claude-test", content, usage };
+  const parts = [
+    { start: 0, end: 1 },  // the turn's opening sentence
+    { start: 2, end: 3 },  // the part that ends it
+  ];
+
+  const rendered = parts.map((part) => renderMessage(
+    { ...message, content: content.slice(part.start, part.end) },
+    { blockIndexOffset: part.start, isTurnPart: true },
+  ));
+
+  // A part is not the turn: Copy, the file list and the token counts come once,
+  // from the turn's footer at its end. pi-web stores one assistant entry per tool
+  // call, so a per-part footer repeated down the turn — and sat under a sentence in
+  // the middle when the turn ends on thinking or a tool call.
+  for (const [index, html] of rendered.entries()) {
+    assert.doesNotMatch(html, /Copy message/, `copy ${index}`);
+    assert.doesNotMatch(html, /213,902 in/, `usage ${index}`);
+  }
+
+  // A whole message, which is what every other caller passes, keeps its footer.
+  const whole = renderMessage(message);
+  assert.match(whole, /Copy message/);
+  assert.match(whole, /213,902 in/);
+
+  // The time follows the same rule: a part of a turn never shows one, whether it is
+  // a slice of history or the entry that has just finished streaming.
+  const timed = { role: "assistant", provider: "anthropic", model: "claude-test", timestamp: new Date("2026-10-10T08:52:00").getTime(), content: [{ type: "text", text: "Done." }] };
+  const { formatTime } = await jiti.import("@/components/MessageView");
+  assert.ok(!renderMessage(timed, { isTurnPart: true, showTimestamp: true }).includes(formatTime(timed.timestamp)));
+  assert.ok(renderMessage(timed, { showTimestamp: true }).includes(formatTime(timed.timestamp)));
+});
+
+test("the turn's footer collects its copy, its files and its numbers", async () => {
+  const { TurnFooter } = await jiti.import("@/components/TurnFooter");
+  const usage = { input: 213902, output: 725, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } };
+  const { formatTime } = await jiti.import("@/components/MessageView");
+  const timestamp = new Date("2026-10-10T08:52:00").getTime();
+  const html = renderToStaticMarkup(React.createElement(I18nProvider, null,
+    React.createElement(TurnFooter, {
+      usage,
+      timestamp,
+      text: "First sentence.\n\nLast sentence.",
+      writtenFiles: [{ filePath: "src/a.ts" }],
+    })));
+  assert.match(html, /213,902 in/);
+  assert.match(html, /Copy message/);
+  assert.match(html, /src\/a\.ts/);
+  assert.ok(html.includes(formatTime(timestamp)), "the turn's time sits with its numbers");
+
+  // A turn that wrote nothing to copy gets no button, and a footer with nothing in
+  // it renders nothing at all.
+  const wordsOnly = renderToStaticMarkup(React.createElement(I18nProvider, null,
+    React.createElement(TurnFooter, { text: "Just words." })));
+  assert.match(wordsOnly, /Copy message/);
+  assert.doesNotMatch(wordsOnly, /213,902 in/);
+  // A time of its own is no footer.
+  const empty = renderToStaticMarkup(React.createElement(I18nProvider, null,
+    React.createElement(TurnFooter, { timestamp: new Date("2026-10-10T08:52:00").getTime() })));
+  assert.equal(empty, "");
 });

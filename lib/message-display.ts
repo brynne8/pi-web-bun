@@ -1,4 +1,4 @@
-import type { AgentMessage, AssistantContentBlock, AssistantMessage, ThinkingContent, ToolCallContent } from "./types";
+import type { AgentMessage, AssistantContentBlock, AssistantMessage, ThinkingContent } from "./types";
 
 interface DisplayOptions {
   isStreaming?: boolean;
@@ -32,13 +32,6 @@ export function isEmptyThinkingBlock(block: AssistantContentBlock, options: Disp
   return block.type === "thinking" && !block.deferred && !options.isStreaming && block.thinking.trim() === "";
 }
 
-export function getDisplayableAssistantBlocks(
-  message: AssistantMessage,
-  options: DisplayOptions = {},
-): AssistantContentBlock[] {
-  return (message.content ?? []).filter((block) => !isEmptyThinkingBlock(block, options));
-}
-
 export function getAssistantErrorMessage(
   message: AssistantMessage,
   options: DisplayOptions = {},
@@ -67,37 +60,3 @@ export function hasAssistantAnswer(message: AssistantMessage): boolean {
   });
 }
 
-function isFinalAnswerBlock(block: AssistantContentBlock): boolean {
-  return block.type === "text" || block.type === "image";
-}
-
-export function splitFinalAssistantBlocks(
-  message: AssistantMessage,
-  options: DisplayOptions = {},
-): { answerBlocks: AssistantContentBlock[]; processBlocks: AssistantContentBlock[] } {
-  const blocks = getDisplayableAssistantBlocks(message, options);
-  const lastProcessIndex = blocks.findLastIndex((block) => !isFinalAnswerBlock(block));
-  if (lastProcessIndex === -1) {
-    return { answerBlocks: blocks, processBlocks: [] };
-  }
-  return {
-    answerBlocks: blocks.slice(lastProcessIndex + 1),
-    processBlocks: blocks.slice(0, lastProcessIndex + 1),
-  };
-}
-
-export function countToolCallBlocks(blocks: AssistantContentBlock[]): number {
-  return blocks.filter((block): block is ToolCallContent => block.type === "toolCall").length;
-}
-
-/**
- * Process details start collapsed only above a real answer: text or an image in
- * the answer the turn shows (null when it shows none). Under an error or
- * truncation notice alone they stay open, since text the turn wrote before its
- * last tool call sits in them and would be hidden (#906).
- */
-export function collapsesProcessDetails(answer: AssistantMessage | null): boolean {
-  return (answer?.content ?? []).some((block) => (
-    block.type === "image" || (block.type === "text" && block.text.trim().length > 0)
-  ));
-}

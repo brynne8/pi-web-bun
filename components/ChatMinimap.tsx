@@ -7,9 +7,9 @@ import {
   markdownPreviewRemarkPlugins,
   normalizeDisplayMath,
 } from "@/lib/markdown";
-import { isMessageGroupAnchor, splitFinalAssistantBlocks } from "@/lib/message-display";
+import { isMessageGroupAnchor } from "@/lib/message-display";
 import { loadMinimapPreviewLocked, saveMinimapPreviewLocked } from "@/lib/minimap-preview-lock";
-import type { AgentMessage, AssistantMessage, CustomMessage, TextContent, UserMessage } from "@/lib/types";
+import type { AgentMessage, AssistantContentBlock, CustomMessage, TextContent, UserMessage } from "@/lib/types";
 import { useI18n } from "@/hooks/useI18n";
 import styles from "./ChatMinimap.module.css";
 
@@ -71,9 +71,10 @@ export function countToolCalls(message: AgentMessage | Partial<AgentMessage>): n
 }
 
 function getAssistantAnswerMarkdown(message: AgentMessage | Partial<AgentMessage>): string {
-  if (message.role !== "assistant") return "";
-  const { answerBlocks } = splitFinalAssistantBlocks(message as AssistantMessage);
-  return answerBlocks
+  if (message.role !== "assistant" || !Array.isArray(message.content)) return "";
+  // The chat shows every text block a turn wrote, not only the ones after its
+  // last tool call, so the preview covers the same text.
+  return (message.content as AssistantContentBlock[])
     .filter((block): block is TextContent => block.type === "text")
     .map((block) => block.text)
     .join("\n\n")

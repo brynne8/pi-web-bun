@@ -3,17 +3,19 @@ import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
 import Image from "next/image";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage } from "@/lib/types";
+import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, ExtensionUiRequest, SessionInfo, SessionTreeNode, TextContent, ToolResultMessage } from "@/lib/types";
 import { normalizeCustomPanelLines } from "@/lib/ansi";
 import { splitNoticeText } from "@/lib/notice-text";
 import { EXTENSION_DIALOG_BASE_WIDTH, fitExtensionDialogWidth } from "@/lib/extension-dialog-fit";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
-import { collapsesProcessDetails, countToolCallBlocks, getDisplayableAssistantBlocks, hasAssistantAnswer, isHiddenCustomMessage, isMessageGroupAnchor, splitFinalAssistantBlocks } from "@/lib/message-display";
-import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
-import { getFinalAnswerViews, keepWrittenFiles, type FinalAnswerViews } from "@/lib/turn-views";
+import { getAssistantErrorMessage, hasAssistantAnswer, isAssistantTruncated, isHiddenCustomMessage, isMessageGroupAnchor } from "@/lib/message-display";
+import { extractTurnWrittenFiles } from "@/lib/turn-written-files";
+import { splitTurnSegments, turnHasAnswer } from "@/lib/turn-segments";
+import { getTurnPart, recordsUsage, type TurnPartCache } from "@/lib/turn-views";
+import { TurnFooter } from "./TurnFooter";
 import { buildQuotedSelection } from "@/lib/quoted-selection";
 import { dropMentionText, splitDroppedItems, uploadFiles, type DroppedItem } from "@/lib/file-upload-client";
-import { MessageView } from "./MessageView";
+import { AssistantNotice, MessageView } from "./MessageView";
 import { MarkdownBody } from "./MarkdownBody";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
@@ -174,23 +176,6 @@ function NewSessionUpdateLink({
   );
 }
 
-function hasFinalAssistantAnswer(message: AgentMessage): boolean {
-  if (message.role !== "assistant") return false;
-  return splitFinalAssistantBlocks(message as AssistantMessage).answerBlocks.some((block) => (
-    block.type === "image" || (block.type === "text" && block.text.trim().length > 0)
-  ));
-}
-
-function findFinalAssistantIndex(messages: AgentMessage[], userIdx: number, endIdx: number): number {
-  for (let candidateIdx = endIdx - 1; candidateIdx > userIdx; candidateIdx--) {
-    if (hasFinalAssistantAnswer(messages[candidateIdx])) return candidateIdx;
-  }
-  for (let candidateIdx = endIdx - 1; candidateIdx > userIdx; candidateIdx--) {
-    if (messages[candidateIdx]?.role === "assistant") return candidateIdx;
-  }
-  return -1;
-}
-
 function getUserInputText(message: AgentMessage): string | null {
   if (message.role !== "user") return null;
   if (typeof message.content === "string") {
@@ -205,8 +190,11 @@ function getUserInputText(message: AgentMessage): string | null {
   return text.length > 0 ? text : null;
 }
 
-function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = false, reveal = false, children, t }: { messageCount: number; toolCallCount: number; defaultExpanded?: boolean; reveal?: boolean; children: ReactNode; t: (key: string, params?: Record<string, string | number>) => string }) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
+function ProcessDetailsGroup({ messageCount, toolCallCount, reveal = false, children, t }: { messageCount: number; toolCallCount: number; reveal?: boolean; children: ReactNode; t: (key: string, params?: Record<string, string | number>) => string }) {
+  // Always collapsed: what is inside a group is how the turn got there, and what it
+  // wrote and how it failed both render outside it. A group the user opened by hand
+  // keeps its state across the turn's updates, since nothing re-keys it.
+  const [expanded, setExpanded] = useState(false);
   useLayoutEffect(() => {
     if (reveal) setExpanded(true);
   }, [reveal]);
@@ -214,7 +202,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   if (toolCallCount > 0) parts.push(`${toolCallCount} ${t(toolCallCount === 1 ? "chat.toolCall" : "chat.toolCalls")}`);
 
   return (
-    <div style={{ marginBottom: 14 }}>
+    <div style={{ marginBottom: 16 }}>
       <button
         type="button"
         aria-expanded={expanded || reveal}
@@ -810,8 +798,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     }
     return map;
   }, [activeToolResults, messages]);
-  // Same idea for the copies a grouped turn passes MessageView (see getFinalAnswerViews).
-  const finalAnswerViewCache = useMemo(() => new WeakMap<AssistantMessage, FinalAnswerViews>(), []);
+  // Same idea for the copies a turn's segments pass MessageView (see getTurnPart).
+  const turnPartCache = useMemo<TurnPartCache>(() => new WeakMap(), []);
   const inputHistory = useMemo(() => {
     const seen = new Set<string>();
     const history: string[] = [];
@@ -1109,7 +1097,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 if (idx === lastUserIdx) { (lastUserMsgRef as { current: HTMLDivElement | null }).current = el; }
               };
 
-              const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; showTimestamp?: boolean; writtenFiles?: WrittenFile[]; recoverTruncation?: boolean } = {}): ReactNode => {
+              const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; blockIndexOffset?: number; isTurnPart?: boolean } = {}): ReactNode => {
                 const msg = options.messageOverride ?? messages[idx];
                 if (isHiddenCustomMessage(msg)) return null;
                 const isVisible = isMessageGroupAnchor(msg) || msg.role === "assistant";
@@ -1129,7 +1117,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                     showTimestamp = false;
                   }
                 }
-                if (options.showTimestamp !== undefined) showTimestamp = options.showTimestamp;
                 const view = (
                   <MessageView
                     key={`${keyPrefix}-view-${messageKey}`}
@@ -1150,10 +1137,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                     showTimestamp={showTimestamp}
                     prevTimestamp={idx > 0 ? (messages[idx - 1] as AgentMessage & { timestamp?: number }).timestamp : undefined}
                     sessionId={session?.id ?? sessionIdRef.current ?? undefined}
-                    writtenFiles={options.writtenFiles}
-                    onCompact={options.recoverTruncation ? handleCompact : undefined}
-                    isCompacting={options.recoverTruncation ? isCompacting : undefined}
-                    compactError={options.recoverTruncation ? compactError : undefined}
+                    blockIndexOffset={options.blockIndexOffset}
+                    isTurnPart={options.isTurnPart}
                   />
                 );
                 if (!isVisible || currentRefIdx === undefined) return view;
@@ -1182,20 +1167,14 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 let endIdx = idx + 1;
                 while (endIdx < messages.length && !isMessageGroupAnchor(messages[endIdx])) endIdx += 1;
 
-                const finalAssistantIdx = findFinalAssistantIndex(messages, userIdx, endIdx);
-
-                if (finalAssistantIdx === -1) {
-                  for (let renderIdx = groupStartIdx; renderIdx < endIdx; renderIdx++) {
-                    rendered.push(renderMessage(renderIdx));
-                  }
-                  idx = endIdx;
-                  continue;
-                }
-
                 const isLiveTail = (sessionBusy || streamState.isStreaming) && endIdx === messages.length && userIdx === lastAnchorIdx;
                 if (isLiveTail) {
+                  // A running turn is still one turn. Its parts show what they are doing
+                  // as they do it, but the token counts, Copy and the failure wait for the
+                  // footer at the turn's end: per entry they were a row under every tool
+                  // call, all of it gone the moment the run folded.
                   for (let renderIdx = groupStartIdx; renderIdx < endIdx; renderIdx++) {
-                    rendered.push(renderMessage(renderIdx));
+                    rendered.push(renderMessage(renderIdx, { isTurnPart: true }));
                   }
                   idx = endIdx;
                   continue;
@@ -1203,78 +1182,134 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
                 if (hasAnchor) rendered.push(renderMessage(userIdx));
 
-                const finalViews = getFinalAnswerViews(finalAnswerViewCache, messages[finalAssistantIdx] as AssistantMessage);
-                const finalAnswerMessage = finalViews.answer;
+                // The turn's words stay on screen and each run of thinking and tool
+                // calls between them folds into a group of its own, so a long turn
+                // reads as several groups with the sentences in between rather than
+                // one fold holding everything up to its last tool call.
+                const segments = splitTurnSegments(messages, userIdx + 1, endIdx);
+                // Whether anything the model wrote is on the screen. A turn that wrote
+                // none of it still folds its workings: only a truncation with no answer
+                // anywhere asks to be handled here (the Compact button below).
+                const answered = turnHasAnswer(segments);
 
-                const processViews: ReactNode[] = [];
-                let processToolCount = 0;
-                let processRefIdx: number | undefined;
-                let revealProcess = false;
+                // Each tool call is stored as its own assistant entry, so no single
+                // part carries what the turn wrote or what it cost: gather the turn's
+                // blocks once, and keep the last response's numbers.
+                const turnContent: AssistantContentBlock[] = [];
+                let turnUsage: AssistantMessage["usage"];
+                let turnTimestamp: number | undefined;
+                for (let turnIdx = userIdx + 1; turnIdx < endIdx; turnIdx++) {
+                  const turnMessage = messages[turnIdx] as AssistantMessage | undefined;
+                  if (turnMessage?.role === "assistant") {
+                    for (const block of turnMessage.content ?? []) turnContent.push(block);
+                    // The last response that recorded numbers: an aborted run leaves a
+                    // usage object of zeros, and a row of zeros says nothing.
+                    if (turnMessage.usage && recordsUsage(turnMessage.usage)) turnUsage = turnMessage.usage;
+                    turnTimestamp = turnMessage.timestamp ?? turnTimestamp;
+                  }
+                }
+                const turnWrittenFiles = extractTurnWrittenFiles(turnContent, toolResultsMap, messageCwd);
+                // What Copy hands over: the turn's words, not the last part's sentence.
+                const turnCopyText = turnContent
+                  .filter((block): block is TextContent => block.type === "text")
+                  .map((block) => block.text)
+                  .join("\n\n")
+                  .trim();
 
-                for (let processIdx = userIdx + 1; processIdx <= finalAssistantIdx; processIdx++) {
-                  const processMessage = messages[processIdx];
-                  if (processMessage.role === "custom") {
-                    // Not counted either: a turn whose only extra is a hidden message has no process details.
-                    if (isHiddenCustomMessage(processMessage)) continue;
-                    revealProcess ||= Boolean(pendingSearchScroll && pendingSearchScroll.entryId === entryIds[processIdx]);
-                    processViews.push(renderMessage(processIdx, { attachRef: false, keyPrefix: "process" }));
+                for (const [segmentIdx, segment] of segments.entries()) {
+                  const views: ReactNode[] = [];
+                  let revealSegment = false;
+                  let segmentRefIdx: number | undefined;
+
+                  for (const part of segment.parts) {
+                    const stored = messages[part.index] as AssistantMessage;
+                    if (part.custom) {
+                      revealSegment ||= Boolean(pendingSearchScroll && pendingSearchScroll.entryId === entryIds[part.index]);
+                      views.push(renderMessage(part.index, { attachRef: false, keyPrefix: `segment-${segmentIdx}` }));
+                      continue;
+                    }
+                    const view = getTurnPart(turnPartCache, stored, part.start, part.end);
+                    const partBlocks = view.content ?? [];
+                    revealSegment ||= Boolean(pendingSearchScroll && entryIds[part.index] === pendingSearchScroll.entryId && (!searchBlock || partBlocks.includes(searchBlock)));
+                    segmentRefIdx ??= visibleRefIndexByMessage.get(part.index);
+                    views.push(renderMessage(part.index, {
+                      // A group's contents are not the turn's scroll target: its answer is.
+                      attachRef: segment.kind === "answer",
+                      keyPrefix: `segment-${segmentIdx}-${part.start}`,
+                      messageOverride: view,
+                      blockIndexOffset: part.start,
+                      // No part is the turn: its time, its numbers, its failure and its
+                      // Copy all come after the last segment, where the turn ends.
+                      isTurnPart: true,
+                    }));
+                  }
+
+                  if (segment.kind === "process") {
+                    rendered.push(
+                      <div
+                        key={`process-group-${entryIds[groupStartIdx] ?? groupStartIdx}-${segmentIdx}`}
+                        ref={segmentRefIdx === undefined ? undefined : (el) => { messageRefs.current[segmentRefIdx] = el; }}
+                      >
+                        <ProcessDetailsGroup
+                          messageCount={segment.messageCount}
+                          toolCallCount={segment.toolCallCount}
+                          reveal={revealSegment}
+                          t={t}
+                        >
+                          {views}
+                        </ProcessDetailsGroup>
+                      </div>,
+                    );
                     continue;
                   }
-                  if (processMessage.role !== "assistant") continue;
-                  const message = processIdx === finalAssistantIdx ? finalViews.process : processMessage;
-                  const blocks = getDisplayableAssistantBlocks(message);
-                  if (blocks.length === 0) continue;
-                  processRefIdx ??= visibleRefIndexByMessage.get(processIdx);
-                  processToolCount += countToolCallBlocks(blocks);
-                  revealProcess ||= Boolean(pendingSearchScroll && entryIds[processIdx] === pendingSearchScroll.entryId && (!searchBlock || blocks.includes(searchBlock)));
-                  processViews.push(renderMessage(processIdx, {
-                    attachRef: false,
-                    keyPrefix: "process",
-                    messageOverride: message,
-                    showTimestamp: false,
-                  }));
+                  rendered.push(...views);
                 }
 
-                if (processViews.length > 0) {
-                  const answered = collapsesProcessDetails(finalAnswerMessage);
+                // A turn's failure is its outcome, not one of its workings, so it shows
+                // here rather than inside a group the user has to open to find the reason
+                // the run stopped (#906). pi records it on the response that ended the run.
+                let noticeMessage: AssistantMessage | undefined;
+                for (let turnIdx = endIdx - 1; turnIdx > userIdx; turnIdx--) {
+                  const candidate = messages[turnIdx] as AssistantMessage | undefined;
+                  if (candidate?.role !== "assistant") continue;
+                  noticeMessage = candidate;
+                  break;
+                }
+                const notice = noticeMessage
+                  && (getAssistantErrorMessage(noticeMessage) || isAssistantTruncated(noticeMessage))
+                  ? noticeMessage : undefined;
+                if (notice) {
+                  // A run cut off by the output limit with no answer anywhere in it can be
+                  // recovered from here, and only while it is the session's tail.
+                  const canRecover = !answered && isAssistantTruncated(notice) && !hasAssistantAnswer(notice)
+                    && endIdx === messages.length && !streamState.isStreaming;
                   rendered.push(
-                    <div
-                      key={`process-group-${entryIds[groupStartIdx] ?? groupStartIdx}`}
-                      ref={processRefIdx === undefined ? undefined : (el) => { messageRefs.current[processRefIdx] = el; }}
-                    >
-                      {/* Re-key on answer availability: useState reads defaultExpanded only
-                          on mount, so a turn first rendered without an answer (expanded)
-                          would otherwise stay open once its answer shows up, e.g. when
-                          switching between an answered and an unanswered leaf of the same
-                          turn. Manual toggles survive every other re-render. */}
-                      <ProcessDetailsGroup key={answered ? "answered" : "unanswered"} messageCount={processViews.length} toolCallCount={processToolCount} defaultExpanded={!answered} reveal={revealProcess} t={t}>
-                        {processViews}
-                      </ProcessDetailsGroup>
+                    <div key={`turn-notice-${entryIds[groupStartIdx] ?? groupStartIdx}`} style={{ marginTop: -8, marginBottom: 16 }}>
+                      <AssistantNotice
+                        message={notice}
+                        onCompact={canRecover ? handleCompact : undefined}
+                        isCompacting={canRecover ? isCompacting : undefined}
+                        compactError={canRecover ? compactError : undefined}
+                      />
                     </div>,
                   );
                 }
 
-                if (finalAnswerMessage) {
-                  // Each tool call is stored as its own assistant entry, so the
-                  // final answer alone carries no record of what the turn wrote.
-                  // Gather the turn's assistant blocks and derive the file list
-                  // from the write/edit calls among them.
-                  const turnContent: AssistantContentBlock[] = [];
-                  for (let i = userIdx + 1; i <= finalAssistantIdx; i++) {
-                    const m = messages[i];
-                    if (m?.role === "assistant") {
-                      for (const b of (m as AssistantMessage).content ?? []) turnContent.push(b);
-                    }
-                  }
-                  const writtenFiles = keepWrittenFiles(finalViews, extractTurnWrittenFiles(turnContent, toolResultsMap, messageCwd));
-                  rendered.push(renderMessage(finalAssistantIdx, {
-                    messageOverride: finalAnswerMessage,
-                    writtenFiles,
-                    recoverTruncation: endIdx === messages.length && !streamState.isStreaming && !hasAssistantAnswer(finalAnswerMessage),
-                  }));
-                }
-                for (let renderIdx = finalAssistantIdx + 1; renderIdx < endIdx; renderIdx++) {
-                  rendered.push(renderMessage(renderIdx));
+                // The turn's footer, once where the turn ends — not under whichever part
+                // happens to hold the last sentence: stop a run mid-thinking and the turn
+                // ends on a folded group, and pi-web saves one assistant entry per tool
+                // call, so a per-part footer repeats down the turn.
+                if (turnCopyText || turnWrittenFiles.length > 0 || turnUsage) {
+                  rendered.push(
+                    <TurnFooter
+                      key={`turn-footer-${entryIds[groupStartIdx] ?? groupStartIdx}`}
+                      usage={turnUsage}
+                      timestamp={turnTimestamp}
+                      text={turnCopyText}
+                      writtenFiles={turnWrittenFiles}
+                      onOpenFile={onOpenFile}
+                    />,
+                  );
                 }
                 idx = endIdx;
               }

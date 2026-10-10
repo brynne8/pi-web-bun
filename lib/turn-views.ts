@@ -1,66 +1,51 @@
-import type { AssistantContentBlock, AssistantMessage } from "./types";
-import { getAssistantErrorMessage, isAssistantTruncated, splitFinalAssistantBlocks } from "./message-display";
-import type { WrittenFile } from "./turn-written-files";
+import type { AgentUsage, AssistantMessage } from "./types";
 
-/** What the chat shows of a turn's final assistant message, apart. */
-export interface FinalAnswerViews {
-  /** The answer under the process group; null when the turn has none. */
-  answer: AssistantMessage | null;
-  /** What the message did before its answer, inside the process group. */
-  process: AssistantMessage;
-  writtenFiles?: WrittenFile[];
-}
+/**
+ * The copies a turn's segments render from, kept per stored message.
+ *
+ * MessageView is memoized, and a copy built afresh on each render defeats it:
+ * every visible part of a turn would run its markdown again whenever anything
+ * in the chat changes — a streamed chunk, a notice, a key typed into an
+ * extension's custom panel (#1005). So each `(message, block range)` copy is
+ * built once and reused, which also keeps a part's React keys stable.
+ */
+export type TurnPartCache = WeakMap<AssistantMessage, Map<string, AssistantMessage>>;
 
-function withAssistantBlocks(
+/** A copy carrying `message`'s blocks `[start, end)`, stable across renders. */
+export function getTurnPart(
+  cache: TurnPartCache,
   message: AssistantMessage,
-  content: AssistantContentBlock[],
-  options: { omitUsage?: boolean } = {},
+  start: number,
+  end: number,
 ): AssistantMessage {
-  const next = { ...message, content };
-  if (options.omitUsage) next.usage = undefined;
+  const key = `${start}:${end}`;
+  let byRange = cache.get(message);
+  if (!byRange) {
+    byRange = new Map();
+    cache.set(message, byRange);
+  }
+  const cached = byRange.get(key);
+  if (cached) return cached;
+
+  const content = message.content ?? [];
+  const next: AssistantMessage = { ...message, content: content.slice(start, end) };
+  if (end < content.length) {
+    // Not the end of this response: usage, the provider error and the output-limit
+    // notice belong to where the response ended, so one part carries them.
+    next.usage = undefined;
+    next.stopReason = undefined;
+    next.errorMessage = undefined;
+  }
+  byRange.set(key, next);
   return next;
 }
 
 /**
- * Splits a turn's final assistant message into its answer and its process part.
- * MessageView is memoized, and copies built afresh on each render defeat it: every
- * visible answer then runs its markdown again whenever anything in the chat changes,
- * be it a streamed chunk, a notice or a key typed into an extension's custom panel
- * (#1005). So the copies are kept per stored message, which is never mutated.
+ * Whether a response's usage records anything. A request that never reported
+ * numbers — an aborted run, a cache-warming call — still carries a usage object of
+ * zeros, and a footer reading "0 in · 0 out · $0.00" says nothing about the turn.
  */
-export function getFinalAnswerViews(
-  cache: WeakMap<AssistantMessage, FinalAnswerViews>,
-  message: AssistantMessage,
-): FinalAnswerViews {
-  const cached = cache.get(message);
-  if (cached) return cached;
-
-  const { answerBlocks } = splitFinalAssistantBlocks(message);
-  const answer = answerBlocks.length > 0 || getAssistantErrorMessage(message) || isAssistantTruncated(message)
-    ? withAssistantBlocks(message, answerBlocks)
-    : null;
-  const processEnd = message.content.indexOf(answerBlocks[0]);
-  const views: FinalAnswerViews = {
-    answer,
-    // Keep the original prefix so deferred thinking retains its stored block indices.
-    process: withAssistantBlocks(
-      message,
-      message.content.slice(0, processEnd < 0 ? undefined : processEnd),
-      { omitUsage: Boolean(answer) },
-    ),
-  };
-  cache.set(message, views);
-  return views;
-}
-
-/** The list passed last time while the turn still wrote the same files, for the same reason. */
-export function keepWrittenFiles(views: FinalAnswerViews, next: WrittenFile[]): WrittenFile[] {
-  const previous = views.writtenFiles;
-  if (
-    previous
-    && previous.length === next.length
-    && previous.every((file, index) => file.filePath === next[index].filePath)
-  ) return previous;
-  views.writtenFiles = next;
-  return next;
+export function recordsUsage(usage: AgentUsage): boolean {
+  return usage.input > 0 || usage.output > 0 || usage.cacheRead > 0 || usage.cacheWrite > 0
+    || (usage.cost?.total ?? 0) > 0;
 }

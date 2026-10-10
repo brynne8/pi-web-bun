@@ -15,8 +15,6 @@ import { isApplyPatchToolName, isEditToolName, isShellToolName } from "@/lib/too
 import { readSnapshotOfCall, type ReadSnapshot } from "@/lib/read-snapshot";
 import { isToolCallExpanded, setToolCallExpanded } from "@/lib/tool-call-expansion";
 import { isThinkingExpandedByDefault, THINKING_EXPANDED_EVENT } from "@/lib/thinking-expansion-preference";
-import { TurnWrittenFiles } from "./TurnWrittenFiles";
-import type { WrittenFile } from "@/lib/turn-written-files";
 import { skillExpansionToCommand } from "@/lib/slash-display";
 import type { SubagentToolDetails } from "@/lib/subagent-extension";
 import { CODEMODE_TOOL_NAME, codemodeCalls, codemodeScript, codemodeScriptPreview, stripCodemodeHeader } from "@/lib/codemode-view";
@@ -215,15 +213,21 @@ interface Props {
   prevTimestamp?: number;
   sessionId?: string;
   /**
-   * Files this turn wrote, derived by the caller from the whole turn's
-   * successful write/edit tool calls. ChatWindow computes this because the
-   * saved-message path splits tool calls into their own entries, leaving the
-   * final answer text-only.
+   * Where this message's blocks sit in the stored message, when the caller shows
+   * a slice of it. A turn is rendered as segments, so a part carries a block
+   * range; deferred thinking is loaded by its stored index, and a part that
+   * reported its own offsets would fetch the wrong block.
    */
-  writtenFiles?: WrittenFile[];
-  onCompact?: () => void;
-  isCompacting?: boolean;
-  compactError?: string | null;
+  blockIndexOffset?: number;
+  /**
+   * This message is one part of a turn rendered as segments, or still streaming as
+   * one. No part is the turn, so no part carries its footer: the token counts, the
+   * time, Copy, the failure and the files the turn changed all belong to
+   * `TurnFooter` and `AssistantNotice`, once where the turn ends — which need not be
+   * where its last sentence is, e.g. when the user stopped the run mid-thinking and
+   * the turn ends on a folded group.
+   */
+  isTurnPart?: boolean;
 }
 
 export function getModelDisplayName(
@@ -245,7 +249,7 @@ export function getModelDisplayName(
     ?? `${provider}/${responseModel}`;
 }
 
-function formatTime(ts?: number): string | null {
+export function formatTime(ts?: number): string | null {
   if (!ts) return null;
   const d = new Date(ts);
   const now = new Date();
@@ -291,12 +295,12 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, entryId, searchBlock, onFork, forking, onEditContent, onCancelEdit, isEditing, showTimestamp, prevTimestamp, sessionId, writtenFiles, onCompact, isCompacting, compactError }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, entryId, searchBlock, onFork, forking, onEditContent, onCancelEdit, isEditing, showTimestamp, prevTimestamp, sessionId, blockIndexOffset, isTurnPart }: Props) {
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onEditContent={onEditContent} onCancelEdit={onCancelEdit} isEditing={isEditing} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} writtenFiles={writtenFiles} onCompact={onCompact} isCompacting={isCompacting} compactError={compactError} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} blockIndexOffset={blockIndexOffset} isTurnPart={isTurnPart} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -330,11 +334,9 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.isEditing === next.isEditing
     && prev.showTimestamp === next.showTimestamp
     && prev.prevTimestamp === next.prevTimestamp
-    && prev.writtenFiles === next.writtenFiles
-    && prev.sessionId === next.sessionId
-    && prev.onCompact === next.onCompact
-    && prev.isCompacting === next.isCompacting
-    && prev.compactError === next.compactError;
+    && prev.blockIndexOffset === next.blockIndexOffset
+    && prev.isTurnPart === next.isTurnPart
+    && prev.sessionId === next.sessionId;
 });
 
 function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, onEditContent, onCancelEdit, isEditing }: {
@@ -647,6 +649,78 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
   );
 }
 
+/**
+ * How a response ends badly: a provider error, or an output limit that cut it off.
+ *
+ * A turn's failure is its outcome, not one of its workings, so ChatWindow renders
+ * this once under the turn's last segment rather than leaving it inside a Process
+ * details group the user has to open to find the reason it stopped (#906). It also
+ * renders under a whole message, which is how the live tail and a message outside a
+ * segmented turn show it.
+ */
+export function AssistantNotice({ message, isStreaming, onCompact, isCompacting, compactError }: {
+  message: AssistantMessage;
+  isStreaming?: boolean;
+  onCompact?: () => void;
+  isCompacting?: boolean;
+  compactError?: string | null;
+}) {
+  const { t } = useI18n();
+  const providerError = getAssistantErrorMessage(message, { isStreaming });
+  const truncated = isAssistantTruncated(message, { isStreaming });
+  const unansweredTruncation = truncated && !hasAssistantAnswer(message);
+  if (!providerError && !truncated) return null;
+
+  const alert = {
+    padding: "7px 10px",
+    border: "1px solid",
+    borderRadius: 6,
+    fontFamily: "var(--font-mono)",
+    fontSize: 12,
+    lineHeight: 1.5,
+    whiteSpace: "pre-wrap",
+    overflowWrap: "anywhere",
+  } as const;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {providerError && (
+        <div role="alert" style={{ ...alert, borderColor: "rgba(239,68,68,0.3)", background: "rgba(239,68,68,0.07)", color: "#ef4444" }}>
+          Error: {providerError}
+        </div>
+      )}
+      {truncated && (
+        <div role="alert" style={{ ...alert, borderColor: "rgba(234,179,8,0.3)", background: "rgba(234,179,8,0.07)", color: "#ca8a04" }}>
+          {t(unansweredTruncation ? "chat.truncatedWithoutAnswer" : "chat.truncatedByOutputLimit")}
+          {unansweredTruncation && onCompact && (
+            <button
+              type="button"
+              onClick={onCompact}
+              disabled={isCompacting}
+              style={{
+                display: "block",
+                marginTop: 8,
+                padding: "3px 8px",
+                border: "1px solid currentColor",
+                borderRadius: 5,
+                background: "transparent",
+                color: "inherit",
+                cursor: isCompacting ? "default" : "pointer",
+                font: "inherit",
+              }}
+            >
+              {t(isCompacting ? "chat.compacting" : "chat.compactContext")}
+            </button>
+          )}
+          {unansweredTruncation && compactError && (
+            <div style={{ marginTop: 8, color: "#ef4444", whiteSpace: "pre-wrap" }}>{compactError}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AssistantMessageView({
   message,
   isStreaming,
@@ -661,10 +735,8 @@ function AssistantMessageView({
   sessionId,
   entryId,
   searchBlock,
-  writtenFiles,
-  onCompact,
-  isCompacting,
-  compactError,
+  blockIndexOffset,
+  isTurnPart,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -679,20 +751,21 @@ function AssistantMessageView({
   sessionId?: string;
   entryId?: string;
   searchBlock?: AssistantContentBlock;
-  writtenFiles?: WrittenFile[];
-  onCompact?: () => void;
-  isCompacting?: boolean;
-  compactError?: string | null;
+  blockIndexOffset?: number;
+  /** A part of a segmented turn shows no turn footer; see `Props.isTurnPart`. */
+  isTurnPart?: boolean;
 }) {
   const { t } = useI18n();
-  const time = showTimestamp ? formatTime(message.timestamp) : null;
+  // The time is the turn's, shown by `TurnFooter` at its end. On a part it would be
+  // a lone stamp that moves down the turn as the run goes on and disappears when the
+  // turn folds, exactly like the token counts did.
+  const time = showTimestamp && !isTurnPart ? formatTime(message.timestamp) : null;
   const blockItems = useMemo(() => (message.content ?? [])
-    .map((block, originalIndex) => ({ block, originalIndex }))
-    .filter(({ block }) => !isEmptyThinkingBlock(block, { isStreaming })), [message.content, isStreaming]);
+    .map((block, index) => ({ block, originalIndex: index + (blockIndexOffset ?? 0) }))
+    .filter(({ block }) => !isEmptyThinkingBlock(block, { isStreaming })), [message.content, isStreaming, blockIndexOffset]);
   const blocks = useMemo(() => blockItems.map(({ block }) => block), [blockItems]);
   const providerError = getAssistantErrorMessage(message, { isStreaming });
   const truncated = isAssistantTruncated(message, { isStreaming });
-  const unansweredTruncation = truncated && !hasAssistantAnswer(message);
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
   const streamStartRef = useRef<StreamRateStart | null>(null);
@@ -756,6 +829,10 @@ function AssistantMessageView({
     .filter((b): b is TextContent => b.type === "text")
     .map((b) => b.text)
     .join("\n");
+  // A part of a segmented turn shows none of this: a turn cut off mid-thinking
+  // ends on a folded group, and a footer attached to a part would sit after some
+  // sentence in the middle of it. `TurnFooter` renders once at the turn's end.
+  const showsTurnFooter = !isTurnPart;
 
   const copyContent = () => {
     copyText(textContent).then(() => {
@@ -873,84 +950,27 @@ function AssistantMessageView({
         ))}
       </div>
 
-      {providerError && (
-        <div
-          role="alert"
-          style={{
-            marginTop: blocks.length > 0 ? 8 : 0,
-            padding: "7px 10px",
-            border: "1px solid rgba(239,68,68,0.3)",
-            borderRadius: 6,
-            background: "rgba(239,68,68,0.07)",
-            color: "#ef4444",
-            fontFamily: "var(--font-mono)",
-            fontSize: 12,
-            lineHeight: 1.5,
-            whiteSpace: "pre-wrap",
-            overflowWrap: "anywhere",
-          }}
-        >
-          Error: {providerError}
+      {!isTurnPart && (providerError || truncated) && (
+        <div style={{ marginTop: blocks.length > 0 ? 8 : 0 }}>
+          <AssistantNotice message={message} isStreaming={isStreaming} />
         </div>
       )}
 
-      {truncated && (
-        <div
-          role="alert"
-          style={{
-            marginTop: blocks.length > 0 || providerError ? 8 : 0,
-            padding: "7px 10px",
-            border: "1px solid rgba(234,179,8,0.3)",
-            borderRadius: 6,
-            background: "rgba(234,179,8,0.07)",
-            color: "#ca8a04",
-            fontFamily: "var(--font-mono)",
-            fontSize: 12,
-            lineHeight: 1.5,
-            whiteSpace: "pre-wrap",
-            overflowWrap: "anywhere",
-          }}
-        >
-          {t(unansweredTruncation ? "chat.truncatedWithoutAnswer" : "chat.truncatedByOutputLimit")}
-          {unansweredTruncation && onCompact && (
-            <button
-              type="button"
-              onClick={onCompact}
-              disabled={isCompacting}
-              style={{
-                display: "block",
-                marginTop: 8,
-                padding: "3px 8px",
-                border: "1px solid currentColor",
-                borderRadius: 5,
-                background: "transparent",
-                color: "inherit",
-                cursor: isCompacting ? "default" : "pointer",
-                font: "inherit",
-              }}
-            >
-              {t(isCompacting ? "chat.compacting" : "chat.compactContext")}
-            </button>
-          )}
-          {unansweredTruncation && compactError && (
-            <div style={{ marginTop: 8, color: "#ef4444", whiteSpace: "pre-wrap" }}>{compactError}</div>
-          )}
-        </div>
-      )}
-
-      {writtenFiles && writtenFiles.length > 0 && (
-        <TurnWrittenFiles files={writtenFiles} onOpenFile={onOpenFile} />
-      )}
-
+      {/* The row is there when it has something to say. Left empty under a part of
+          a turn, its margin alone pushed the next block away. */}
+      {(showsTurnFooter && (message.usage || textContent) || time) && !isStreaming && (
       <div style={{
         display: "flex", alignItems: "center", gap: 8, marginTop: 4,
       }}>
-        {message.usage && !isStreaming && (
+        {/* Usage is per stored request, and pi-web saves one assistant entry per
+            tool call: shown on every part it is a row of token counts repeating
+            down the turn. It belongs with the rest of the turn's footer. */}
+        {showsTurnFooter && message.usage && !isStreaming && (
           <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
             {formatUsage(message.usage)}
           </div>
         )}
-        {textContent && !isStreaming && (
+        {textContent && showsTurnFooter && !isStreaming && (
           <button
             onClick={copyContent}
              title={t("i18n.copyMessage")}
@@ -983,10 +1003,11 @@ function AssistantMessageView({
              {copied ? t("i18n.copied") : t("i18n.copy")}
           </button>
         )}
-        {time && !isStreaming && (
+        {time && (
           <span style={{ fontSize: 10, color: "var(--text-dim)", marginLeft: "auto" }}>{time}</span>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -2121,7 +2142,7 @@ function getToolPreview(block: ToolCallContent): string {
   return String(first).slice(0, TOOL_PREVIEW_LENGTH);
 }
 
-function formatUsage(usage: {
+export function formatUsage(usage: {
   input: number;
   output: number;
   cacheRead: number;
