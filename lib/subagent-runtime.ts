@@ -38,6 +38,7 @@ import { projectTrustReloadOptions } from "./project-trust";
 import { createSubagentCodemodeExtension } from "./builtin-extensions";
 import { resolveShellTools } from "./powershell-settings";
 import { isBuiltInSubagentsEnabled, readSubagentSettings } from "./subagent-settings";
+import { deliverSettledReport } from "./settled-report-delivery";
 import { SubagentQueue } from "./subagent-queue";
 import { addWorktree, removeWorktree } from "./worktree";
 import { randomUUID } from "node:crypto";
@@ -82,11 +83,11 @@ type StoredSubagentExecution = {
 declare global {
   var __piSubagentRuns: Map<string, StoredSubagentExecution> | undefined;
   var __piSubagentSettledRuns: Map<string, SubagentRunInfo> | undefined;
+  var __piSubagentResultCollectors: Map<string, Set<ResultCollector>> | undefined;
   var __piSubagentQueue: SubagentQueue<SubagentRunInfo> | undefined;
   var __piSubagentConsumedResults: Map<string, string> | undefined;
 }
 const SUBAGENT_CONTEXT_LIMIT = 50_000;
-const PARENT_IDLE_POLL_MS = 200;
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 const TURN_LIMIT_INSTRUCTION = "You have reached your turn limit. Wrap up immediately and provide your final answer now.";
@@ -129,6 +130,56 @@ function getSubagentRuns(): Map<string, StoredSubagentExecution> {
  * the last few results matter, an archive of them does not.
  */
 const SETTLED_RUNS_LIMIT = 64;
+
+/** How long a notification waits for an in-flight `get_subagent_result` of its own run. */
+const RESULT_COLLECTION_GRACE_MS = 2_000;
+
+/**
+ * `get_subagent_result` calls currently in flight, by subagent session id.
+ *
+ * A background run that settles while its parent sits inside that call must not also be
+ * announced: the parent is handed the same text as a tool result within the poll interval, so
+ * the notification would only wake a second turn to repeat it. That single call is the one
+ * thing worth waiting for. Waiting for the parent to fall idle instead — what this did before —
+ * meant a parent that kept working for forty minutes got forty-minute-old reports in a burst.
+ */
+function getResultCollectors(): Map<string, Set<ResultCollector>> {
+  if (!globalThis.__piSubagentResultCollectors) globalThis.__piSubagentResultCollectors = new Map();
+  return globalThis.__piSubagentResultCollectors;
+}
+
+/** One in-flight `get_subagent_result`, with the handle that ends it. */
+type ResultCollector = { done: Promise<void>; end: () => void };
+
+/** Announce that a `get_subagent_result` for `sessionId` is running; the returned fn ends it. */
+export function beginSubagentResultCollection(sessionId: string): () => void {
+  const collectors = getResultCollectors();
+  let finish = () => {};
+  const done = new Promise<void>((resolve) => { finish = resolve; });
+  const collector: ResultCollector = { done, end: () => {} };
+  collector.end = () => {
+    const set = collectors.get(sessionId);
+    if (set) {
+      set.delete(collector);
+      if (set.size === 0) collectors.delete(sessionId);
+    }
+    finish();
+  };
+  const open = collectors.get(sessionId) ?? new Set<ResultCollector>();
+  collectors.set(sessionId, open);
+  open.add(collector);
+  return collector.end;
+}
+
+/** Resolve when every in-flight collection for `sessionId` has ended, or once `timeoutMs` passes. */
+export async function awaitSubagentResultCollection(sessionId: string, timeoutMs: number): Promise<void> {
+  const open = [...(getResultCollectors().get(sessionId) ?? [])].map((collector) => collector.done);
+  if (open.length === 0) return;
+  await Promise.race([
+    Promise.all(open),
+    new Promise<void>((resolve) => { setTimeout(resolve, timeoutMs); }),
+  ]);
+}
 
 function getSettledSubagentRuns(): Map<string, SubagentRunInfo> {
   if (!globalThis.__piSubagentSettledRuns) globalThis.__piSubagentSettledRuns = new Map();
@@ -737,22 +788,19 @@ export function createSubagentController(
       parent = await dependencies.reopenSession(run.parentSessionId, sessionFile);
     }
     await parent.waitUntilReady();
-    // The parent may still be inside the `get_subagent_result` call that collects this result,
-    // and `deliverAs: "followUp"` would only queue the message until that turn ends anyway.
-    // Hold the notification until the parent is idle and re-check the mark, so a result the
-    // parent already consumed never triggers a duplicate turn.
-    while (parent.isAlive() && parent.isRunning()) {
-      if (takeResultConsumed(run)) return;
-      await new Promise<void>((resolve) => { setTimeout(resolve, PARENT_IDLE_POLL_MS); });
-    }
+    // Queued the moment the run settles, not held until the parent looks idle: a parent that runs
+    // on for forty minutes delivered a burst of stale reports at the end of it. The one thing
+    // still worth waiting for is a `get_subagent_result` in flight for *this* run, which is about
+    // to give the parent the same text as a tool result; that wait is bounded by the call.
+    await awaitSubagentResultCollection(run.sessionId, RESULT_COLLECTION_GRACE_MS);
     if (takeResultConsumed(run)) return;
     if (!parent.isAlive()) throw new Error(`Parent session is no longer available: ${run.parentSessionId}`);
-    await parent.inner.sendCustomMessage({
+    await deliverSettledReport(parent, {
       customType: "pi-web:subagent-notification",
       content: subagentNotificationText(run),
       display: true,
       details: subagentToolDetails(run),
-    }, { deliverAs: "followUp", triggerTurn: true });
+    });
   }
 
   async function abort(sessionId: string): Promise<void> {

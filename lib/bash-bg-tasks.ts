@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BG_TASK_NOTIFICATION_CUSTOM_TYPE } from "./bg-task-notification";
+import { deliverSettledReport } from "./settled-report-delivery";
 
 /**
  * Foreground bash commands that outlive this switch to background mode, where
@@ -102,15 +103,14 @@ export function createBgTaskNotifier(deps: BgTaskNotifierDependencies): BgTaskNo
         session = await deps.reopenSession(sessionId, sessionFile);
       }
       await session.waitUntilReady();
-      // Do not interrupt an in-flight turn: deliver once the parent is idle.
-      while (session.isAlive() && session.isRunning()) {
-        await new Promise<void>((resolve) => { setTimeout(resolve, 200); });
-      }
-      if (!session.isAlive()) return;
-      await session.inner.sendCustomMessage(
-        { customType: BG_TASK_NOTIFICATION_CUSTOM_TYPE, content: text, display: true, details: undefined },
-        { deliverAs: "followUp", triggerTurn: true },
-      );
+      // Queue it now rather than waiting for the parent to fall idle: pi appends a message that
+      // arrives mid-run at the end of that turn, which bounds the wait by one turn.
+      await deliverSettledReport(session, {
+        customType: BG_TASK_NOTIFICATION_CUSTOM_TYPE,
+        content: text,
+        display: true,
+        details: undefined,
+      });
     },
   };
 }

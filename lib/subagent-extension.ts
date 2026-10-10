@@ -77,6 +77,11 @@ export interface SubagentExtensionRuntime {
   steer(sessionId: string, message: string): Promise<void>;
   notifyParent(run: SubagentRunInfo): Promise<void>;
   markResultConsumed(run: Pick<SubagentRunInfo, "sessionId" | "completedAt">): void;
+  /**
+   * Mark a `get_subagent_result` for `sessionId` as in flight and return the fn that ends it.
+   * Optional so a fake runtime without it still runs; nothing is suppressed for it then.
+   */
+  beginResultCollection?(sessionId: string): () => void;
 }
 
 export type SubagentProfileProvider = () => readonly SubagentProfile[];
@@ -266,32 +271,39 @@ export function createSubagentExtension(
           wait: Type.Optional(Type.Boolean({ description: "Wait until the subagent finishes." })),
         }),
         async execute(_toolCallId, params, signal) {
-          let run = await runtime.get(params.agent_id);
-          if (!run) return { content: [{ type: "text", text: `Subagent not found: ${params.agent_id}` }], details: undefined, isError: true };
-          while (params.wait && (run.status === "starting" || run.status === "running")) {
-            await new Promise<void>((resolve, reject) => {
-              const onAbort = () => {
-                clearTimeout(timer);
-                reject(new Error("Result wait aborted"));
-              };
-              const timer = setTimeout(() => {
-                signal?.removeEventListener("abort", onAbort);
-                resolve();
-              }, 500);
-              if (signal?.aborted) onAbort();
-              else signal?.addEventListener("abort", onAbort, { once: true });
-            });
-            run = await runtime.get(params.agent_id);
+          // Registers this call so a run that settles under it is not also announced as a
+          // notification; see `beginSubagentResultCollection` in the runtime.
+          const endCollection = runtime.beginResultCollection?.(params.agent_id);
+          try {
+            let run = await runtime.get(params.agent_id);
             if (!run) return { content: [{ type: "text", text: `Subagent not found: ${params.agent_id}` }], details: undefined, isError: true };
+            while (params.wait && (run.status === "starting" || run.status === "running")) {
+              await new Promise<void>((resolve, reject) => {
+                const onAbort = () => {
+                  clearTimeout(timer);
+                  reject(new Error("Result wait aborted"));
+                };
+                const timer = setTimeout(() => {
+                  signal?.removeEventListener("abort", onAbort);
+                  resolve();
+                }, 500);
+                if (signal?.aborted) onAbort();
+                else signal?.addEventListener("abort", onAbort, { once: true });
+              });
+              run = await runtime.get(params.agent_id);
+              if (!run) return { content: [{ type: "text", text: `Subagent not found: ${params.agent_id}` }], details: undefined, isError: true };
+            }
+            // The parent now holds this result, so the background completion notification must not
+            // deliver the same text again and wake a duplicate turn.
+            if (run.runInBackground && TERMINAL_SUBAGENT_STATUSES.has(run.status)) runtime.markResultConsumed(run);
+            return {
+              content: [{ type: "text", text: subagentFinalText(run) }],
+              details: subagentToolDetails(run),
+              ...(run.status === "failed" ? { isError: true } : {}),
+            };
+          } finally {
+            endCollection?.();
           }
-          // The parent now holds this result, so the background completion notification must not
-          // deliver the same text again and wake a duplicate turn.
-          if (run.runInBackground && TERMINAL_SUBAGENT_STATUSES.has(run.status)) runtime.markResultConsumed(run);
-          return {
-            content: [{ type: "text", text: subagentFinalText(run) }],
-            details: subagentToolDetails(run),
-            ...(run.status === "failed" ? { isError: true } : {}),
-          };
         },
       }));
 
