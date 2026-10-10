@@ -13,12 +13,24 @@ export interface ParsedRecords {
 }
 
 export interface DelimitedTableData {
-  /** The first record's fields, padded with "" up to the widest record. */
+  /** The header record's fields padded with "" to the widest record, or `#1…#N` when there is no header. */
   columns: string[];
-  /** The line the header record starts on; 0 when there is no record at all. */
+  /** The line the header row sits at, i.e. the first record's line; 0 when there is no record at all. */
   headerLine: number;
   rows: string[][];
   rowLines: number[];
+}
+
+/**
+ * What part of a file `text` covers. A `read` tool call returns a slice, not a
+ * file: `firstLine` numbers its records as the file numbers its lines, and a
+ * slice cut from the middle of a file has no header row to take.
+ */
+export interface DelimitedTableOptions {
+  /** The file line `text` starts on. Default 1 (the whole file). */
+  firstLine?: number;
+  /** Default: only text that starts at the file's top can carry a header row. */
+  hasHeader?: boolean;
 }
 
 const CSV_DELIMITER_CANDIDATES = [",", ";", "\t", "|"] as const;
@@ -37,27 +49,37 @@ export function isDelimitedTablePath(filePath: string): boolean {
   return delimiterForPath(filePath) !== null;
 }
 
+/** A line number to count from: 1 for a whole file, the read's offset for a slice. */
+function firstLineOf(firstLine?: number): number {
+  const value = Math.floor(firstLine ?? 1);
+  return Number.isFinite(value) && value > 1 ? value : 1;
+}
+
 /**
  * Splits `text` into records. With `complete: false` the text is a prefix of
  * the file (the viewer loads large files in chunks), so a last record that no
  * line break ends, or that stops inside a quoted field, is left out rather
  * than shown cut. Blank lines are skipped, as spreadsheet tools do.
+ * `firstLine` is the file line `text` starts on, so a slice is numbered as the
+ * file numbers its lines. A slice that starts inside a quoted field spanning
+ * lines cannot be re-joined by any parser: it splits where the slice starts.
  */
 export function parseDelimitedRecords(
   text: string,
   delimiter: string,
-  options: { complete?: boolean; maxRecords?: number } = {},
+  options: { complete?: boolean; maxRecords?: number; firstLine?: number } = {},
 ): ParsedRecords {
   const complete = options.complete ?? true;
   const maxRecords = options.maxRecords ?? Infinity;
+  const firstLine = firstLineOf(options.firstLine);
   const records: string[][] = [];
   const lines: number[] = [];
   const length = text.length;
   const delimiterCode = delimiter.charCodeAt(0);
   let index = text.charCodeAt(0) === 0xfeff ? 1 : 0;
-  let line = 1;
+  let line = firstLine;
   let record: string[] = [];
-  let recordLine = 1;
+  let recordLine = firstLine;
 
   const endRecord = () => {
     // A blank line parses as one empty field.
@@ -171,19 +193,37 @@ export function detectCsvDelimiter(text: string): string {
   return best;
 }
 
-/** The table of a delimited file: the first record is the header row. */
-export function parseDelimitedTable(text: string, filePath: string, complete = true): DelimitedTableData {
+/**
+ * The table of a delimited file: the first record is the header row, unless
+ * `hasHeader` says otherwise — a slice from the middle of a file starts on a
+ * data row, so every record is a row and the columns are numbered.
+ */
+export function parseDelimitedTable(
+  text: string,
+  filePath: string,
+  complete = true,
+  options: DelimitedTableOptions = {},
+): DelimitedTableData {
+  const firstLine = firstLineOf(options.firstLine);
+  const hasHeader = options.hasHeader ?? firstLine === 1;
   const fixed = delimiterForPath(filePath) ?? ",";
   const delimiter = fixed === "," ? detectCsvDelimiter(text) : fixed;
-  const { records, lines } = parseDelimitedRecords(text, delimiter, { complete });
+  const { records, lines } = parseDelimitedRecords(text, delimiter, { complete, firstLine });
   if (records.length === 0) return { columns: [], headerLine: 0, rows: [], rowLines: [] };
   let width = 0;
   for (const record of records) if (record.length > width) width = record.length;
   const header = records[0];
-  const columns = header.length === width
-    ? header
-    : [...header, ...Array.from({ length: width - header.length }, () => "")];
-  return { columns, headerLine: lines[0], rows: records.slice(1), rowLines: lines.slice(1) };
+  let columns: string[];
+  if (!hasHeader) {
+    columns = Array.from({ length: width }, (_, index) => `#${index + 1}`);
+  } else {
+    columns = header.length === width
+      ? header
+      : [...header, ...Array.from({ length: width - header.length }, () => "")];
+  }
+  return hasHeader
+    ? { columns, headerLine: lines[0], rows: records.slice(1), rowLines: lines.slice(1) }
+    : { columns, headerLine: lines[0], rows: records, rowLines: lines };
 }
 
 const MEASURE_SAMPLE_ROWS = 500;

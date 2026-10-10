@@ -51,22 +51,33 @@ const CELL: CSSProperties = {
  * gutter shows the file line each record starts on. Rows have one fixed
  * height and only those around the viewport are rendered, so a large file
  * scrolls without a DOM per row. The viewer's own content box scrolls (its
- * position is saved and restored like the source view's); `scrollRef` is it.
+ * position is saved and restored like the source view's); `scrollRef` is it —
+ * this component never builds a scroller of its own, and renders nothing when
+ * the text holds no record at all (an empty file, an empty slice).
  * `complete: false` means `content` is a loaded prefix of the file, whose cut
- * last record is left out.
+ * last record is left out. `firstLine` / `hasHeader` describe a slice of a
+ * file rather than a whole one (a `read` tool call's result): the gutter keeps
+ * the file's numbering and the slice's first record stays a row.
  */
 export function DelimitedTable({
   content,
   filePath,
   complete,
   scrollRef,
+  firstLine,
+  hasHeader,
 }: {
   content: string;
   filePath: string;
   complete: boolean;
   scrollRef: RefObject<HTMLElement | null>;
+  firstLine?: number;
+  hasHeader?: boolean;
 }) {
-  const table = useMemo(() => parseDelimitedTable(content, filePath, complete), [complete, content, filePath]);
+  const table = useMemo(
+    () => parseDelimitedTable(content, filePath, complete, { firstLine, hasHeader }),
+    [complete, content, filePath, firstLine, hasHeader],
+  );
   const widths = useMemo(() => measureColumnWidths(table.columns, table.rows), [table]);
   const totalWidth = useMemo(() => widths.reduce((sum, width) => sum + width, GUTTER_WIDTH), [widths]);
   const [scrollTop, setScrollTop] = useState(0);
