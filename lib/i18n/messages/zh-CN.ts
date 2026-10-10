@@ -269,6 +269,7 @@ export const zhCNLocale: LocalePlugin = {
     "readPanel.tabLabel": "读取快照 {name}",
     "readPanel.open": "在面板中打开这次读取的内容",
     "readPanel.sliceHint": "文件第 {from} 到 {to} 行的片段；解析从第 {firstLine} 行开始，跨行引用的字段可能无法与上方的片段接续。",
+    "readPanel.plainSourceHint": "超过 {max} 行：以纯文本显示 —— 面板对大型文件跳过语法高亮，文件查看器也是如此。",
     "layout.resizeSidebar": "调整侧边栏宽度",
     "layout.resizeFilePanel": "调整文件面板宽度",
     "layout.resizeHint": "拖动调整宽度。双击或按 Enter 恢复默认值。",

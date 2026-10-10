@@ -11,6 +11,9 @@ const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
 const { ReadSnapshotViewer } = await jiti.import("./ReadSnapshotViewer.tsx");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
+// The size limit is the file viewer's own: a test with its own number would drift
+// from the one the component reads.
+const { SOURCE_HIGHLIGHT_MAX_LINES } = await jiti.import("./FileViewer.tsx");
 
 const viewer = await readFile(new URL("./ReadSnapshotViewer.tsx", import.meta.url), "utf8");
 const appShell = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
@@ -34,6 +37,28 @@ test("source keeps the file's line numbers, continuing from the read's offset", 
   const numbers = (html) => [...html.matchAll(/line-number[^>]*>([^<]*)</g)].map((match) => match[1]);
   assert.deepEqual(numbers(render({ filePath: "/tmp/a.ts", content: "const a = 1;\nconst b = 2;" })), ["1", "2"]);
   assert.deepEqual(numbers(render({ filePath: "/tmp/a.ts", content: "const a = 1;\nconst b = 2;", offset: 40 })), ["40", "41"]);
+});
+
+test("past the file viewer's limit a big slice is plain text, still numbered, and says so", () => {
+  const body = (n) => Array.from({ length: n }, (_, i) => `const line${i} = ${i};`).join("\n");
+
+  // The limit reads "more than", exactly as FileViewer's own check, so a slice of
+  // the largest allowed size still gets its colours.
+  const atLimit = render({ filePath: "/tmp/big.ts", content: body(SOURCE_HIGHLIGHT_MAX_LINES), offset: 21 });
+  assert.match(atLimit, /react-syntax-highlighter-line-number/);
+  assert.doesNotMatch(atLimit, /shown as plain text/);
+
+  const over = render({ filePath: "/tmp/big.ts", content: body(SOURCE_HIGHLIGHT_MAX_LINES + 1), offset: 21 });
+  assert.doesNotMatch(over, /react-syntax-highlighter/);
+  assert.match(over, new RegExp(`More than ${SOURCE_HIGHLIGHT_MAX_LINES} lines: shown as plain text`));
+  // Plain, but still the file's own lines: the gutter runs the slice's whole span,
+  // so a reader can still name the line to go back to.
+  const numbers = [...over.matchAll(/data-line-number="(\d+)"/g)].map((match) => match[1]);
+  assert.equal(numbers.length, SOURCE_HIGHLIGHT_MAX_LINES + 1);
+  assert.equal(numbers[0], "21");
+  assert.equal(numbers[numbers.length - 1], String(21 + SOURCE_HIGHLIGHT_MAX_LINES));
+  // Nothing is dropped on the way to the fallback.
+  assert.ok(over.includes(`const line${SOURCE_HIGHLIGHT_MAX_LINES} = ${SOURCE_HIGHLIGHT_MAX_LINES};`));
 });
 
 test("a delimited slice is a table, scroller included, and says where parsing starts", () => {
@@ -67,7 +92,7 @@ test("the viewer holds the snapshot: it fetches nothing and never opens the live
   assert.doesNotMatch(viewer, /<FileViewer/);
   // Importing the source styling is all it takes from the file viewer, and the
   // snapshot's own content is what renders.
-  assert.match(viewer, /import \{ FILE_CODE_STYLE, FILE_LINE_NUMBER_STYLE, fileViewerDarkTheme \} from "\.\/FileViewer"/);
+  assert.match(viewer, /import \{ FILE_CODE_STYLE, FILE_LINE_NUMBER_STYLE, SOURCE_HIGHLIGHT_MAX_LINES, fileViewerDarkTheme \} from "\.\/FileViewer"/);
   assert.match(viewer, /startingLineNumber=\{firstLine\}/);
 });
 

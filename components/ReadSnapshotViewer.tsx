@@ -10,7 +10,7 @@ import { getFileDirectory } from "@/lib/file-paths";
 import { isDelimitedTablePath } from "@/lib/delimited-table";
 import { readSnapshotLineSpan, type ReadSnapshot } from "@/lib/read-snapshot";
 import { DelimitedTable } from "./DelimitedTable";
-import { FILE_CODE_STYLE, FILE_LINE_NUMBER_STYLE, fileViewerDarkTheme } from "./FileViewer";
+import { FILE_CODE_STYLE, FILE_LINE_NUMBER_STYLE, SOURCE_HIGHLIGHT_MAX_LINES, fileViewerDarkTheme } from "./FileViewer";
 import { MarkdownBody } from "./MarkdownBody";
 
 interface Props extends ReadSnapshot {
@@ -38,6 +38,11 @@ export function ReadSnapshotViewer({ filePath, content, offset, onOpenFile }: Pr
   // holds none (an empty or blank one) keeps the source view rather than an
   // empty panel.
   const hasRecords = content.trim() !== "";
+  // Past the file viewer's own limit the highlighter would rebuild an element per
+  // token on every render, so a big slice goes the way a big file does: the same
+  // plain, still numbered source, with one line saying why it is uncoloured.
+  const lines = useMemo(() => content.split("\n"), [content]);
+  const tooBigToHighlight = lines.length > SOURCE_HIGHLIGHT_MAX_LINES;
 
   const source = useMemo(
     () => (
@@ -70,6 +75,25 @@ export function ReadSnapshotViewer({ filePath, content, offset, onOpenFile }: Pr
       </SyntaxHighlighter>
     ),
     [content, firstLine, isDark, language],
+  );
+
+  const plainSource = useMemo(
+    () => (tooBigToHighlight
+      ? lines.map((line, index) => (
+        <span
+          className="file-source-line"
+          data-line-number={firstLine + index}
+          key={`plain-source-line-${firstLine + index}`}
+          style={{ display: "flex", minWidth: "100%" }}
+        >
+          <span aria-hidden="true" style={FILE_LINE_NUMBER_STYLE}>{firstLine + index}</span>
+          <span className="file-source-line-content" style={{ flex: "1 1 auto", minWidth: 0, whiteSpace: "pre" }}>
+            {line}
+          </span>
+        </span>
+      ))
+      : null),
+    [firstLine, lines, tooBigToHighlight],
   );
 
   if (isDelimitedTablePath(filePath) && hasRecords) {
@@ -107,7 +131,27 @@ export function ReadSnapshotViewer({ filePath, content, offset, onOpenFile }: Pr
 
   return (
     <div style={{ height: "100%", overflow: "auto", background: "var(--bg)" }}>
-      {source}
+      {tooBigToHighlight && (
+        <p style={{ margin: 0, padding: "5px 12px", borderBottom: "1px solid var(--border)", color: "var(--text-dim)", fontSize: 11, lineHeight: 1.5 }}>
+          {t("readPanel.plainSourceHint", { max: SOURCE_HIGHLIGHT_MAX_LINES })}
+        </p>
+      )}
+      {tooBigToHighlight ? (
+        <div
+          className="file-source-view is-lightweight"
+          style={{
+            width: "max-content",
+            minWidth: "100%",
+            minHeight: "100%",
+            background: "var(--bg)",
+            ...FILE_CODE_STYLE,
+          }}
+        >
+          {plainSource}
+        </div>
+      ) : (
+        source
+      )}
     </div>
   );
 }

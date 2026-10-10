@@ -269,6 +269,7 @@ export const enLocale: LocalePlugin = {
     "readPanel.tabLabel": "Read snapshot {name}",
     "readPanel.open": "Open this read result in the panel",
     "readPanel.sliceHint": "Lines {from}-{to} of the file; parsing starts at line {firstLine}, so a row quoted across lines may not join the slice above.",
+    "readPanel.plainSourceHint": "More than {max} lines: shown as plain text — the panel skips syntax highlighting for large files, as the file viewer does.",
     "layout.resizeSidebar": "Resize sidebar",
     "layout.resizeFilePanel": "Resize file panel",
     "layout.resizeHint": "Drag to resize. Double-click or press Enter to reset.",

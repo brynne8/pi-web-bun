@@ -62,7 +62,13 @@ interface FileData {
   truncated: boolean;
 }
 
-const SOURCE_HIGHLIGHT_MAX_LINES = 1_000;
+/**
+ * Lines past which the source view drops the highlighter: react-syntax-highlighter
+ * rebuilds every token element on each render, which costs hundreds of milliseconds
+ * on a large file. Shared with `components/ReadSnapshotViewer.tsx` so a read's slice
+ * gives up at the same size the live file does.
+ */
+export const SOURCE_HIGHLIGHT_MAX_LINES = 1_000;
 const DISPLAY_MODE_LABELS: Record<DisplayMode, string> = {
   source: "Source",
   preview: "Preview",
