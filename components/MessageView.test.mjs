@@ -35,6 +35,58 @@ function renderMessage(message, props = {}) {
   );
 }
 
+function settledBatchMessage() {
+  return {
+    role: "custom",
+    customType: "pi-web:settled-reports",
+    display: true,
+    content: [
+      {
+        type: "text",
+        text: `${BG_TASK_NOTIFICATION_PREFIX}Background bash task completed in 12s.\nCommand: bun test\nLog file: /tmp/a.log\n\nOutput tail:\n\`\`\`\nok\n\`\`\``,
+      },
+      { type: "text", text: "Subagent abc123 completed.\n\nParser found" },
+    ],
+    details: {
+      kind: "pi-web-settled-reports",
+      notificationId: "n1",
+      reports: [
+        { customType: BG_TASK_NOTIFICATION_CUSTOM_TYPE },
+        { customType: "pi-web:subagent-notification" },
+      ],
+    },
+  };
+}
+
+test("a batch of settled reports renders one card per report", () => {
+  // One queue element, N cards: each block is that report's own text and gets the card it always
+  // had. A single merged card, or the whole batch as one Markdown body, both lose that.
+  const html = renderMessage(settledBatchMessage());
+  assert.equal(html.split("Outcome").length - 1, 1, "the background task's own card");
+  assert.match(html, /bun test/);
+  assert.match(html, /Parser found/, "the subagent's report");
+  // The model-only prefix belongs to the text, never to the screen.
+  assert.ok(!html.includes("not a message from the user"));
+});
+
+test("a report the build does not know still shows its text", () => {
+  const message = settledBatchMessage();
+  message.details.reports[1].customType = "pi-web:something-new";
+  const html = renderMessage(message);
+  assert.match(html, /Parser found/);
+});
+
+test("a single-report message keeps rendering as the one card it always was", () => {
+  const html = renderMessage({
+    role: "custom",
+    customType: BG_TASK_NOTIFICATION_CUSTOM_TYPE,
+    display: true,
+    content: `${BG_TASK_NOTIFICATION_PREFIX}Background bash task completed in 3s.\nCommand: ls\nLog file: /tmp/b.log\n\nOutput tail:\n\`\`\`\nfile\n\`\`\``,
+  });
+  assert.equal(html.split("Outcome").length - 1, 1);
+  assert.match(html, /ls/);
+});
+
 test("updates a reused message when it gains or loses its place in a turn", () => {
   const props = { message: { role: "assistant", content: [] } };
   assert.equal(MessageView.compare(props, props), true);
