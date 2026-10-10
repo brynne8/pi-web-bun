@@ -101,7 +101,7 @@ lib/
   retry-http2-stream-drops.ts temporary wrap over AgentSession._isRetryableError, so a relay's dropped HTTP/2 stream retries (the private name is pinned by its test)
   pending-notifications.ts   index of background results that settled before the conversation had room for them, read by the pending_notifications tool
   pending-notifications-extension.ts  registers that tool on its own, so switching subagents off cannot hide background commands' results
-  settled-report-delivery.ts  a finished run's report to its parent: queued into pi's follow-up queue, whose mode is raised so a burst drains in one turn
+  settled-report-note.ts     a batch of settled background reports: one message in the parent's queue, appended in place while it waits, frozen once pi appends it
   session-reader.ts         SessionManager wrappers, path cache, buildSessionContext adapter
   session-fork.ts           forkSessionBranch(): the sidebar's Fork, a leaf-branch copy on a fresh SessionManager named after its source, typed refusals
   session-fork-name.ts      client-safe Fork naming: source title + " · " + 4 hex; splitting the suffix off for the row and toast

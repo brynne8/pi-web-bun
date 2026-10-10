@@ -29,6 +29,7 @@ import type {
   SessionMessageEntry,
 } from "./types";
 import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS, type HeadlessCustomUiTui } from "./custom-ui-terminal";
+import { createSettledReportSink } from "./settled-report-note";
 import { createPendingNotificationsExtension } from "./pending-notifications-extension";
 import {
   createSubagentExtension,
@@ -2030,7 +2031,17 @@ function registerRpcWrapper(wrapper: AgentSessionWrapper): void {
   if (!wrapper.isChatOnly()) wrapper.beginExtensionBinding();
 }
 
+// One sink for both kinds of background work: a batch is one message in the parent's queue, so
+// several results finishing together reach the model in one turn instead of one turn each.
+const SETTLED_REPORT_SINK = createSettledReportSink({
+  getSession: (sessionId) => getRegistry().get(sessionId),
+  reopenSession: async (sessionId, sessionFile) =>
+    (await startRpcSession(sessionId, sessionFile, undefined)).session,
+  resolveSessionPath,
+});
+
 const SUBAGENT_CONTROLLER = createSubagentController({
+  settledReports: SETTLED_REPORT_SINK,
   getSession: (sessionId) => getRegistry().get(sessionId),
   registerSession: (inner, options) => {
     const wrapper = new AgentSessionWrapper(inner, {
@@ -2054,7 +2065,7 @@ const BG_TASK_NOTIFIER = createBgTaskNotifier({
   reopenSession: async (sessionId, sessionFile) =>
     (await startRpcSession(sessionId, sessionFile, undefined)).session,
   resolveSessionPath,
-});
+}, SETTLED_REPORT_SINK);
 
 export function getSubagentRun(sessionId: string) {
   return SUBAGENT_CONTROLLER.get(sessionId);

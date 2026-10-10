@@ -7,9 +7,9 @@
  * index: one entry per settled report, read back by the `pending_notifications` tool, and nothing
  * else. It holds no output — only what the model needs to decide whether to go and fetch it.
  *
- * "Delivered" is read off the parent's own transcript rather than tracked here: the report's
- * custom message carries a marker in its `details`, so a report that has reached the session is
- * gone from the list without this module having to guess when pi appended it.
+ * "Delivered" is read off the parent's own transcript rather than tracked here: a batch message
+ * carries its id in its `details`, so every report it carried is gone from the list the moment
+ * the message reaches the session, without this module guessing when pi appended it.
  */
 
 /** Which kind of background work produced the result. */
@@ -26,10 +26,13 @@ export interface PendingNotification {
   finishedAtMs: number;
   /** The session the report belongs to, by id — the parent, not the cwd. */
   parentSessionId: string;
-  /** The custom message type the report is delivered under. */
+  /** The report's own custom type, which decides the card that renders it. */
   customType: string;
-  /** Written into the delivered message's `details`, which is how delivery is recognized. */
-  markerId: string;
+  /**
+   * The batch message this report rides in, written into its `details.notificationId`. One id
+   * per message, so a batch landing clears every report it carried at once.
+   */
+  messageId: string;
   /** How to fetch the whole result, spelled so the model can copy it out of the list. */
   fetchHint: string;
 }
@@ -93,15 +96,10 @@ export function pendingNotificationsFor(parentSessionId: string, entries: readon
   const list = registry.get(parentSessionId);
   if (!list || list.length === 0) return [];
   const delivered = deliveredNotificationIds(entries);
-  const pending = list.filter((entry) => !delivered.has(entry.markerId));
+  const pending = list.filter((entry) => !delivered.has(entry.messageId));
   if (pending.length === 0) registry.delete(parentSessionId);
   else if (pending.length !== list.length) registry.set(parentSessionId, pending);
   return [...pending].sort((a, b) => b.finishedAtMs - a.finishedAtMs);
-}
-
-/** The `details` a report message carries so its delivery can be recognized later. */
-export function pendingNotificationDetails(markerId: string): { notificationId: string } {
-  return { notificationId: markerId };
 }
 
 /** One recognizable line out of a longer string: first non-empty line, collapsed, capped. */

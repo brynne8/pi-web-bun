@@ -37,7 +37,7 @@ import {
   captureScrollDistance,
   getNextVisibleCount,
   getPromptAnchorSpacerHeight,
-  getVisibleRenderWindow,
+  getVisibleEntryStart,
   isScrollAtTail,
   restoreScrollTop,
   VISIBLE_PAGE_SIZE,
@@ -1097,7 +1097,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 if (idx === lastUserIdx) { (lastUserMsgRef as { current: HTMLDivElement | null }).current = el; }
               };
 
-              const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; blockIndexOffset?: number; isTurnPart?: boolean } = {}): ReactNode => {
+              const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; blockIndexOffset?: number; isTurnPart?: boolean; isTurnTail?: boolean } = {}): ReactNode => {
                 const msg = options.messageOverride ?? messages[idx];
                 if (isHiddenCustomMessage(msg)) return null;
                 const isVisible = isMessageGroupAnchor(msg) || msg.role === "assistant";
@@ -1139,6 +1139,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                     sessionId={session?.id ?? sessionIdRef.current ?? undefined}
                     blockIndexOffset={options.blockIndexOffset}
                     isTurnPart={options.isTurnPart}
+                    isTurnTail={options.isTurnTail}
                   />
                 );
                 if (!isVisible || currentRefIdx === undefined) return view;
@@ -1149,12 +1150,14 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 );
               };
 
-              const rendered: ReactNode[] = [];
+              // Each entry remembers the message it came from: the window below counts
+              // messages, and a turn renders as several entries for one of them.
+              const rendered: { node: ReactNode; messageIdx: number }[] = [];
               for (let idx = 0; idx < messages.length;) {
                 const msg = messages[idx];
                 const hasAnchor = isMessageGroupAnchor(msg);
                 if (!hasAnchor && idx !== 0) {
-                  rendered.push(renderMessage(idx));
+                  rendered.push({ node: renderMessage(idx), messageIdx: idx });
                   idx += 1;
                   continue;
                 }
@@ -1174,13 +1177,13 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                   // footer at the turn's end: per entry they were a row under every tool
                   // call, all of it gone the moment the run folded.
                   for (let renderIdx = groupStartIdx; renderIdx < endIdx; renderIdx++) {
-                    rendered.push(renderMessage(renderIdx, { isTurnPart: true }));
+                    rendered.push({ node: renderMessage(renderIdx, { isTurnPart: true }), messageIdx: renderIdx });
                   }
                   idx = endIdx;
                   continue;
                 }
 
-                if (hasAnchor) rendered.push(renderMessage(userIdx));
+                if (hasAnchor) rendered.push({ node: renderMessage(userIdx), messageIdx: userIdx });
 
                 // The turn's words stay on screen and each run of thinking and tool
                 // calls between them folds into a group of its own, so a long turn
@@ -1216,36 +1219,45 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                   .join("\n\n")
                   .trim();
 
+                // The turn's last part is the one place a part may still show the turn's own
+                // row: the model label a part used to repeat for every run of one entry.
+                const lastSegmentIdx = segments.length - 1;
+                const lastPartIdx = (segments[lastSegmentIdx]?.parts.length ?? 1) - 1;
                 for (const [segmentIdx, segment] of segments.entries()) {
-                  const views: ReactNode[] = [];
+                  const views: { node: ReactNode; messageIdx: number }[] = [];
                   let revealSegment = false;
                   let segmentRefIdx: number | undefined;
 
-                  for (const part of segment.parts) {
+                  for (const [partIdx, part] of segment.parts.entries()) {
                     const stored = messages[part.index] as AssistantMessage;
                     if (part.custom) {
                       revealSegment ||= Boolean(pendingSearchScroll && pendingSearchScroll.entryId === entryIds[part.index]);
-                      views.push(renderMessage(part.index, { attachRef: false, keyPrefix: `segment-${segmentIdx}` }));
+                      views.push({ node: renderMessage(part.index, { attachRef: false, keyPrefix: `segment-${segmentIdx}` }), messageIdx: part.index });
                       continue;
                     }
                     const view = getTurnPart(turnPartCache, stored, part.start, part.end);
                     const partBlocks = view.content ?? [];
                     revealSegment ||= Boolean(pendingSearchScroll && entryIds[part.index] === pendingSearchScroll.entryId && (!searchBlock || partBlocks.includes(searchBlock)));
                     segmentRefIdx ??= visibleRefIndexByMessage.get(part.index);
-                    views.push(renderMessage(part.index, {
-                      // A group's contents are not the turn's scroll target: its answer is.
+                    views.push({
+                      node: renderMessage(part.index, {
+                        // A group's contents are not the turn's scroll target: its answer is.
                       attachRef: segment.kind === "answer",
                       keyPrefix: `segment-${segmentIdx}-${part.start}`,
                       messageOverride: view,
                       blockIndexOffset: part.start,
-                      // No part is the turn: its time, its numbers, its failure and its
-                      // Copy all come after the last segment, where the turn ends.
-                      isTurnPart: true,
-                    }));
+                        // No part is the turn: its time, its numbers, its failure and its
+                        // Copy all come after the last segment, where the turn ends.
+                        isTurnPart: true,
+                        isTurnTail: segmentIdx === lastSegmentIdx && partIdx === lastPartIdx,
+                      }),
+                      messageIdx: part.index,
+                    });
                   }
 
                   if (segment.kind === "process") {
-                    rendered.push(
+                    rendered.push({
+                      node: (
                       <div
                         key={`process-group-${entryIds[groupStartIdx] ?? groupStartIdx}-${segmentIdx}`}
                         ref={segmentRefIdx === undefined ? undefined : (el) => { messageRefs.current[segmentRefIdx] = el; }}
@@ -1256,10 +1268,12 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                           reveal={revealSegment}
                           t={t}
                         >
-                          {views}
+                          {views.map((entry) => entry.node)}
                         </ProcessDetailsGroup>
-                      </div>,
-                    );
+                      </div>
+                      ),
+                      messageIdx: groupStartIdx,
+                    });
                     continue;
                   }
                   rendered.push(...views);
@@ -1283,16 +1297,19 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                   // recovered from here, and only while it is the session's tail.
                   const canRecover = !answered && isAssistantTruncated(notice) && !hasAssistantAnswer(notice)
                     && endIdx === messages.length && !streamState.isStreaming;
-                  rendered.push(
-                    <div key={`turn-notice-${entryIds[groupStartIdx] ?? groupStartIdx}`} style={{ marginTop: -8, marginBottom: 16 }}>
-                      <AssistantNotice
-                        message={notice}
-                        onCompact={canRecover ? handleCompact : undefined}
-                        isCompacting={canRecover ? isCompacting : undefined}
-                        compactError={canRecover ? compactError : undefined}
-                      />
-                    </div>,
-                  );
+                  rendered.push({
+                    messageIdx: endIdx - 1,
+                    node: (
+                      <div key={`turn-notice-${entryIds[groupStartIdx] ?? groupStartIdx}`} style={{ marginTop: -8, marginBottom: 16 }}>
+                        <AssistantNotice
+                          message={notice}
+                          onCompact={canRecover ? handleCompact : undefined}
+                          isCompacting={canRecover ? isCompacting : undefined}
+                          compactError={canRecover ? compactError : undefined}
+                        />
+                      </div>
+                    ),
+                  });
                 }
 
                 // The turn's footer, once where the turn ends — not under whichever part
@@ -1300,20 +1317,25 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 // ends on a folded group, and pi-web saves one assistant entry per tool
                 // call, so a per-part footer repeats down the turn.
                 if (turnCopyText || turnWrittenFiles.length > 0 || turnUsage) {
-                  rendered.push(
-                    <TurnFooter
-                      key={`turn-footer-${entryIds[groupStartIdx] ?? groupStartIdx}`}
-                      usage={turnUsage}
-                      timestamp={turnTimestamp}
-                      text={turnCopyText}
-                      writtenFiles={turnWrittenFiles}
-                      onOpenFile={onOpenFile}
-                    />,
-                  );
+                  rendered.push({
+                    messageIdx: endIdx - 1,
+                    node: (
+                      <TurnFooter
+                        key={`turn-footer-${entryIds[groupStartIdx] ?? groupStartIdx}`}
+                        usage={turnUsage}
+                        timestamp={turnTimestamp}
+                        text={turnCopyText}
+                        writtenFiles={turnWrittenFiles}
+                        onOpenFile={onOpenFile}
+                      />
+                    ),
+                  });
                 }
                 idx = endIdx;
               }
-              const { startIndex } = getVisibleRenderWindow(rendered.length, visibleCount);
+              // The window counts messages, so a turn that renders as several entries cannot
+              // push a prepended page's own messages out of it.
+              const startIndex = getVisibleEntryStart(rendered, messages.length, visibleCount);
               const hasMore = startIndex > 0 || hasEarlierMessages;
               return (
                 <>
@@ -1322,7 +1344,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                        {t("chat.loadEarlier")}
                     </div>
                   )}
-                  {rendered.slice(startIndex)}
+                  {rendered.slice(startIndex).map((entry) => entry.node)}
                 </>
               );
             })()}

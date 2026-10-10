@@ -11,6 +11,25 @@ export function getVisibleRenderWindow(totalCount: number, visibleCount: number)
   return { startIndex, hasMore: startIndex > 0 };
 }
 
+/**
+ * The first rendered entry to keep when the window holds `visibleCount` messages.
+ *
+ * The window counts messages, never rendered entries: one message can render as several entries
+ * — a turn's words, each group of its workings, its footer — so slicing by entry count dropped
+ * `entries - visibleCount` entries off the top even while every loaded message was inside the
+ * window. That is how a prepended older page's own first message went missing from the DOM while
+ * the page that fetched it was already on screen.
+ */
+export function getVisibleEntryStart<T extends { messageIdx: number }>(
+  entries: readonly T[],
+  messageCount: number,
+  visibleCount: number,
+): number {
+  const startMessageIdx = Math.max(0, messageCount - Math.max(visibleCount, 0));
+  const first = entries.findIndex((entry) => entry.messageIdx >= startMessageIdx);
+  return first === -1 ? entries.length : first;
+}
+
 export function getNextVisibleCount(currentVisibleCount: number, pageSize = VISIBLE_PAGE_SIZE): number {
   return currentVisibleCount + pageSize;
 }

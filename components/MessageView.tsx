@@ -228,6 +228,8 @@ interface Props {
    * the turn ends on a folded group.
    */
   isTurnPart?: boolean;
+  /** The turn's last part: the one row of the turn's own metadata that is not in the footer. */
+  isTurnTail?: boolean;
 }
 
 export function getModelDisplayName(
@@ -295,12 +297,12 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, entryId, searchBlock, onFork, forking, onEditContent, onCancelEdit, isEditing, showTimestamp, prevTimestamp, sessionId, blockIndexOffset, isTurnPart }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, entryId, searchBlock, onFork, forking, onEditContent, onCancelEdit, isEditing, showTimestamp, prevTimestamp, sessionId, blockIndexOffset, isTurnPart, isTurnTail }: Props) {
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onEditContent={onEditContent} onCancelEdit={onCancelEdit} isEditing={isEditing} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} blockIndexOffset={blockIndexOffset} isTurnPart={isTurnPart} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} blockIndexOffset={blockIndexOffset} isTurnPart={isTurnPart} isTurnTail={isTurnTail} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -737,6 +739,7 @@ function AssistantMessageView({
   searchBlock,
   blockIndexOffset,
   isTurnPart,
+  isTurnTail,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -754,6 +757,8 @@ function AssistantMessageView({
   blockIndexOffset?: number;
   /** A part of a segmented turn shows no turn footer; see `Props.isTurnPart`. */
   isTurnPart?: boolean;
+  /** The turn's last part, the one row of turn metadata a part may still show. */
+  isTurnTail?: boolean;
 }) {
   const { t } = useI18n();
   // The time is the turn's, shown by `TurnFooter` at its end. On a part it would be
@@ -902,7 +907,9 @@ function AssistantMessageView({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {/* Model label */}
+      {/* Model label: one row per turn, on its last part. A part is not the turn, so the
+          label a part used to repeat for every block run of the same entry belongs here. */}
+      {(!isTurnPart || isTurnTail) && (
       <div
         style={{
           fontSize: 11,
@@ -943,6 +950,7 @@ function AssistantMessageView({
           );
         })()}
       </div>
+      )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {blockItems.map(({ block, originalIndex }) => (

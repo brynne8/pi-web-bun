@@ -12,7 +12,9 @@ test("groups the leading segment when the history page starts mid-turn", () => {
   assert.match(source, /if \(!hasAnchor && idx !== 0\)/);
   assert.match(source, /const userIdx = hasAnchor \? idx : -1/);
   assert.match(source, /const groupStartIdx = hasAnchor \? idx : 0/);
-  assert.match(source, /if \(hasAnchor\) rendered\.push\(renderMessage\(userIdx\)\)/);
+  // The rendered list is entries that remember the message they came from, so the window
+  // below can count messages rather than entries.
+  assert.match(source, /if \(hasAnchor\) rendered\.push\(\{ node: renderMessage\(userIdx\), messageIdx: userIdx \}\)/);
 });
 
 test("renders a turn as its segments, so nothing the model wrote is filed away", () => {
@@ -50,11 +52,20 @@ test("a turn's failure renders below the fold, not inside it", () => {
   assert.match(messageSource, /\{!isTurnPart && \(providerError \|\| truncated\) && \(/);
 });
 
+test("a part shows the turn's model label once, on the turn's last part", () => {
+  // The label used to render for every part of the same entry, because a part carries the
+  // whole message's provider: a turn with two answer runs printed "test / E2E Model" twice,
+  // which is the same repeated metadata the footer was introduced to end.
+  assert.match(messageSource, /\{\(!isTurnPart \|\| isTurnTail\) && \(/);
+  assert.match(source, /isTurnTail: segmentIdx === lastSegmentIdx && partIdx === lastPartIdx/);
+  assert.match(source, /const lastSegmentIdx = segments\.length - 1/);
+});
+
 test("a running turn prints no token counts under its parts", () => {
   // While the run was going, each stored entry printed its own "… in · … out" row,
   // and every one of them vanished the moment the run ended and folded. The numbers
   // describe the turn, so they come with the turn's footer and not before it exists.
-  assert.match(source, /rendered\.push\(renderMessage\(renderIdx, \{ isTurnPart: true \}\)\)/);
+  assert.match(source, /rendered\.push\(\{ node: renderMessage\(renderIdx, \{ isTurnPart: true \}\), messageIdx: renderIdx \}\)/);
   assert.doesNotMatch(source, /renderMessage\(renderIdx\)/);
 });
 

@@ -1,5 +1,5 @@
-import { mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import {
@@ -7,12 +7,8 @@ import {
   describeBgTaskOutcome,
   type BgTaskOutcome,
 } from "./bg-task-notification";
-import {
-  pendingNotificationDetails,
-  pendingTitleFrom,
-  recordPendingNotification,
-} from "./pending-notifications";
-import { deliverSettledReport } from "./settled-report-delivery";
+import { pendingTitleFrom } from "./pending-notifications";
+import type { SettledReportSink } from "./settled-report-note";
 
 /**
  * Foreground bash commands that outlive this switch to background mode, where
@@ -103,23 +99,9 @@ export interface BgTaskNotifier {
   notify(sessionId: string, text: string, outcome: BgTaskOutcome): Promise<void>;
 }
 
-export function createBgTaskNotifier(deps: BgTaskNotifierDependencies): BgTaskNotifier {
+export function createBgTaskNotifier(deps: BgTaskNotifierDependencies, sink: SettledReportSink): BgTaskNotifier {
   return {
     async notify(sessionId, text, outcome) {
-      // Listed for the parent to look up before the report reaches it, which under a long run is
-      // the whole point: `pending_notifications` answers "what finished while I was working".
-      const markerId = randomBytes(4).toString("hex");
-      recordPendingNotification({
-        kind: "bash",
-        id: basename(outcome.logPath),
-        title: pendingTitleFrom(outcome.command),
-        outcome: describeBgTaskOutcome(outcome),
-        finishedAtMs: outcome.finishedAtMs,
-        parentSessionId: sessionId,
-        customType: BG_TASK_NOTIFICATION_CUSTOM_TYPE,
-        markerId,
-        fetchHint: `read("${outcome.logPath}")`,
-      });
       let session = deps.getSession(sessionId);
       if (!session?.isAlive()) {
         const sessionFile = await deps.resolveSessionPath(sessionId);
@@ -127,13 +109,17 @@ export function createBgTaskNotifier(deps: BgTaskNotifierDependencies): BgTaskNo
         session = await deps.reopenSession(sessionId, sessionFile);
       }
       await session.waitUntilReady();
-      // Queue it now rather than waiting for the parent to fall idle: pi appends a message that
-      // arrives mid-run at the end of that turn, which bounds the wait by one turn.
-      await deliverSettledReport(session, {
+      // The report joins the batch already in the parent's queue, so a run of tasks that finish
+      // together reaches the model as one message rather than one message per task.
+      await sink.deliver(sessionId, {
+        kind: "bash",
+        id: basename(outcome.logPath),
+        title: pendingTitleFrom(outcome.command),
+        outcome: describeBgTaskOutcome(outcome),
+        finishedAtMs: outcome.finishedAtMs,
         customType: BG_TASK_NOTIFICATION_CUSTOM_TYPE,
-        content: text,
-        display: true,
-        details: pendingNotificationDetails(markerId),
+        fetchHint: `read("${outcome.logPath}")`,
+        text,
       });
     },
   };
