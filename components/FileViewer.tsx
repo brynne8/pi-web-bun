@@ -69,7 +69,9 @@ const DISPLAY_MODE_LABELS: Record<DisplayMode, string> = {
   diff: "Diff",
 };
 
-const FILE_CODE_STYLE: CSSProperties = {
+// The source view's font and gutter, shared with components/ReadSnapshotViewer
+// so a read's slice and the live file read identically.
+export const FILE_CODE_STYLE: CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontWeight: "var(--font-mono-weight)",
   fontSize: 13,
@@ -81,7 +83,7 @@ const FILE_CODE_STYLE: CSSProperties = {
 // dark theme's shorthand is dropped, as CodeBlock does: a theme switch then never
 // makes React remove one beside the other (it warned, and the view lost its
 // background).
-const fileViewerDarkTheme = {
+export const fileViewerDarkTheme = {
   ...vscDarkPlus,
   'pre[class*="language-"]': {
     ...vscDarkPlus['pre[class*="language-"]'],
@@ -89,7 +91,7 @@ const fileViewerDarkTheme = {
 };
 delete fileViewerDarkTheme['pre[class*="language-"]'].background;
 
-const FILE_LINE_NUMBER_STYLE: CSSProperties = {
+export const FILE_LINE_NUMBER_STYLE: CSSProperties = {
   width: 48,
   minWidth: 48,
   padding: "0 10px",

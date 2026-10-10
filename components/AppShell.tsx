@@ -17,6 +17,8 @@ import { SystemPromptPanel } from "./SystemPromptPanel";
 import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
 import { AgentSessionPanel } from "./AgentSessionPanel";
 import { SubagentViewer } from "./SubagentViewer";
+import { ReadSnapshotViewer } from "./ReadSnapshotViewer";
+import type { ReadSnapshot } from "@/lib/read-snapshot";
 import { TerminalPanel } from "./TerminalPanel";
 import { newTerminalTab, restoreTerminalTabs, TERMINAL_TABS_KEY, type TerminalTab } from "./terminal-tab-state";
 import { useTheme } from "@/hooks/useTheme";
@@ -96,6 +98,12 @@ function parkedNewSessionDraftKey(cwd: string): string {
 function lastAgentTabId(tabs: readonly { sessionId: string }[]): string | null {
   const last = tabs.at(-1);
   return last ? `agent:${last.sessionId}` : null;
+}
+
+/** Panel tab id of the last read snapshot tab, or null when there is none. */
+function lastReadTabId(tabs: readonly { toolCallId: string }[]): string | null {
+  const last = tabs.at(-1);
+  return last ? `read:${last.toolCallId}` : null;
 }
 
 export function AppShell() {
@@ -532,6 +540,9 @@ export function AppShell() {
   // Subagent work tabs are session-scoped and transient: no persistence, and
   // they are dropped when the project changes (they belong to its sessions).
   const [agentTabs, setAgentTabs] = useState<{ sessionId: string; label: string }[]>([]);
+  // Read snapshots are as transient as sub-agent tabs: each holds the slice one
+  // `read` call returned, which only this chat's messages carry.
+  const [readTabs, setReadTabs] = useState<{ toolCallId: string; snapshot: ReadSnapshot }[]>([]);
   const panelTabs: Tab[] = [
     ...fileTabs,
     ...terminalTabs.map((tab) => ({
@@ -546,6 +557,12 @@ export function AppShell() {
       label: tab.label,
       filePath: tab.label,
       kind: "agent" as const,
+    })),
+    ...readTabs.map((tab) => ({
+      id: `read:${tab.toolCallId}`,
+      label: getFileName(tab.snapshot.filePath) || tab.snapshot.filePath,
+      filePath: tab.snapshot.filePath,
+      kind: "read-snapshot" as const,
     })),
   ];
 
@@ -598,8 +615,10 @@ export function AppShell() {
     setFileTabs(next.tabs);
     // Subagent tabs belong to the previous project's sessions: dropped, not parked.
     setAgentTabs([]);
+    // So do its reads' snapshots: their content came from those messages.
+    setReadTabs([]);
     // Terminal tabs span workspaces and keep control of the panel while active.
-    if (!activeFileTabId || activeFileId || activeFileTabId.startsWith("agent:")) {
+    if (!activeFileTabId || activeFileId || activeFileTabId.startsWith("agent:") || activeFileTabId.startsWith("read:")) {
       setActiveFileTabId(next.activeTabId);
       setRightPanelOpen(next.open);
     }
@@ -1200,12 +1219,24 @@ export function AppShell() {
     if (isMobile) setSidebarOpen(false);
   }, [isMobile]);
 
+  // A read card opens its result in the panel: one tab per call, holding the
+  // slice exactly as it came back. Never the file behind it, which may since
+  // have been written, moved or deleted.
+  const handleOpenReadSnapshot = useCallback((toolCallId: string, snapshot: ReadSnapshot) => {
+    setReadTabs((prev) => prev.some((tab) => tab.toolCallId === toolCallId)
+      ? prev.map((tab) => tab.toolCallId === toolCallId ? { ...tab, snapshot } : tab)
+      : [...prev, { toolCallId, snapshot }]);
+    setActiveFileTabId(`read:${toolCallId}`);
+    setRightPanelOpen(true);
+    if (isMobile) setSidebarOpen(false);
+  }, [isMobile]);
+
   const handleTerminalClosed = (tab: TerminalTab) => {
     const replacement = tab.closing === "restart" ? newTerminalTab(tab.cwd) : null;
     const remaining = terminalTabs.filter((item) => item.id !== tab.id);
     setTerminalTabs((tabs) => tabs.flatMap((item) => item.id !== tab.id ? [item] : replacement ? [replacement] : []));
-    setActiveFileTabId((current) => current !== tab.id ? current : replacement?.id ?? remaining.at(-1)?.id ?? fileTabs.at(-1)?.id ?? lastAgentTabId(agentTabs));
-    if (!replacement && !remaining.length && !fileTabs.length && !agentTabs.length) setRightPanelOpen(false);
+    setActiveFileTabId((current) => current !== tab.id ? current : replacement?.id ?? remaining.at(-1)?.id ?? fileTabs.at(-1)?.id ?? lastAgentTabId(agentTabs) ?? lastReadTabId(readTabs));
+    if (!replacement && !remaining.length && !fileTabs.length && !agentTabs.length && !readTabs.length) setRightPanelOpen(false);
   };
 
   const handleCloseFileTab = useCallback((tabId: string) => {
@@ -1218,22 +1249,32 @@ export function AppShell() {
       setAgentTabs(remainingAgents);
       setActiveFileTabId((cur) => {
         if (cur !== tabId) return cur;
-        return fileTabs.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(remainingAgents);
+        return fileTabs.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(remainingAgents) ?? lastReadTabId(readTabs);
       });
-      if (fileTabs.length === 0 && terminalTabs.length === 0 && remainingAgents.length === 0) setRightPanelOpen(false);
+      if (fileTabs.length === 0 && terminalTabs.length === 0 && remainingAgents.length === 0 && readTabs.length === 0) setRightPanelOpen(false);
+      return;
+    }
+    if (tabId.startsWith("read:")) {
+      const remainingReads = readTabs.filter((tab) => `read:${tab.toolCallId}` !== tabId);
+      setReadTabs(remainingReads);
+      setActiveFileTabId((cur) => {
+        if (cur !== tabId) return cur;
+        return fileTabs.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(agentTabs) ?? lastReadTabId(remainingReads);
+      });
+      if (fileTabs.length === 0 && terminalTabs.length === 0 && agentTabs.length === 0 && remainingReads.length === 0) setRightPanelOpen(false);
       return;
     }
     setFileTabs((prev) => {
       const next = prev.filter((t) => t.id !== tabId);
-      if (next.length === 0 && terminalTabs.length === 0 && agentTabs.length === 0) setRightPanelOpen(false);
+      if (next.length === 0 && terminalTabs.length === 0 && agentTabs.length === 0 && readTabs.length === 0) setRightPanelOpen(false);
       return next;
     });
     setActiveFileTabId((cur) => {
       if (cur !== tabId) return cur;
       const remaining = fileTabs.filter((t) => t.id !== tabId);
-      return remaining.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(agentTabs);
+      return remaining.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(agentTabs) ?? lastReadTabId(readTabs);
     });
-  }, [fileTabs, terminalTabs, agentTabs]);
+  }, [fileTabs, terminalTabs, agentTabs, readTabs]);
 
   const handleViewFullHistory = useCallback(() => {
     if (!selectedSession) return;
@@ -1373,6 +1414,8 @@ export function AppShell() {
   const activeFileTab = fileTabs.find((tab) => tab.id === activeFileTabId) ?? null;
   // Subagent work tabs: like files, only the active one is mounted.
   const activeAgentTab = agentTabs.find((tab) => `agent:${tab.sessionId}` === activeFileTabId) ?? null;
+  // Read snapshots likewise: their content is already in hand, so mounting one costs a render.
+  const activeReadTab = readTabs.find((tab) => `read:${tab.toolCallId}` === activeFileTabId) ?? null;
   const activeCwdName = activeCwd ? getFileName(activeCwd) || activeCwd : null;
   const windowTitle = activeCwdName ? `${activeCwdName} - Pi Web` : "Pi Web";
 
@@ -2553,6 +2596,7 @@ export function AppShell() {
               onOpenFile={handleOpenLinkedFile}
               onFilesUploaded={handleExplorerRefresh}
               onOpenSubagent={handleOpenSubagentTab}
+              onOpenReadSnapshot={handleOpenReadSnapshot}
               onAskInNewChat={handleAskInNewChat}
               quoteSelectionEnabled={quoteSelectionEnabled}
               initialPrompt={pendingQuotePrompt?.sessionId === selectedSession?.id ? pendingQuotePrompt?.text : undefined}
@@ -2717,7 +2761,7 @@ export function AppShell() {
                 { sourceSessionId: activeFileTab.sourceSessionId, page },
               )}
             />
-          ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) && !activeAgentTab ? (
+          ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) && !activeAgentTab && !activeReadTab ? (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
                {translate("files.noneOpen")}
             </div>
@@ -2739,6 +2783,15 @@ export function AppShell() {
               sessionId={activeAgentTab.sessionId}
               fallbackLabel={activeAgentTab.label}
               running={runningSessionIds.has(activeAgentTab.sessionId)}
+              onOpenFile={handleOpenLinkedFile}
+            />
+          )}
+          {activeReadTab && (
+            <ReadSnapshotViewer
+              key={activeReadTab.toolCallId}
+              filePath={activeReadTab.snapshot.filePath}
+              content={activeReadTab.snapshot.content}
+              offset={activeReadTab.snapshot.offset}
               onOpenFile={handleOpenLinkedFile}
             />
           )}

@@ -81,21 +81,26 @@ test("AppShell hosts subagent tabs in the right panel next to file and terminal 
   assert.match(appShell, /setActiveFileTabId\(`agent:\$\{sessionId\}`\)/);
   assert.match(appShell, /kind: "agent" as const/);
   assert.match(appShell, /<SubagentViewer[\s\S]*?sessionId=\{activeAgentTab\.sessionId\}[\s\S]*?running=\{runningSessionIds\.has\(activeAgentTab\.sessionId\)\}/);
-  // Closing the last tab of any kind folds the panel.
-  assert.match(appShell, /if \(fileTabs\.length === 0 && terminalTabs\.length === 0 && remainingAgents\.length === 0\) setRightPanelOpen\(false\)/);
+  // Closing the last tab of any kind folds the panel: file, terminal, sub-agent
+  // or read snapshot.
+  assert.match(appShell, /if \(fileTabs\.length === 0 && terminalTabs\.length === 0 && remainingAgents\.length === 0 && readTabs\.length === 0\) setRightPanelOpen\(false\)/);
+  assert.match(appShell, /if \(fileTabs\.length === 0 && terminalTabs\.length === 0 && agentTabs\.length === 0 && remainingReads\.length === 0\) setRightPanelOpen\(false\)/);
   // Every project switch (cwd change, session pick, new session) goes through
   // changeFileWorkspace(), which parks the file tabs and drops the agent tabs.
   assert.match(appShell, /setFileTabs\(next\.tabs\);[\s\S]{0,120}setAgentTabs\(\[\]\);/);
-  assert.match(appShell, /if \(!activeFileTabId \|\| activeFileId \|\| activeFileTabId\.startsWith\("agent:"\)\) \{/);
+  assert.match(appShell, /if \(!activeFileTabId \|\| activeFileId \|\| activeFileTabId\.startsWith\("agent:"\) \|\| activeFileTabId\.startsWith\("read:"\)\) \{/);
   // The "no files open" placeholder must not show behind an active agent tab.
-  assert.match(appShell, /!terminalTabs\.some\(\(tab\) => tab\.id === activeFileTabId\) && !activeAgentTab \? \(/);
+  assert.match(appShell, /!terminalTabs\.some\(\(tab\) => tab\.id === activeFileTabId\) && !activeAgentTab && !activeReadTab \? \(/);
 });
 
 test("closing a tab falls back without a ?? chain swallowed by a ternary", () => {
   // `a ?? b ?? c ? x : null` parses as `(a ?? b ?? c) ? x : null`: closing a
   // file tab with another one open read `.sessionId` of a missing agent tab.
   assert.doesNotMatch(appShell, /\?\? \w+\.at\(-1\) \?/);
-  assert.equal((appShell.match(/lastAgentTabId\(/g) ?? []).length, 4);
+  // Every close path ends by looking for another tab of the kind, and a fourth
+  // kind of tab joins every one of them: definition plus four close paths.
+  assert.equal((appShell.match(/lastAgentTabId\(/g) ?? []).length, 5);
+  assert.equal((appShell.match(/lastReadTabId\(/g) ?? []).length, 5);
 });
 
 test("the subagent card in a tool call opens the side tab with a label", () => {

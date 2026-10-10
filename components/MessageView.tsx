@@ -12,6 +12,7 @@ import { getAssistantErrorMessage, getThinkingPreview, hasAssistantAnswer, isAss
 import { parseUnifiedPatch, type SplitDiffCell, type SplitDiffFile } from "@/lib/patch";
 import { applyPatchPreviewToFiles, applyPatchResultHasFailures, extractApplyPatchPaths, getApplyPatchInputText, parseApplyPatchInput } from "@/lib/apply-patch";
 import { isApplyPatchToolName, isEditToolName, isShellToolName, isWriteToolName } from "@/lib/tool-names";
+import { readSnapshotOfCall, type ReadSnapshot } from "@/lib/read-snapshot";
 import { isToolCallExpanded, setToolCallExpanded } from "@/lib/tool-call-expansion";
 import { isThinkingExpandedByDefault, THINKING_EXPANDED_EVENT } from "@/lib/thinking-expansion-preference";
 import { TurnWrittenFiles } from "./TurnWrittenFiles";
@@ -199,6 +200,8 @@ interface Props {
   cwd?: string;
   onOpenFile?: (filePath: string, page?: number) => void;
   onOpenSubagent?: (sessionId: string, label: string) => void;
+  /** A `read` call's result opens in a right-panel tab: the slice, not the file. */
+  onOpenReadSnapshot?: (toolCallId: string, snapshot: ReadSnapshot) => void;
   entryId?: string;
   searchBlock?: AssistantContentBlock;
   onFork?: (entryId: string) => void;
@@ -286,12 +289,12 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSubagent, entryId, searchBlock, onFork, forking, onEditContent, onCancelEdit, isEditing, showTimestamp, prevTimestamp, sessionId, writtenFiles, onCompact, isCompacting, compactError }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, entryId, searchBlock, onFork, forking, onEditContent, onCancelEdit, isEditing, showTimestamp, prevTimestamp, sessionId, writtenFiles, onCompact, isCompacting, compactError }: Props) {
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onEditContent={onEditContent} onCancelEdit={onCancelEdit} isEditing={isEditing} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} writtenFiles={writtenFiles} onCompact={onCompact} isCompacting={isCompacting} compactError={compactError} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} writtenFiles={writtenFiles} onCompact={onCompact} isCompacting={isCompacting} compactError={compactError} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -315,6 +318,7 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.cwd === next.cwd
     && prev.onOpenFile === next.onOpenFile
     && prev.onOpenSubagent === next.onOpenSubagent
+    && prev.onOpenReadSnapshot === next.onOpenReadSnapshot
     && prev.entryId === next.entryId
     && prev.searchBlock === next.searchBlock
     && prev.onFork === next.onFork
@@ -649,6 +653,7 @@ function AssistantMessageView({
   cwd,
   onOpenFile,
   onOpenSubagent,
+  onOpenReadSnapshot,
   showTimestamp,
   prevTimestamp,
   sessionId,
@@ -666,6 +671,7 @@ function AssistantMessageView({
   cwd?: string;
   onOpenFile?: (filePath: string, page?: number) => void;
   onOpenSubagent?: (sessionId: string, label: string) => void;
+  onOpenReadSnapshot?: (toolCallId: string, snapshot: ReadSnapshot) => void;
   showTimestamp?: boolean;
   prevTimestamp?: number;
   sessionId?: string;
@@ -861,7 +867,7 @@ function AssistantMessageView({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {blockItems.map(({ block, originalIndex }) => (
-          <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} searchTarget={block === searchBlock} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
+          <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} searchTarget={block === searchBlock} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
         ))}
       </div>
 
@@ -983,7 +989,7 @@ function AssistantMessageView({
   );
 }
 
-function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDuration, toolCallDurations, cwd, onOpenFile, onOpenSubagent, sessionId, entryId, blockIndex }: { block: AssistantContentBlock; searchTarget?: boolean; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; cwd?: string; onOpenFile?: (filePath: string, page?: number) => void; onOpenSubagent?: (sessionId: string, label: string) => void; sessionId?: string; entryId?: string; blockIndex: number }) {
+function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDuration, toolCallDurations, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, sessionId, entryId, blockIndex }: { block: AssistantContentBlock; searchTarget?: boolean; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; cwd?: string; onOpenFile?: (filePath: string, page?: number) => void; onOpenSubagent?: (sessionId: string, label: string) => void; onOpenReadSnapshot?: (toolCallId: string, snapshot: ReadSnapshot) => void; sessionId?: string; entryId?: string; blockIndex: number }) {
   if (block.type === "text") {
     return <div data-message-text data-search-target={searchTarget || undefined}><TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} /></div>;
   }
@@ -994,7 +1000,7 @@ function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDur
     const tc = block as ToolCallContent;
     const result = toolResults?.get(tc.toolCallId);
     const duration = toolCallDurations?.get(tc.toolCallId);
-    return <ToolCallBlock block={tc} result={result} duration={duration} onOpenSubagent={onOpenSubagent} />;
+    return <ToolCallBlock block={tc} result={result} duration={duration} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} />;
   }
   return null;
 }
@@ -1143,7 +1149,7 @@ export function formatToolDuration(ms: number): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m ${remainder}s`;
 }
 
-function ToolCallBlock({ block, result, duration, onOpenSubagent }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; onOpenSubagent?: (sessionId: string, label: string) => void }) {
+function ToolCallBlock({ block, result, duration, onOpenSubagent, onOpenReadSnapshot }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; onOpenSubagent?: (sessionId: string, label: string) => void; onOpenReadSnapshot?: (toolCallId: string, snapshot: ReadSnapshot) => void }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(() => isToolCallExpanded(block.toolCallId));
   const toggleExpanded = () => {
@@ -1187,6 +1193,23 @@ function ToolCallBlock({ block, result, duration, onOpenSubagent }: { block: Too
   const subagent = isSubagentToolDetails(result?.details) ? result.details : null;
   const codemodeCallCount = codemode ? codemode.calls.length + codemode.omitted : 0;
 
+  // A read call's result is a slice of a file worth the panel's width: the
+  // header opens it there instead of unfolding the card. Anything the snapshot
+  // cannot represent (images, an error, no result, streamed input) leaves the
+  // card exactly as it was. See `lib/read-snapshot.ts`.
+  const readSnapshot = onOpenReadSnapshot
+    ? readSnapshotOfCall({
+        toolName: block.toolName,
+        input: block.input,
+        resultText,
+        isError,
+        hasImages: resultImages.length > 0,
+        streamingInput: isStreamingInput,
+      })
+    : null;
+  // The body a snapshot replaces: what the read returned is what the panel shows.
+  const showBody = readSnapshot === null && expanded;
+
   return (
     <div
       style={{
@@ -1200,7 +1223,8 @@ function ToolCallBlock({ block, result, duration, onOpenSubagent }: { block: Too
       {/* ── Tool call header ── */}
       <div style={{ display: "flex", alignItems: "stretch", minWidth: 0 }}>
         <button
-          onClick={toggleExpanded}
+          onClick={readSnapshot ? () => onOpenReadSnapshot?.(block.toolCallId, readSnapshot) : toggleExpanded}
+          title={readSnapshot ? t("readPanel.open") : undefined}
           style={{
             display: "flex",
             alignItems: "center",
@@ -1242,9 +1266,17 @@ function ToolCallBlock({ block, result, duration, onOpenSubagent }: { block: Too
           {duration !== undefined && (
             <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{formatToolDuration(duration)}</span>
           )}
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
-            <polyline points="2 3.5 5 6.5 8 3.5" />
-          </svg>
+          {readSnapshot ? (
+            // The panel's own outline: this click moves the content sideways, it
+            // does not unfold anything here.
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
+            </svg>
+          ) : (
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
+              <polyline points="2 3.5 5 6.5 8 3.5" />
+            </svg>
+          )}
         </button>
         {subagent && onOpenSubagent && (
           <button
@@ -1260,7 +1292,7 @@ function ToolCallBlock({ block, result, duration, onOpenSubagent }: { block: Too
       </div>
 
       {/* ── Expanded: input args (only when no richer view exists); a codemode script in place of its JSON ── */}
-      {expanded && (isStreamingInput || !isEditTool) && !patchFiles && (
+      {showBody && (isStreamingInput || !isEditTool) && !patchFiles && (
         <pre
           style={{
             margin: 0,
@@ -1284,7 +1316,7 @@ function ToolCallBlock({ block, result, duration, onOpenSubagent }: { block: Too
       )}
 
       {/* ── Expanded: the calls a codemode script made ── */}
-      {expanded && codemode && (
+      {showBody && codemode && (
         <CodemodeCallList calls={codemode.calls} omitted={codemode.omitted} isError={isError} />
       )}
 
@@ -1292,21 +1324,21 @@ function ToolCallBlock({ block, result, duration, onOpenSubagent }: { block: Too
       {resultImages.length > 0 && <ResultImages images={resultImages} isError={isError} />}
 
       {/* ── Expanded: applied-patch split diff ── */}
-      {expanded && patchFiles && (
+      {showBody && patchFiles && (
         <div style={{ borderTop: "1px solid rgba(34,197,94,0.15)", background: "var(--bg)" }}>
           <SplitFilesView files={patchFiles} />
         </div>
       )}
 
       {/* ── Paired result — only shown when expanded ── */}
-      {expanded && result && patchFiles && isError && (
+      {showBody && result && patchFiles && isError && (
         <PairedResult
           text={resultText ?? ""}
           isEmpty={resultIsEmpty}
           isError={isError}
         />
       )}
-      {expanded && result && !patchFiles && !codemodeRunning && (
+      {showBody && result && !patchFiles && !codemodeRunning && (
         resultDiff ? (
           <PairedDiffResult
             diff={resultDiff}

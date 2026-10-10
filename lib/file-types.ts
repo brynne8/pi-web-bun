@@ -71,6 +71,36 @@ export function documentPreviewKind(filePath: string): DocumentPreviewKind | nul
   return null;
 }
 
+const EXT_TO_LANGUAGE: Record<string, string> = {
+  ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
+  mjs: "javascript", cjs: "javascript", py: "python", rb: "ruby",
+  go: "go", rs: "rust", java: "java", kt: "kotlin", swift: "swift",
+  c: "c", cpp: "cpp", h: "c", hpp: "cpp", cs: "csharp",
+  html: "html", htm: "html", css: "css", scss: "css", less: "css",
+  json: "json", jsonl: "json", yaml: "yaml", yml: "yaml",
+  toml: "toml", xml: "xml", md: "markdown", mdx: "markdown",
+  sh: "bash", bash: "bash", zsh: "bash", fish: "bash",
+  sql: "sql", graphql: "graphql", gql: "graphql",
+  dockerfile: "dockerfile", tf: "hcl", hcl: "hcl",
+  env: "bash", gitignore: "bash", txt: "text",
+  pdf: "pdf", docx: "word",
+};
+
+/**
+ * The `react-syntax-highlighter` language for a path, from its name alone: the
+ * file API answers it for a file it read, and a snapshot of a file the browser
+ * never fetched (a `read` tool call's slice) has to work it out the same way.
+ */
+export function getLanguage(filePath: string): string {
+  const base = getBaseName(filePath).toLowerCase();
+  // Special full-name matches
+  if (base === "dockerfile" || base.startsWith("dockerfile.")) return "dockerfile";
+  if (base === ".env" || base.startsWith(".env.")) return "bash";
+  if (base === "makefile" || base === "gnumakefile") return "makefile";
+  const ext = base.split(".").pop() ?? "";
+  return EXT_TO_LANGUAGE[ext] ?? "text";
+}
+
 export function isImagePath(filePath: string): boolean {
   return getImageMime(filePath) !== null;
 }

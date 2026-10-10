@@ -9,7 +9,8 @@ export interface Tab {
   id: string;
   label: string;
   filePath: string;
-  kind?: "terminal" | "agent";
+  /** File tabs carry no kind: the panel's other tabs are a terminal, a sub-agent's work, or one read's slice. */
+  kind?: "terminal" | "agent" | "read-snapshot";
   closing?: boolean;
   sourceSessionId?: string | null;
   initialDisplayMode?: FileViewerDisplayMode;
@@ -48,7 +49,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
           <div
             key={tab.id}
             role="tab"
-            aria-label={tab.kind === "terminal" ? t("terminal.tabLabel", { name: tab.label }) : tab.kind === "agent" ? t("subagent.tabLabel", { name: tab.label }) : tab.label}
+            aria-label={tab.kind === "terminal" ? t("terminal.tabLabel", { name: tab.label }) : tab.kind === "agent" ? t("subagent.tabLabel", { name: tab.label }) : tab.kind === "read-snapshot" ? t("readPanel.tabLabel", { name: tab.label }) : tab.label}
             aria-selected={isActive}
             tabIndex={isActive || (!activeTabId && tabs[0].id === tab.id) ? 0 : -1}
             onKeyDown={(event) => {
