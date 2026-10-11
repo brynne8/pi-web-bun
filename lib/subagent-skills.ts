@@ -3,6 +3,17 @@ import { formatSkillsForPrompt, type DefaultResourceLoader, type InlineExtension
 import { parseFrontmatter } from "./frontmatter";
 import { subagentNameList } from "./subagents";
 
+/**
+ * Prefixed to the skill catalog when it is delivered as its own user turn ahead of the
+ * delegated task. The `<skills>` system-prompt section is routinely skipped, which makes the
+ * agent guess a skill path or search the filesystem for it; the same listing placed in the
+ * turn immediately before the task is read, and its `<location>` is used verbatim.
+ */
+const SKILL_CATALOG_INSTRUCTION =
+  "Below is the catalog of available skills. When a task matches a skill description, read its " +
+  "<location> file directly. Never search for a skill, never guess or invent a path, never claim " +
+  "it is missing.";
+
 /** One discovery binding and one prompt projection, shared by spawn and reopen. */
 export function createSubagentSkillsBinding(options: {
   loadSkills: boolean;
@@ -64,6 +75,18 @@ export function createSubagentSkillsBinding(options: {
   return {
     loaderOptions,
     setActiveToolsGetter(getter: () => readonly string[]) { activeTools = getter; },
+    /**
+     * The skill catalog as a standalone user turn, or undefined when it is not applicable:
+     * skills are off, nothing was discovered, or the profile names its skills (named mode
+     * already inlines each skill's body and `Location` into the system prompt).
+     */
+    getSkillCatalogMessage(): string | undefined {
+      if (!options.loadSkills || names !== undefined) return undefined;
+      const tools = activeTools();
+      const reader = tools.includes("read") ? "read" : tools.includes("bash") ? "bash" : undefined;
+      if (!reader || discovered.length === 0) return undefined;
+      return `${SKILL_CATALOG_INSTRUCTION}\n\n${formatSkillsForPrompt(discovered, reader)}`;
+    },
     getExactSystemPrompt: options.exactSystemPrompt === undefined ? undefined : () => effectiveExactPrompt!,
   };
 }

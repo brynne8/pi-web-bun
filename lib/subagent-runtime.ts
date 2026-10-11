@@ -543,6 +543,11 @@ export function createSubagentController(
         }
         let result: SubagentRunInfo;
         try {
+          // The skill catalog goes out as its own turn, ahead of the task. Left in the
+          // `<skills>` system-prompt section it is skipped, and the agent then guesses a
+          // skill path or searches the filesystem for one.
+          const skillCatalogMessage = skillsBinding.getSkillCatalogMessage();
+          if (skillCatalogMessage) await inner.prompt(skillCatalogMessage, { source: "rpc" });
           await inner.prompt(delegatedTask, { source: "rpc" });
           const text = inner.getLastAssistantText()?.trim();
           const stop = stored.abortRequested ? undefined : lastAssistantStop(sessionManager);
