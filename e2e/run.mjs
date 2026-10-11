@@ -14,6 +14,7 @@ import { checkExtensionDialogSizing, checkExtensionDialogs, extensionSource } fr
 import { checkChatAppearance } from "./chat-appearance.mjs";
 import { checkCodeBackground } from "./code-background.mjs";
 import { checkModelDiscovery } from "./model-discovery.mjs";
+import { checkFilesPlacement, showSidebarSessions } from "./sidebar.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const mode = process.env.E2E_SERVER_MODE || "dev";
@@ -390,14 +391,13 @@ try {
       });
       await page.screenshot({ path: join(artifacts, "compaction-minimap.png") });
 
-      // A session row of the sidebar's Sessions tab, found by its visible title
+      // A session row of the sidebar's sessions, found by its visible title
       // (the row's tooltip adds message count and time, so no exact title match).
       const sessionRow = (title) => page.locator("#session-sidebar-panel-sessions .session-tree-session").filter({
         has: page.locator(".session-tree-title", { hasText: new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) }),
       });
       const clickSessionRow = async (title) => {
-        const sessionsTab = page.getByRole("tab", { name: "Sessions", exact: true });
-        if (await sessionsTab.getAttribute("aria-selected") !== "true") await sessionsTab.click();
+        await showSidebarSessions(page);
         await sessionRow(title).locator(".session-tree-main").click();
       };
       const selectSession = async (title, entryId) => {
@@ -486,6 +486,10 @@ try {
       await hideSidebar.or(showSidebar).waitFor({ state: "visible" });
       if (await showSidebar.isVisible()) await showSidebar.click();
       await hideSidebar.waitFor({ state: "visible" });
+      // The files sit below the sessions on a desktop; Settings › General ›
+      // File browser brings the tabs back, and goes back.
+      await checkFilesPlacement(page);
+      console.log("PASS: files below the sessions by default, tabs from Settings and back");
       await checkModelDiscovery(page);
     }
     await page.goto(`${base}/?session=${CODE_BACKGROUND}`, { waitUntil: "domcontentloaded" });

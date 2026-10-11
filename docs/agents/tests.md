@@ -1,6 +1,6 @@
 # Tests
 
-`bun test` is the target; `npm test` (Node's runner, the `test` script) is the second opinion, and upstream only has that one — so a rebase onto upstream always brings the work in this note. Compare failures, never totals: Node counts subtests and suites of its own accord, so the same tree reads roughly 2,885 tests on Bun and 2,925 on Node — 322 files and one skip either way.
+`bun test` is the target; `npm test` (Node's runner, the `test` script) is the second opinion, and upstream only has that one — so a rebase onto upstream always brings the work in this note. Compare failures, never totals: Node counts subtests and suites of its own accord, so the same tree reads roughly 3,039 tests on Bun and 3,078 on Node — 334 files and one skip either way.
 
 ## What behaves differently under Bun, and what to use instead
 
@@ -26,7 +26,7 @@
 
 ## Writing one
 
-One `*.test.mjs` per area beside its file, the `.ts` under test loaded through jiti with `tsconfigPaths: true`. Never write to `globalThis` at module scope without the matching `after()`, and never assume the file has the process to itself.
+One `*.test.mjs` per area beside its file, the `.ts` under test loaded through jiti with `tsconfigPaths: true`. Never write to `globalThis` at module scope without the matching `after()`, and never assume the file has the process to itself. A file that arrives from upstream is written for Node's isolation — one process, one module registry, `tryNative` off — so it lands red here until it takes the same treatment: `tryNative: false`, the modules it stubs dropped from the require cache before jiti loads them and again in `after()`, and whatever it leaves on `globalThis` taken back afterwards. Three of them did after the sidebar merge: `hooks/useSidebarMotion.test.mjs`, `hooks/useResizablePanel.test.mjs` and `components/SessionSidebar.tabs.test.mjs`, all of which alias `react` to the hook shim or `hooks/useFilesPlacement` to a fixture.
 
 ## Assertions an engine cannot all produce
 

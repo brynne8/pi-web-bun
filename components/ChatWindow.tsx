@@ -95,8 +95,8 @@ const CHAT_COLUMN_PADDING = 16;
 
 // One update check per page. Every fresh composer mounts the header again
 // (each move of the new-session bar does), and a link that turned up late
-// each time could push the bar onto a line of its own under the composer's
-// eyes; from the second header on it is there in the first paint.
+// each time would lengthen the versions line under the reader's eyes; from
+// the second header on it is there in the first paint.
 let appUpdateCheck: Promise<AppUpdateResponse | null> | null = null;
 let appUpdateFound: AppUpdateResponse | null = null;
 
@@ -139,40 +139,25 @@ function NewSessionUpdateLink({
   if (!update) return null;
   const accessibleLabel = label(update.latestVersion);
 
+  // In the versions line, after the version in use: "→ v<latest> ↗".
   return (
-    <a
-      href={update.releaseUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      title={accessibleLabel}
-      aria-label={accessibleLabel}
-      onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
-      onMouseLeave={(event) => { event.currentTarget.style.background = "transparent"; }}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        alignSelf: "center",
-        gap: 3,
-        minHeight: 32,
-        minWidth: 0,
-        padding: "0 4px",
-        background: "transparent",
-        borderRadius: 5,
-        color: "var(--accent)",
-        fontSize: 12,
-        fontWeight: 600,
-        lineHeight: 1.2,
-        textDecoration: "none",
-        transition: "background 0.12s",
-        whiteSpace: "nowrap",
-      }}
-    >
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>v{update.latestVersion}</span>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
-        <path d="M7 17 17 7" />
-        <path d="M7 7h10v10" />
-      </svg>
-    </a>
+    <>
+      <span className="new-session-meta-arrow" aria-hidden="true">→</span>
+      <a
+        className="new-session-update"
+        href={update.releaseUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={accessibleLabel}
+        aria-label={accessibleLabel}
+      >
+        v{update.latestVersion}
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M7 17 17 7" />
+          <path d="M7 7h10v10" />
+        </svg>
+      </a>
+    </>
   );
 }
 
@@ -1501,21 +1486,25 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             </button>
           </div>
         )}
-        {/* The brand, the project/worktree bar and the versions: one row, or
-            the bar on a line of its own under the brand where it does not
-            fit beside it (.new-session-hero in app/globals.css). The
-            versions come first: floated right of the first line. */}
+        {/* The brand (the logo, "Pi Web" and its versions line), then the
+            project/worktree row right above the composer, all on the
+            composer's left edge (.new-session-brand, .new-session-meta and
+            .new-session-context in app/globals.css; the side padding and
+            width are inline here). */}
         {isEmptyNew && (
           <div className="new-session-hero" style={{ paddingLeft: 16, paddingRight: isMobile ? 16 : 52 }}>
-            <div className="new-session-hero-row" style={{ maxWidth: "var(--chat-content-max-width, 820px)" }}>
-              <div className="new-session-versions">
-                <span>web <span className="new-session-version">v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}</span></span>
-                <span>pi <span className="new-session-version">v{process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}</span></span>
-              </div>
-              <div className="new-session-brand" style={{ gap: isMobile ? 7 : 10 }}>
-                <Image src="/icons/apple-touch-icon.png" width={32} height={32} alt="" priority style={{ flexShrink: 0 }} />
-                <span className="new-session-brand-name">Pi Web</span>
-                <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
+            <div className="new-session-hero-inner" style={{ maxWidth: "var(--chat-content-max-width, 820px)" }}>
+              <div className="new-session-brand">
+                <Image src="/icons/apple-touch-icon.png" width={40} height={40} alt="" priority className="new-session-logo" />
+                <div className="new-session-brand-text">
+                  <span className="new-session-brand-name">Pi Web</span>
+                  <span className="new-session-meta">
+                    <span>web v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}</span>
+                    <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
+                    <span aria-hidden="true">·</span>
+                    <span className="new-session-meta-pi">pi v{process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}</span>
+                  </span>
+                </div>
               </div>
               {newSessionContextBar}
             </div>
