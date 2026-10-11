@@ -291,10 +291,10 @@ export function createProjectCommandBashExtension(options: {
               description: `${displayDefinition.description} Supports background execution: pass run_in_background=true for long-running commands, or let foreground commands auto-background after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000} seconds; you are notified when a background command finishes.`,
               promptGuidelines: [
                 ...(displayDefinition.promptGuidelines ?? []),
-                "When you can already expect a command to run for a long time (dev server, watcher, long build, large download), do NOT force a timeout: set run_in_background=true and continue with other work.",
+                "When you can already expect a command to run for a long time (dev server, watcher, long build, large download), do NOT force a timeout: set run_in_background=true.",
                 "A foreground command auto-backgrounds after 120 seconds; treat that as a handoff, not a failure.",
                 "Do not add redirection to a command (2>&1, | tail, > out.log): stdout and stderr are already combined, and a backgrounded command's report already carries the end of its log — a pipe throws that output away before the log sees it.",
-                "After starting a background command you are notified on completion — do not wait, poll, or sleep for it; do work that does not depend on its result, like an async request.",
+                "A background command's result arrives on its own when it finishes — do not poll, sleep, or re-read its log. Do other work that does not need it if you have any; if you have none, stop — no output, no commands — until it arrives. Stopping does not cancel the task.",
               ],
             }
           : {}),
@@ -319,7 +319,7 @@ export function createProjectCommandBashExtension(options: {
             if (error instanceof Error && error.message.startsWith("bg-task-backgrounded:")) {
               const logPath = error.message.slice("bg-task-backgrounded:".length);
               return {
-                content: [{ type: "text" as const, text: `Command auto-backgrounded after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000}s.\nLog file: ${logPath}\nYou will be notified when it completes — do not wait or poll; continue with other work.` }],
+                content: [{ type: "text" as const, text: `Command auto-backgrounded after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000}s.\nLog file: ${logPath}\nThe result arrives on its own when the command finishes — do not poll, sleep, check the log, or run any other command for it. Do other work that does not need it if you have any; if you have none, stop — no output, no commands — until it arrives. Stopping does not cancel the task.` }],
                 details: undefined,
               };
             }
@@ -377,7 +377,7 @@ function startBackgroundCommand(
     }
   })();
   return Promise.resolve({
-    content: [{ type: "text" as const, text: `Command started in background.\nLog file: ${logPath}\nYou will be notified when it completes — do not wait or poll; continue with other work.` }],
+    content: [{ type: "text" as const, text: `Command started in background.\nLog file: ${logPath}\nThe result arrives on its own when the command finishes — do not poll, sleep, check the log, or run any other command for it. Do other work that does not need it if you have any; if you have none, stop — no output, no commands — until it arrives. Stopping does not cancel the task.` }],
     details: undefined,
   });
 }
