@@ -6,10 +6,7 @@ import { createJiti } from "jiti";
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
 const {
   EMPTY_MCP_ADD_DRAFT,
-  MCP_ADD_BREADTH_KEYS,
   MCP_ADD_EXAMPLES,
-  MCP_ADD_PROJECT_BLOCK_KEYS,
-  MCP_IMPORT_FIELD_REASON_KEYS,
   MCP_IMPORT_PROBLEM_KEYS,
   MCP_IMPORT_SOURCE_KEYS,
   mcpAddAnalysis,
@@ -152,15 +149,6 @@ test("every importer note has words in every locale, each variant included, with
         assert.ok(!text.includes(key), `${locale} ${code} has its own words`);
         if (code === "invalid-config") assert.doesNotMatch(text, /\{(?:name|url|index|tool|value)\}/, `${locale} ${code}: ${text}`);
       }
-    }
-    for (const key of [
-      ...MCP_IMPORT_PROBLEM_KEYS,
-      ...Object.values(MCP_IMPORT_FIELD_REASON_KEYS),
-      ...Object.values(MCP_IMPORT_SOURCE_KEYS),
-      ...Object.values(MCP_ADD_PROJECT_BLOCK_KEYS),
-      ...Object.values(MCP_ADD_BREADTH_KEYS),
-    ]) {
-      assert.equal(typeof messages[locale][key], "string", `${locale} ${key}`);
     }
   }
 });

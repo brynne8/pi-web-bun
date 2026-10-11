@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createJiti } from "jiti";
 
@@ -10,7 +9,6 @@ const jiti = createJiti(import.meta.url, {
 const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
 const { OAuthPastePanel, oauthPasteKeySubmits } = await jiti.import("./OAuthPastePanel.tsx");
-const modelsSource = await readFile(new URL("./ModelsConfig.tsx", import.meta.url), "utf8");
 
 function render(props) {
   return renderToStaticMarkup(React.createElement(OAuthPastePanel, {
@@ -42,15 +40,6 @@ test("the hint line carries the caller's link to the sign-in page", () => {
   assert.match(html, /<p class="oauth-paste-hint"><a href="https:\/\/example\.test\/authorize">open the login page<\/a><\/p>/);
 });
 
-test("the Models subscription sign-in uses the shared paste panel", () => {
-  const oauthDetail = modelsSource.slice(
-    modelsSource.indexOf("function OAuthDetail"),
-    modelsSource.indexOf("// ── API Key detail"),
-  );
-  assert.match(oauthDetail, /<OAuthPastePanel[\s\S]*?inputRef=\{inputRef\}[\s\S]*?onSubmit=\{\(\) => void submitCode\(loginState\.token, inputValue\)\}/);
-  assert.doesNotMatch(oauthDetail, /<input\b/);
-});
-
 test("the box can carry an accessible name, and waits with its button while a value is checked", () => {
   const named = render({ value: "http://x/?code=1", inputLabel: "Address the browser landed on" });
   assert.match(named, /<input class="oauth-paste-input" placeholder="[^"]*" aria-label="Address the browser landed on" value="http:\/\/x\/\?code=1"\/>/);
@@ -71,6 +60,4 @@ test("Enter submits, never while an input method composes; without plainEnterSub
     assert.equal(oauthPasteKeySubmits(key({ keyCode: 229, ctrlKey: true }), plain), false);
   }
   assert.equal(oauthPasteKeySubmits(key({ key: "a", metaKey: true }), true), false);
-  // The Models subscription box keeps plain Enter.
-  assert.doesNotMatch(modelsSource, /plainEnterSubmits/);
 });

@@ -4,13 +4,19 @@
  * (nothing disk-backed for a transient session, archive disabled while a
  * family runs) are testable without a DOM. Fork leaves the source untouched
  * (it copies the finished entries of its current branch), so it is offered
- * everywhere: while the family runs and from the archive too.
+ * everywhere: while the family runs and from the archive too. Open in new tab
+ * only navigates (a browser tab loads the session's link): it is offered
+ * everywhere a saved session is, after the actions that manage the session and
+ * before Delete. Never first: a menu's first item takes focus when it opens,
+ * so Enter right after opening would leave the tab. Also the requests behind
+ * a project group's "Delete all sessions", with `fetch` passed in.
  */
 
 import { projectNameOf, type SidebarFamilyStatus, type SidebarProject, type SidebarRow } from "./session-tree";
 import type { SessionUiStateRequest } from "./session-ui-state-shared";
 
 export type SessionMenuActionId =
+  | "open-new-tab"
   | "pin"
   | "unpin"
   | "rename"
@@ -27,7 +33,8 @@ export type SessionMenuEntry =
 
 /**
  * A session row's built-in menu. A transient session has no file yet, so it
- * gets none: pin, archive, rename, fork and delete would all act on a missing file.
+ * gets none: pin, archive, rename, fork and delete would all act on a missing
+ * file, and another tab could not load it.
  * In the archive view, Pin also restores (pin and archive exclude each other).
  */
 export function sessionMenuEntries(
@@ -35,12 +42,14 @@ export function sessionMenuEntries(
   status: SidebarFamilyStatus,
 ): SessionMenuEntry[] {
   if (status.transient) return [];
+  const openNewTab: SessionMenuEntry = { kind: "action", id: "open-new-tab", shortcut: "T" };
   if (context === "archive") {
     return [
       { kind: "action", id: "unarchive", shortcut: "A" },
       { kind: "action", id: "pin", shortcut: "P" },
       { kind: "action", id: "rename", shortcut: "R" },
       { kind: "action", id: "fork", shortcut: "F" },
+      openNewTab,
       { kind: "separator" },
       { kind: "action", id: "delete", shortcut: "D" },
     ];
@@ -54,6 +63,7 @@ export function sessionMenuEntries(
     status.running
       ? { kind: "action", id: "archive", shortcut: "A", disabledReason: "running" }
       : { kind: "action", id: "archive", shortcut: "A" },
+    openNewTab,
     { kind: "separator" },
     { kind: "action", id: "delete", shortcut: "D" },
   ];
@@ -98,4 +108,54 @@ export function forkFailureMessage(code: string | undefined, error: string): { k
       return { key: "sidebar.forkUnavailable" };
     default: return { key: "sidebar.forkFailed", params: { error } };
   }
+}
+
+/** Root ids per POST /api/sessions/delete (the route's MAX_SESSION_DELETE_IDS). */
+export const PROJECT_DELETE_IDS_PER_REQUEST = 500;
+
+/** What a project's "Delete all sessions" did, summed over its requests. */
+export interface ProjectSessionsDeleteOutcome {
+  /** The root ids deleted; their subagent sessions went with them. */
+  deletedRoots: string[];
+  /** Every session id deleted, subagent sessions included. */
+  deleted: string[];
+  /** Root ids kept because they started running after the confirmation. */
+  running: string[];
+  /** Why a request failed; the parts sent before it were deleted. */
+  error: string | null;
+}
+
+/**
+ * Deletes the root ids a project's confirmation showed, in parts of
+ * PROJECT_DELETE_IDS_PER_REQUEST, one request at a time. A refused part ends
+ * the run: what was deleted until then is reported with the error.
+ */
+export async function deleteProjectSessions(
+  ids: readonly string[],
+  fetchImpl: typeof fetch,
+): Promise<ProjectSessionsDeleteOutcome> {
+  const outcome: ProjectSessionsDeleteOutcome = { deletedRoots: [], deleted: [], running: [], error: null };
+  for (let start = 0; start < ids.length; start += PROJECT_DELETE_IDS_PER_REQUEST) {
+    const part = ids.slice(start, start + PROJECT_DELETE_IDS_PER_REQUEST);
+    try {
+      const res = await fetchImpl("/api/sessions/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: part }),
+      });
+      const data = await res.json().catch(() => ({})) as { deleted?: string[]; running?: string[]; error?: string };
+      if (!res.ok || !Array.isArray(data.deleted)) {
+        outcome.error = data.error ?? `HTTP ${res.status}`;
+        break;
+      }
+      const deleted = new Set(data.deleted);
+      outcome.deleted.push(...data.deleted);
+      outcome.deletedRoots.push(...part.filter((id) => deleted.has(id)));
+      outcome.running.push(...(data.running ?? []));
+    } catch (error) {
+      outcome.error = error instanceof Error ? error.message : String(error);
+      break;
+    }
+  }
+  return outcome;
 }

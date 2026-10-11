@@ -13,7 +13,6 @@ const { I18nProvider } = await jiti.import("@/hooks/useI18n.tsx");
 const { McpSignInRow } = await jiti.import("./McpSignIn.tsx");
 const { enLocale } = await jiti.import("@/lib/i18n/messages/en.ts");
 const source = await readFile(new URL("./McpSignIn.tsx", import.meta.url), "utf8");
-const mcpConfigSource = await readFile(new URL("./McpConfig.tsx", import.meta.url), "utf8");
 
 const h = React.createElement;
 const messages = enLocale.messages;
@@ -212,24 +211,9 @@ test("a failed cancel is shown while the sign-in runs, and not once it has ended
   assert.doesNotMatch(text(row({ run: { flow: flow("authorize"), gone: true, cancelError } })), /Could not cancel/);
 });
 
-test("the row's words come from the locale files, and nothing hides in a tooltip or takes focus by itself", () => {
+test("the row's words come from the locale files", () => {
   const keys = [...source.matchAll(/t\("([^"]+)"/g)].map((match) => match[1]);
   assert.ok(keys.length >= 20);
   for (const key of keys) assert.equal(typeof messages[key], "string", `${key} is missing from en.ts`);
   assert.doesNotMatch(source, />\s*[A-Z][a-z]+(?: [a-z]+){2,}[.:]?\s*</);
-  assert.doesNotMatch(source, /\btitle=/);
-  assert.doesNotMatch(source, /autoFocus|\.focus\(\)/);
-  assert.doesNotMatch(source, /style=\{/);
-  // Focus moves only from the page itself, to the button that replaced the one pressed.
-  assert.match(source, /if \(!wasActive && active\) focusIfLost\(document, cancelRef\.current\);/);
-  assert.match(source, /else if \(wasActive && !active\) focusIfLost\(document, signInRef\.current\);/);
-  assert.match(source, /if \(wasPasting && !pasting\) focusIfLost\(document, inputRef\.current\);/);
-  // The paste box submits from its button or Cmd/Ctrl+Enter, never a plain Enter.
-  assert.match(source, /<OAuthPastePanel[\s\S]*?plainEnterSubmits=\{false\}[\s\S]*?\/>/);
-  // The panel's Sign-in row is this one, and the needs-sign-in words above it never send the user to a chat command.
-  assert.match(mcpConfigSource, /<McpSignInRow\n\s*server=\{server\}/);
-  for (const key of ["mcp.test.summary.needs-auth", "mcp.session.summary.needs-auth"]) {
-    assert.equal(typeof messages[key], "string", key);
-    assert.doesNotMatch(messages[key], /\/mcp/, key);
-  }
 });

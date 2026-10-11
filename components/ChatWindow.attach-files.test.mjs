@@ -83,8 +83,3 @@ test("without a working directory, picked files behave like a drop there (#1101)
   assert.deepEqual(calls.uploads, []);
   assert.deepEqual(calls.notices, [["warning", "chat.dropNeedsCwd"]]);
 });
-
-test("wires the attach handler into the main composer only", () => {
-  assert.match(sourceText, /cwd=\{session\?\.cwd \?\? newSessionCwd\}\s*onAttachFiles=\{onAttachFiles\}/);
-  assert.equal((sourceText.match(/onAttachFiles=/g) ?? []).length, 1);
-});

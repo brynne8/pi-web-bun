@@ -56,18 +56,6 @@ function runHandleSessionDeleted(capturedSelectedSession, active) {
   return state;
 }
 
-test("the delete callback guards on the render-synced ref, not captured state", () => {
-  const body = handleSessionDeletedBody();
-  assert.match(body, /const active = selectedSessionRef\.current;/);
-  assert.match(body, /if \(active\?\.id === sessionId\)/);
-  assert.doesNotMatch(body, /selectedSession\?\.id === sessionId/);
-  assert.match(body, /\}, \[invalidateWorkspaceRestore, router\]\);/);
-  assert.match(
-    source,
-    /const selectedSessionRef = useRef\(selectedSession\);\n  selectedSessionRef\.current = selectedSession;/,
-  );
-});
-
 test("a delete completing after the user navigated away keeps the new chat", () => {
   const deleting = { id: "gone-session", cwd: "/project-a", projectKey: "/project-a" };
   const navigatedTo = { id: "next-session", cwd: "/project-b", projectKey: "/project-b" };

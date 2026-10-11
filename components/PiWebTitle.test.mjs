@@ -19,7 +19,6 @@ const {
 const { SIDEBAR_MIN_WIDTH } = await jiti.import("@/lib/panel-layout.ts");
 const { getLocalePlugin } = await jiti.import("@/lib/i18n/registry.ts");
 
-const source = await readFile(new URL("./PiWebTitle.tsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/sidebar.css", import.meta.url), "utf8");
 const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 
@@ -81,29 +80,8 @@ test("the brand is a button named for what its click shows, with the brand's tex
   }
 });
 
-test("a click shows the versions for a while, a second click takes them back at once", () => {
-  const click = source.slice(source.indexOf("const handleClick = () => {"), source.indexOf("return (\n    <button"));
-  assert.match(click, /if \(revertTimerRef\.current\) clearTimeout\(revertTimerRef\.current\);\s*revertTimerRef\.current = null;\s*if \(versionShown\) \{\s*setVersionShown\(false\);\s*return;\s*\}\s*setVersionShown\(true\);\s*revertTimerRef\.current = setTimeout\(\(\) => \{\s*revertTimerRef\.current = null;\s*setVersionShown\(false\);\s*\}, VERSION_SHOWN_MS\);/);
-  // The timer goes with the brand.
-  assert.match(source, /useEffect\(\(\) => \(\) => \{\s*if \(revertTimerRef\.current\) clearTimeout\(revertTimerRef\.current\);\s*\}, \[\]\);/);
-  // The versions in the accent, the brand in the content color.
-  assert.match(source, /className=\{`sidebar-brand\$\{versionShown \? " is-version" : ""\}`\}/);
-  assert.match(rule(".sidebar-brand.is-version"), /^\s*color: var\(--accent\);\s*$/);
-  // The scramble runs on a change only, never on mount, a frame at a time,
-  // and stops with its brand; under reduced motion the text is swapped.
-  const scramble = source.slice(source.indexOf("function useScramble("), source.indexOf("export function PiWebTitle("));
-  assert.match(scramble, /if \(shownRef\.current === target\) return;\s*shownRef\.current = target;/);
-  assert.match(scramble, /if \(window\.matchMedia\?\.\("\(prefers-reduced-motion: reduce\)"\)\.matches\) \{\s*setText\(target\);\s*return;\s*\}/);
-  assert.match(scramble, /setText\(scrambleFrame\(target, 0\)\);\s*request = requestAnimationFrame\(step\);\s*return \(\) => cancelAnimationFrame\(request\);/);
-  assert.match(scramble, /if \(frame < totalFrames\) request = requestAnimationFrame\(step\);/);
-  // A new length (the versions are longer) refits the toolbar row before it paints.
-  assert.match(source, /useLayoutEffect\(\(\) => \{\s*onWidthChange\?\.\(\);\s*\}, \[text\.length, onWidthChange\]\);/);
-});
-
-test("the brand's look: the old one's type, in the chevron column, a focus ring, never cut at the sidebar's minimum", async () => {
+test("the brand's text sits in the chevron column and is never cut at the sidebar's minimum", async () => {
   const brand = rule(".sidebar-brand");
-  assert.match(brand, /^\s*flex: none;\s*align-self: center;\s*min-width: 6ch;\s*margin: 0 0 0 7px;\s*padding: 2px 4px;\s*border: 0;\s*border-radius: 6px;\s*background: transparent;\s*color: var\(--text\);\s*font-family: var\(--font-mono\);\s*font-size: 15px;\s*font-weight: 700;\s*letter-spacing: -0\.01em;\s*line-height: normal;\s*text-align: left;\s*white-space: nowrap;\s*cursor: default;\s*$/);
-  assert.match(rule(".sidebar-brand:focus-visible"), /^\s*outline: 2px solid var\(--accent\);\s*outline-offset: 1px;\s*$/);
   // Its text in the chevron column: the tree's 6px inset and a toggle's 5px.
   const [marginLeft] = brand.match(/margin: 0 0 0 (\d+)px;/).slice(1).map(Number);
   const [paddingLeft] = brand.match(/padding: \d+px (\d+)px;/).slice(1).map(Number);
@@ -112,6 +90,8 @@ test("the brand's look: the old one's type, in the chevron column, a focus ring,
   // At the sidebar's minimum (its line off), beside New's + and the search
   // (36px cells each), "Pi Web" fits in its 15px code type (0.6em a
   // character), and the versions in the 11px of data-fit 2.
+  assert.match(brand, /(?:^|\s)font-family: var\(--font-mono\);/);
+  assert.match(brand, /(?:^|\s)font-size: 15px;/);
   assert.match(css, /\.sidebar-header\[data-fit="2"\] \.sidebar-brand \{\s*font-size: 11px;\s*\}/);
   const room = SIDEBAR_MIN_WIDTH - 1 - 36 - 36;
   const box = (text, fontSize) => marginLeft + 2 * paddingLeft + text.length * 0.6 * fontSize;

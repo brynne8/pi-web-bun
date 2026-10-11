@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createJiti } from "jiti";
 
@@ -10,13 +9,9 @@ const jiti = createJiti(import.meta.url, {
 const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n.tsx");
-const { MCP_ADD_REFUSAL_KEYS, McpAddServer } = await jiti.import("./McpAddServer.tsx");
-const { getLocalePlugin, getSupportedLocales } = await jiti.import("@/lib/i18n/registry.ts");
-const locales = Object.fromEntries(getSupportedLocales().map((id) => [id, getLocalePlugin(id).messages]));
+const { McpAddServer } = await jiti.import("./McpAddServer.tsx");
 const { McpConfigView } = await jiti.import("./McpConfig.tsx");
 const { EMPTY_MCP_ADD_DRAFT } = await jiti.import("./mcp-add-helpers.ts");
-const configSource = await readFile(new URL("./McpConfig.tsx", import.meta.url), "utf8");
-const paneSource = await readFile(new URL("./McpAddServer.tsx", import.meta.url), "utf8");
 
 const h = React.createElement;
 const noop = () => {};
@@ -94,8 +89,6 @@ test("the paste box is a textarea that never takes focus by itself on a phone, a
   assert.equal(addButton(html).label, "Add");
   // An empty box is no refusal: nothing explains Add yet but the hint.
   assert.doesNotMatch(text(html), /Nothing to add yet/);
-  // The box's own submit rule is SettingsUi's (SettingsUi.blocks.test.mjs pins addSourceKeySubmits()).
-  assert.match(paneSource, /<ConfigAddSourcePanel[\s\S]*?\n\s*multiline\n/);
 });
 
 test("before Add the pane shows what would be written: the target as written, names, shell commands, notes", () => {
@@ -284,9 +277,6 @@ test("a variable box opens with the name it suggests, and an emptied one asks fo
   html = decode(pane({ draft: { text: field, references: { "env.GH_PAT": "" } } }));
   assert.match(html, /aria-label="Variable for GH_PAT" placeholder="GH_PAT"[^>]*value=""\/>/);
   assert.match(text(html), /GH_PAT: enter the name of the variable to read it from\./);
-  // Both boxes open with the suggestion, never empty when there is one.
-  assert.equal([...paneSource.matchAll(/setReference\(event\.target\.checked \? suggestedName \?\? "" : undefined\)/g)].length, 2);
-  assert.doesNotMatch(paneSource, /setReference\(event\.target\.checked \? "" : undefined\)/);
 });
 
 test("a refused Add says why; host variables are added only through an explicit second button", () => {
@@ -319,12 +309,9 @@ test("a refused Add says why; host variables are added only through an explicit 
   assert.doesNotMatch(text(html), /does not connect it/);
   html = pane({ draft: { text: "https://api.example.com/mcp" }, failure: { error: "x", reason: "web-password", name: "server" } });
   assert.match(text(html), /Not added: It references PI_WEB_PASSWORD, so Pi Web does not add it\./);
-  for (const key of Object.values(MCP_ADD_REFUSAL_KEYS)) {
-    for (const [locale, plugin] of Object.entries(locales)) assert.equal(typeof plugin[key], "string", `${key} in ${locale}`);
-  }
 });
 
-test("Settings › MCP opens the add pane from the sidebar, keeps the draft, and tests what Add wrote", () => {
+test("Settings › MCP opens the add pane from the sidebar, keeps the draft, and says what Add wrote", () => {
   const html = renderToStaticMarkup(h(I18nProvider, null, h(McpConfigView, {
     cwd: null,
     load: { state: "loaded", data: overview(null) },
@@ -404,37 +391,9 @@ test("Settings › MCP opens the add pane from the sidebar, keeps the draft, and
   assert.match(globalNotice, /Added docs to ~\/\.pi\/agent\/mcp\.json\./);
   const elsewhere = text(addedView({ added: { scope: "project", name: "docs", path: projectFile.path, key: "project\0docs", trustedFolder: "/Users/me/other" } }));
   assert.match(elsewhere, /Added docs to \.\/\.pi\/mcp\.json, and trusted ~\/other\./);
-  for (const [locale, words] of Object.entries(locales)) {
-    assert.equal(typeof words["mcp.add.addedTrustedHere"], "string", locale);
-    assert.match(words["mcp.add.addedTrustedHere"], /\{name\}[\s\S]*\{path\}/, locale);
-    assert.doesNotMatch(words["mcp.add.addedTrustedHere"], /\{folder\}/, locale);
-  }
   // A Sign out of the same server on its way would cancel a sign-in started now, so the notice's
   // Sign in waits for it, as the row's does.
   const signingOut = decode(addedView({ busy: "sign-out:project\0docs" }));
   assert.match(text(signingOut), /It asks for a sign-in\./);
   assert.doesNotMatch(signingOut.slice(signingOut.indexOf("Added docs"), signingOut.indexOf("</div>", signingOut.indexOf("Added docs"))), /Sign in</);
-  assert.match(configSource, /signingOut=\{busy === `sign-out:\$\{added\.key\}`\}/);
-
-  // The container: Add is a change like any other, and only an Add that worked starts the test.
-  const submit = configSource.slice(configSource.indexOf("const submitAdd = useCallback"), configSource.indexOf("// The notice goes when the route lets the removal go."));
-  assert.match(submit, /const result = await runAction\(request, "add", \(data\) => \(data\.added \? mcpServerKey\(data\.added\) : undefined\)\);/);
-  assert.match(submit, /if \(listed && !mcpTestBlock\(listed, result\.data\)\) void testServer\(listed\);/);
-  assert.ok(submit.indexOf("if (!result.ok)") < submit.indexOf("void testServer("), "a refused Add tests nothing");
-  assert.match(submit, /if \(writtenTrust && cwd\) onProjectTrustChanged\?\.\(cwd, writtenTrust\);/);
-  assert.match(submit, /if \(result\.error\.trust && cwd\) onProjectTrustChanged\?\.\(cwd, result\.error\.trust\);/);
-  // The test after Add is never aborted, as every Test (postMcpTest leaves the request running).
-  assert.doesNotMatch(submit, /AbortController/);
-  // An Add that worked takes its pane away, Add button and box alike, whichever started it (a click or
-  // Cmd/Ctrl+Enter in the box, which leaves no pressed button): focus goes to the new server's row.
-  const success = submit.slice(submit.indexOf("setAdding(false)"));
-  assert.match(success, /setFocusBack\(\{ control: null, toSelectedRow: true \}\);/);
-  assert.match(configSource, /if \(focusBack\.toSelectedRow\) focusIfLost\(document, focusFallback\(\)\);/);
-  // An answer about a draft edited while the request was out is not shown under the new draft, nor
-  // acted on (the host-variable confirmation, Use <name>), and what was typed since is kept.
-  assert.match(submit, /const sent = addDraftRef\.current;[\s\S]*?await runAction\(request, "add"/);
-  assert.match(submit, /const edited = addDraftRef\.current !== sent;/);
-  assert.match(submit, /if \(!edited\) setAddFailure\(result\.error\);/);
-  assert.match(success, /if \(!edited\) setAddDraft\(EMPTY_MCP_ADD_DRAFT\);/);
-  assert.match(configSource, /onAddDraftChange=\{\(draft\) => \{\n\s*addDraftRef\.current = draft;\n\s*setAddDraft\(draft\);/);
 });

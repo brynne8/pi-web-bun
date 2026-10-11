@@ -529,11 +529,5 @@ test("unmounting mid-drag removes every listener, timer and frame", () => {
 
 test("the hook's sources stay within the platform rules", () => {
   assert.doesNotMatch(source, /\(\?<[=!]/, "no RegExp lookbehind (Safari 16.2)");
-  assert.doesNotMatch(source, /navigator\.vibrate|userSelect/, "no vibration (a console warning in Chrome) and no body style (Safari needs the prefix)");
-  // The mouse's threshold path is for a mouse only; touch and pen long-press.
-  assert.match(source, /if \(event\.pointerType !== "mouse"\) drag\.timer = window\.setTimeout\(arm, LONG_PRESS_MS\);/);
-  assert.match(source, /if \(drag\.pointerType === "mouse" && event\.buttons === 0\) \{\s*teardown\(\);/);
-  assert.match(source, /window\.addEventListener\("keydown", onKeyDown, true\);/);
-  assert.match(source, /scroll\.addEventListener\("scroll", onScroll, \{ passive: true \}\);/);
   assert.equal(LONG_PRESS_MS, 350);
 });

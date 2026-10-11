@@ -51,3 +51,11 @@ test("values the catalogue does carry always win", () => {
   assert.equal(merged.messageCount, 99);
   assert.deepEqual(merged.relation, { kind: "subagent", parentSessionId: "p1" });
 });
+
+test("a persisted row clears the transient flag of a fresh session", () => {
+  // After a fresh session's first run the sidebar's reload carries its file on
+  // disk; that row is what turns on title generation for the selected session.
+  const merged = mergeCatalogRow(row({ transient: true, path: "" }), row({ messageCount: 2 }));
+  assert.equal(merged.transient, false);
+  assert.equal(merged.path, "/s.jsonl");
+});

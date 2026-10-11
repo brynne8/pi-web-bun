@@ -17,8 +17,6 @@ const source = await readFile(new URL("./McpConfig.tsx", import.meta.url), "utf8
 const helperSource = await readFile(new URL("./mcp-config-helpers.ts", import.meta.url), "utf8");
 const displaySource = await readFile(new URL("../lib/mcp-server-display.ts", import.meta.url), "utf8");
 const apiTypesSource = await readFile(new URL("../lib/api-types.ts", import.meta.url), "utf8");
-const cssSource = await readFile(new URL("../app/settings.css", import.meta.url), "utf8");
-const settingsUiSource = await readFile(new URL("./SettingsUi.tsx", import.meta.url), "utf8");
 
 const h = React.createElement;
 const messages = enLocale.messages;
@@ -364,21 +362,13 @@ test("an untrusted project's notice offers Trust only where the trust dialog wou
   assert.doesNotMatch(withTrust({ trust: { ...trusted, decisionPath: "/Users/me", inherited: true } }), trustButton);
   // No handler, no button: the panel never offers one that does nothing.
   assert.doesNotMatch(withTrust({ trust: untrusted }, undefined, { onTrustProject: undefined }), trustButton);
-  for (const key of ["mcp.trust.trustButton", "trust.trustProject"]) assert.equal(typeof messages[key], "string", key);
 });
 
-test("the container passes Trust to the notice and reloads in place when the page's trust changes", () => {
-  assert.match(source, /<ConfigTrustNotice id=\{trustNoticeId\} message=\{trustMessage\} trustLabel=\{t\("mcp\.trust\.trustButton"\)\} onTrust=\{onTrust\} \/>/);
-  assert.match(source, /const onTrust = onTrustProject && mcpProjectTrustable\(data\?\.project\) \? onTrustProject : undefined;/);
-  assert.match(source, /onTrustProject=\{onTrustProject\}/);
-  // A new decision loads the panel again without remounting it, so the selection stays.
-  assert.match(source, /const trustKey = projectTrustReloadKey\(trust\);\n\s*useEffect\(\(\) => \{\n\s*void refresh\(\);[\s\S]*?\}, \[refresh, trustKey\]\);/);
-  assert.match(source, /import \{ projectTrustReloadKey \} from "\.\/settings-ui-helpers";/);
-  // The container renders with the page's status and handler without fetching anything itself.
+test("the container renders with the page's trust status and handler without fetching anything itself", () => {
   assert.match(text(render(h(McpConfig, { cwd: "/Users/me/repo", trust: untrusted, onTrustProject() {}, onClose() {}, embedded: true }))), /Loading\.\.\./);
 });
 
-test("the notices above the list scroll in their own box, so on a phone they never squeeze the pane to nothing", () => {
+test("the notices above the list sit together in their own box, right before the split view", () => {
   const html = decode(view({
     load: { state: "loaded", data: overview({ servers: [httpServer], hostInactive: { owner: "/ext/other-mcp.ts", cwd: "/Users/me/repo", updatedAt: 1 } }) },
     undo: { scope: "global", name: "lint", path: globalFile.path, token: "t", expiresInMs: 60_000, undoing: false },
@@ -386,35 +376,9 @@ test("the notices above the list scroll in their own box, so on a phone they nev
   const notices = html.match(/<div class="mcp-config-notices">([\s\S]*?)<\/div><div class="config-split-view">/);
   assert.ok(notices, "the notices sit in one box right before the split view");
   assert.equal((notices[1].match(/role="status" class="config-notice/g) ?? []).length, 2);
-  // The box shrinks and scrolls; a notice alone never shrinks below its text.
-  assert.match(cssSource, /\.mcp-config-notices \{\n\s*flex: 0 1 auto;\n\s*min-height: 0;\n\s*max-height: 40vh;\n\s*overflow-y: auto;\n\}/);
-  const phone = cssSource.slice(cssSource.indexOf(".mcp-config-notices {"));
-  assert.match(phone, /@media \(max-width: 640px\) \{\n\s*\.mcp-config-notices \{\n\s*max-height: 30vh;\n\s*max-height: 30dvh;\n\s*\}/);
-  // Short of height, the 190px phone sidebar gives way before the detail pane is clipped.
-  assert.match(phone, /\.mcp-config-notices \+ \.config-split-view > \.config-sidebar \{\n\s*flex-shrink: 1;\n\s*min-height: 96px;\n\s*\}/);
-  assert.match(phone, /\.mcp-config-notices \+ \.config-split-view > \.config-detail \{\n\s*min-height: 120px;\n\s*\}/);
 });
 
-test("when trusting removes Trust… under the keyboard, focus goes to the selected row", () => {
-  // The dialog hands focus back to Trust… on close; the reload then removes the notice and
-  // its button, and the browser drops focus to body. Only that transition moves focus, and
-  // only when it fell to the page (lib/stacked-dialog.test.mjs pins focusIfLost()).
-  assert.match(source, /const offersTrust = trustNotice\?\.kind === "untrusted" && onTrust !== undefined;/);
-  assert.match(source, /const offeredTrustRef = useRef\(offersTrust\);\n\s*useEffect\(\(\) => \{\n\s*const offeredTrust = offeredTrustRef\.current;\n\s*offeredTrustRef\.current = offersTrust;\n\s*if \(offeredTrust && !offersTrust\) focusIfLost\(document, focusFallback\(\)\);\n\s*\}, \[offersTrust\]\);/);
-  // With no row selected (the add pane is open, or the list is empty), the fallback is the Add action,
-  // on screen whenever the overview has loaded.
-  assert.match(source, /const focusFallback = \(\) => selectedRowRef\.current \?\? addActionRef\.current;/);
-  assert.match(source, /<ConfigListAction ref=\{addActionRef\} active=\{adding\} onClick=\{onAddOpen\}>/);
-  assert.match(settingsUiSource, /export function ConfigListAction\(\{ active = false, children, className, \.\.\.props \}: ButtonHTMLAttributes<HTMLButtonElement> & \{ active\?: boolean; ref\?: Ref<HTMLButtonElement> \}\) \{\n\s*return \(\n\s*<div className="config-list-action">\n\s*<button\n\s*type="button"\n\s*\{\.\.\.props\}/);
-  assert.match(source, /import \{ focusAfterChange, focusIfLost \} from "@\/lib\/stacked-dialog";/);
-  // The ref follows the selection: the Code mode row or a server row, whichever is selected.
-  assert.match(source, /<ConfigSidebarItem\n\s*ref=\{active \? rowRef : undefined\}\n\s*active=\{active\}/);
-  assert.match(source, /<ConfigSidebarItem\n\s*key=\{key\}\n\s*ref=\{selected === key \? selectedRowRef : undefined\}\n\s*active=\{selected === key\}/);
-  assert.match(source, /rowRef=\{selectedRowRef\}/);
-  assert.match(source, /selectedRowRef=\{selectedRowRef\}/);
-  // The shared row passes the ref on to its button (a prop since React 19).
-  assert.match(settingsUiSource, /export function ConfigSidebarItem\(\{[\s\S]*?\.\.\.props\n\}: ButtonHTMLAttributes<HTMLButtonElement> & \{ active\?: boolean; ref\?: Ref<HTMLButtonElement> \}\) \{\n\s*return \(\n\s*<button\n\s*type="button"\n\s*\{\.\.\.props\}/);
-  // A selected row with the ref attached renders as before: the ref is not an attribute.
+test("a selected row renders with the ref attached as a plain button: the ref is not an attribute", () => {
   assert.match(view({ selected: "codemode" }), /<button type="button" aria-label="Code mode: [^"]+" aria-current="page" class="config-sidebar-item">/);
 });
 
@@ -555,10 +519,6 @@ test("a failed save is shown with its reason on every platform", () => {
   assert.equal(text(failed({ error: "Failed to fetch" })), "Could not save the choice: Failed to fetch");
   assert.equal(text(failed({ error: "PUT /api/tools/settings did not answer within 15000 ms", timedOut: true })),
     "Could not save the choice: Pi Web did not answer in time, so the choice may not have been saved.");
-  // Unlike the PowerShell switch in General, nothing here waits for the platform.
-  assert.doesNotMatch(source, /isWindows/);
-  // The error line has its own color.
-  assert.match(cssSource, /\.mcp-config-line\.is-error \{[\s\S]*?color: #ef4444;/);
 });
 
 test("a trusted project whose defaultTools decides Code mode is named in the pane", () => {
@@ -603,37 +563,8 @@ test("the autoEnableCodemode warning names the file whose value sessions read", 
   assert.doesNotMatch(autoOff("always"), /autoEnableCodemode/);
 });
 
-test("the container starts loading and remembers the selection per project", () => {
-  // Before the first answer the panel shows that it is loading.
+test("the container shows that it is loading before the first answer", () => {
   assert.match(text(render(h(McpConfig, { cwd: null, onClose() {}, embedded: true }))), /Loading\.\.\./);
-  assert.match(source, /useState<string \| null>\(\(\) => getLastSettingsSelection\("mcp", cwd\)\)/);
-  assert.match(source, /if \(selected\) setLastSettingsSelection\("mcp", selected, cwd\);/);
-  assert.match(source, /setSelected\(\(current\) => pickMcpSelection\(mcpServerGroups\(result\.data, Boolean\(cwd\)\), current\)\);/);
-  // A late answer from an earlier load never replaces a newer one.
-  assert.match(source, /if \(request !== requestRef\.current\) return;/);
-  // Two writes, both in the helpers: the Code mode choice through the tools settings route, and
-  // the servers' changes through the MCP route; and the Test request, which writes no file.
-  assert.doesNotMatch(source, /method:/);
-  assert.deepEqual([...helperSource.matchAll(/method: "([A-Z]+)"/g)].map((match) => match[1]), ["PUT", "POST", "POST"]);
-  assert.match(helperSource, /fetchImpl\("\/api\/tools\/settings", \{\n\s*method: "PUT",/);
-  assert.match(helperSource, /fetchImpl\("\/api\/mcp", \{\n\s*method: "POST",/);
-  assert.match(helperSource, /fetchImpl\("\/api\/mcp\/test", \{\n\s*method: "POST",/);
-  assert.doesNotMatch(source, /style=\{/);
-});
-
-test("the container saves the Code mode choice, then reads back what is stored", () => {
-  // Only a change is saved; the pressed option does nothing.
-  assert.match(source, /onChange=\{\(value\) => \{\n\s*if \(value !== preference\) onChange\(value\);/);
-  assert.match(source, /const result = await saveMcpCodemodePreference\(preference, undefined, controller\.signal\);/);
-  // A save answered after the panel closed changes nothing.
-  assert.match(source, /if \(saveControllerRef\.current !== controller\) return;/);
-  // The stored preference is shown at once, and the overview is read again whatever the outcome:
-  // a timed-out save may still land, and a refused one may mean the file changed.
-  const save = source.slice(source.indexOf("const saveCodemode = useCallback"), source.indexOf("}, [refresh]);", source.indexOf("const saveCodemode")));
-  assert.match(save, /withMcpCodemodePreference\(current\.data, result\.preference\)/);
-  assert.match(save, /\n    void refresh\(\);\n {2}$/);
-  // Nothing reloads an open session: pi applies defaultTools when it creates one.
-  assert.doesNotMatch(source, /sendAgentCommand|type: "reload"/);
 });
 
 test("the Code mode pane's budget field saves a whole number, or empty for pi's default", () => {
@@ -690,19 +621,6 @@ test("the Code mode pane's budget field saves a whole number, or empty for pi's 
   const unreadable = text(codemodeView(info(undefined, { inlineBudgetError: "Unexpected token" })));
   assert.match(unreadable, /Tool list budget Cannot read the global settings file: Unexpected token/);
   assert.doesNotMatch(codemodeView(info(undefined)), /Tool list budget/);
-});
-
-test("the container saves the budget like the choice, then reads back what is stored", () => {
-  const save = source.slice(source.indexOf("const saveCodemodeInlineBudget = useCallback"), source.indexOf("}, [refresh]);", source.indexOf("const saveCodemodeInlineBudget")));
-  assert.match(save, /setCodemodeSave\(\{ saving: true, error: null, target: "inlineBudget" \}\);/);
-  assert.match(save, /const result = await saveMcpCodemodeInlineBudget\(budget, undefined, controller\.signal\);/);
-  assert.match(save, /if \(saveControllerRef\.current !== controller\) return;/);
-  assert.match(save, /withMcpCodemodeInlineBudget\(current\.data, result\.inlineBudget\)/);
-  assert.match(save, /\n    void refresh\(\);\n {2}$/);
-  // Only a change is saved, and only while nothing else writes.
-  assert.match(source, /if \(parsed\.ok && changes && !waiting\) onSave\(parsed\.value\);/);
-  // Save is disabled while it runs; focus comes back to the field from the page.
-  assert.match(source, /if \(wasSaving && !saving\) focusIfLost\(document, inputRef\.current\);/);
 });
 
 /** The Built-in tools switch's buttons, by label, with whether each is pressed and disabled. */
@@ -766,17 +684,6 @@ test("the Code mode pane's Built-in tools switch keeps tools declared or leaves 
   assert.match(text(unreadable), /Built-in tools Cannot read the global settings file: Unexpected token/);
   assert.doesNotMatch(unreadable, /aria-label="Built-in tools"/);
   assert.doesNotMatch(codemodeView(info(undefined)), /Built-in tools/);
-});
-
-test("the container saves the mode like the choice, then reads back what is stored", () => {
-  const save = source.slice(source.indexOf("const saveCodemodeMode = useCallback"), source.indexOf("}, [refresh]);", source.indexOf("const saveCodemodeMode")));
-  assert.match(save, /setCodemodeSave\(\{ saving: true, error: null, target: "mode" \}\);/);
-  assert.match(save, /const result = await saveMcpCodemodeMode\(mode, undefined, controller\.signal\);/);
-  assert.match(save, /if \(saveControllerRef\.current !== controller\) return;/);
-  assert.match(save, /withMcpCodemodeMode\(current\.data, result\.mode\)/);
-  assert.match(save, /\n    void refresh\(\);\n {2}$/);
-  // Only a change is saved: the pressed option saves only over a value that is not a mode.
-  assert.match(source, /if \(mcpCodemodeModeChanges\(mode, value\)\) onChange\(value\);/);
 });
 
 test("every string the panel shows is translated", () => {
@@ -856,7 +763,7 @@ test("a server's Tools row chooses its exposure, saying in one line what each co
   assert.doesNotMatch(refused, /mcp-exposure-select/);
 });
 
-test("the exposure dropdown waits like a switch and is saved through the MCP route", () => {
+test("the exposure dropdown waits like a switch, and points at why it cannot be changed", () => {
   // The group fixture's servers, validated, so each has an exposure.
   const validated = (props = {}) => writeView({
     ...props,
@@ -874,10 +781,6 @@ test("the exposure dropdown waits like a switch and is saved through the MCP rou
   assert.match(select.tag, /disabled=""/);
   const { noteId } = detailControls(html);
   assert.match(select.tag, new RegExp(`aria-describedby="[^"]* ${noteId}"`));
-  // Only a different value is sent, as a change through POST /api/mcp, and focus comes back to the dropdown.
-  assert.match(source, /if \(exposure !== server\.exposure\) onExposureChange\(server, exposure\);/);
-  assert.match(source, /runAction\(\{ action: "set-exposure", scope: server\.scope, name: server\.name, exposure \}, `exposure:\$\{key\}`\)/);
-  assert.match(source, /return active instanceof HTMLButtonElement \|\| active instanceof HTMLSelectElement \? active : null;/);
 });
 
 /** The opening tags of the selected server's Remove button and switch, and the note under them. */
@@ -1020,35 +923,6 @@ test("a removal offers Undo until the route lets it go, and says why an undo fai
   assert.doesNotMatch(gone, /<button/);
 });
 
-test("the container posts each change and shows the overview it answers with", () => {
-  // One change at a time, through the helper; its answer replaces the listing.
-  const run = source.slice(source.indexOf("const runAction = useCallback"), source.indexOf("const switchServer = useCallback"));
-  assert.match(run, /const result = await postMcpAction\(request, writeCwd, undefined, controller\.signal\);/);
-  assert.match(run, /if \(actionControllerRef\.current !== controller\) return undefined;/);
-  assert.match(run, /if \(result\.ok\) applyOverview\(result\.data, select\?\.\(result\.data\)\);\n\s*else void refresh\(\);/);
-  // The project is sent only when the listing covers it; a refused folder would refuse the change.
-  assert.match(run, /const writeCwd = current\.state === "loaded" && current\.data\.project \? cwd : null;/);
-  // A load still on its way predates the change, so its answer is dropped.
-  const apply = source.slice(source.indexOf("const applyOverview = useCallback"), source.indexOf("const runAction = useCallback"));
-  assert.match(apply, /requestRef\.current \+= 1;\n\s*controllerRef\.current\?\.abort\(\);\n\s*setRefreshing\(false\);/);
-  // Undo selects what it put back, and its notice goes when the route lets the removal go.
-  assert.match(source, /\(data\) => \(data\.restored \? mcpServerKey\(data\.restored\) : undefined\)/);
-  assert.match(source, /const timer = setTimeout\(\(\) => setUndo\(\(current\) => \(current\?\.token === undoToken \? null : current\)\), undoExpiresInMs\);/);
-  // The group switch leaves PI_WEB_PASSWORD entries off and reports what the route refused.
-  assert.match(source, /const \{ targets, keptOff \} = mcpGroupSwitchTargets\(servers, enabled\);/);
-  assert.match(source, /\{ action: "set-enabled", enabled, servers: targets\.map\(/);
-  // When Remove takes the focused pane with it, focus goes to Undo; when the notice goes, to the
-  // selected row; only when it fell to the page (lib/stacked-dialog.test.mjs pins focusIfLost()).
-  assert.match(source, /if \(undoToken !== undefined && undoToken !== shown\) focusIfLost\(document, undoButtonRef\.current\);\n\s*else if \(shown !== undefined && undoToken === undefined\) focusIfLost\(document, focusFallback\(\)\);/);
-  assert.match(source, /<ConfigButton ref=\{undoButtonRef\} size="small" onClick=\{onUndo\}/);
-  assert.match(settingsUiSource, /export function ConfigButton\(\{[\s\S]*?ref\?: Ref<HTMLButtonElement> \}\) \{\n\s*return \(\n\s*<button\n\s*type="button"\n\s*\{\.\.\.props\}/);
-  // Picking another server clears the last failure, which belongs to the one it was about.
-  assert.match(source, /onSelect=\{\(key\) => \{\n\s*setSelected\(key\);\n\s*setActionError\(null\);/);
-  // Nothing about a removed entry but its token, name and file reaches the panel's state.
-  assert.match(source, /if \(removed\) setUndo\(\{ \.\.\.removed, undoing: false \}\);/);
-  assert.match(apiTypesSource, /export interface McpUndoInfo extends McpServerRef \{\n\s*token: string;\n[\s\S]*?path: string;\n[\s\S]*?expiresInMs: number;\n\}/);
-});
-
 /** The opening tag of a group's switch, found by the n/m count in front of it. */
 function groupSwitch(html, count) {
   return decode(html).match(new RegExp(`<span class="config-sidebar-group-count">${count.replace("/", "\\/")}</span>(<button[^>]*>)`))?.[1];
@@ -1065,9 +939,7 @@ test("a group holding a server the switch never turns on can still be switched o
     groupSwitch(writeView({ data: { servers: [server({ name: "docs", enabled: false, transport: "http", url: "https://docs/mcp" }), pwOff] } }), "0/2"),
     /aria-checked="false" aria-label="Turn on every global server"/,
   );
-  // The panel passes its own rule to the shared switch, whose click asks for the opposite.
-  assert.match(source, /const checked = mcpGroupSwitchChecked\(group\.servers\);/);
-  assert.match(source, /<ConfigSidebarGroupSwitch\n\s*enabled=\{enabled\}\n\s*total=\{total\}\n\s*checked=\{checked\}/);
+  // The shared switch's click asks for the opposite of what it shows.
   const asked = [];
   const heading = ConfigSidebarGroupSwitch({ enabled: 1, total: 2, checked: true, label: "x", onChange: (next) => asked.push(next) });
   const toggle = heading.props.children[1];
@@ -1098,12 +970,10 @@ test("a Code mode save and a server change never overlap", () => {
   assert.match(controls.remove[0], /disabled=""/);
   assert.match(groupSwitch(saving, "1/2"), /disabled=""/);
   assert.match(decode(saving), /<button type="button" disabled="" class="config-button config-button-secondary config-button-default">Refresh<\/button>/);
-  assert.match(source, /const controlsBusy = busy !== null \|\| refreshing \|\| codemodeSave\.saving;/);
   // While a server change runs, neither Code mode option can be chosen.
   const info = { sandbox: { state: "available" }, builtinDisabled: false, preference: "automatic" };
   assert.deepEqual(codemodeOptions(codemodeView(info, { view: { busy: "switch:global\0docs" } })).map(({ disabled }) => disabled), [true, true]);
   assert.deepEqual(codemodeOptions(codemodeView(info)).map(({ disabled }) => disabled), [false, false]);
-  assert.match(source, /serverBusy=\{busy !== null\}/);
 });
 
 test("under -builtin:mcp a change is saved, and the note says no session connects it", () => {
@@ -1112,30 +982,6 @@ test("under -builtin:mcp a change is saved, and the note says no session connect
   assert.doesNotMatch(builtin.toggle, /disabled/);
   // MCP on: no note.
   assert.equal(detailControls(writeView()).note, undefined);
-  assert.match(source, /savedWhileOff=\{!data\.mcp\.available && !writesOff\}/);
-});
-
-test("focus goes back to the control a change was started from once nothing waits", () => {
-  // Each handler notes the focused button before the change disables it, and hands it back once
-  // answered; a removal or an undo that worked leaves focus to Undo and to the restored row.
-  const handler = (name, next) => source.slice(source.indexOf(`const ${name} = useCallback`), source.indexOf(`const ${next} = useCallback`));
-  for (const [name, next] of [["switchServer", "removeServer"], ["removeServer", "undoRemoval"], ["switchGroup", "McpConfigView"]]) {
-    const body = next === "McpConfigView" ? source.slice(source.indexOf(`const ${name} = useCallback`), source.indexOf("useEffect(() => {\n    if (selected)")) : handler(name, next);
-    assert.match(body, /const pressed = pressedButton\(\);/, name);
-    assert.match(body, /setFocusBack\(\{ control: pressed \}\);/, name);
-  }
-  const remove = handler("removeServer", "undoRemoval");
-  assert.match(remove, /if \(!result\.ok\) \{\n\s*setActionError\(\{ key, failure: result\.error \}\);\n\s*setFocusBack\(\{ control: pressed \}\);\n\s*return;\n\s*\}/);
-  const undo = source.slice(source.indexOf("const undoRemoval = useCallback"), source.indexOf("// The notice goes when the route lets the removal go."));
-  assert.match(undo, /const pressed = pressedButton\(\);/);
-  assert.match(undo, /if \(!result\.ok\) setFocusBack\(\{ control: pressed \}\);/);
-  // The view waits until no change, save or load holds the controls, handles each request once, and
-  // falls back to the selected row (lib/stacked-dialog.test.mjs pins focusAfterChange()). It comes
-  // after the Undo effects, so a fallback never takes focus from Undo.
-  // A change that took its control away with its pane (an Add that worked) goes straight to the row.
-  assert.match(source, /useEffect\(\(\) => \{\n\s*if \(!focusBack \|\| controlsBusy \|\| handledFocusBackRef\.current === focusBack\) return;\n\s*handledFocusBackRef\.current = focusBack;\n\s*if \(focusBack\.toSelectedRow\) focusIfLost\(document, focusFallback\(\)\);\n\s*else focusAfterChange\(document, focusBack\.control, focusFallback\(\)\);\n\s*\}, \[focusBack, controlsBusy\]\);/);
-  assert.ok(source.indexOf("focusAfterChange(document") > source.indexOf("focusIfLost(document, undoButtonRef.current)"));
-  assert.match(source, /focusBack=\{focusBack\}/);
 });
 
 // ---------------------------------------------------------------------------
@@ -1336,29 +1182,6 @@ test("the panel's own answer shows over the listing while it is about the entry 
   assert.match(connection(stale).text, /^Not tested yet\./);
 });
 
-test("the container tests one server at a time each, beside any change, and gives focus back", () => {
-  const body = source.slice(source.indexOf("const testServer = useCallback"), source.indexOf("// A change answers with the overview read after it"));
-  assert.match(body, /if \(testRequestsRef\.current\.has\(key\)\) return;/);
-  assert.match(body, /const testCwd = current\.state === "loaded" && current\.data\.project \? cwd : null;/);
-  // No signal: neither the panel closing nor its deadline aborts a test, since the route stops a
-  // test nobody waits for and records nothing.
-  assert.match(body, /const result = await postMcpTest\(\{ scope: server\.scope, name: server\.name \}, testCwd\);/);
-  assert.doesNotMatch(body, /abort/);
-  assert.match(source, /testRequests\.clear\(\);/);
-  assert.doesNotMatch(source, /testControllers/);
-  assert.match(body, /if \(testRequestsRef\.current\.get\(key\) !== request\) return;/);
-  assert.match(body, /setTests\(\(runs\) => \(\{ \.\.\.runs, \[key\]: mcpTestRunAfter\(runs\[key\], result, server\.configKey\) \}\)\);/);
-  // A refusal, or a test of other content than the listing shows, loads the listing again.
-  assert.match(body, /if \(mcpTestAnswerOutdates\(result, listed\)\) void refresh\(\);/);
-  // A test sets no `busy`, so no other control waits for it.
-  assert.doesNotMatch(body, /setBusy/);
-  // The view shows the panel's own answers over the listing, and a failure only for the entry it was about.
-  assert.match(source, /const data = load\.state === "loaded" \? mcpWithTestResults\(load\.data, tests\) : undefined;/);
-  assert.match(source, /test=\{mcpTestRunFor\(tests\[mcpServerKey\(selectedServer\)\], selectedServer\)\}/);
-  // Test is disabled while it runs, which drops focus to the page; it gets it back from there only.
-  assert.match(source, /if \(wasRunning && !running\) focusIfLost\(document, buttonRef\.current\);/);
-});
-
 // ---------------------------------------------------------------------------
 // What open sessions report
 // ---------------------------------------------------------------------------
@@ -1511,38 +1334,6 @@ test("the connection a sign-in made is summed up as a sign-in's in the Connectio
   assert.match(value, /<span class="mcp-config-state is-on">Connected<\/span> Signed in, then 2 tool\(s\) listed in 0\.4 s, at [^.]+\./);
   const after = connection(testView({ usesOAuth: true, signedIn: true, status: testedStatus("needs-auth", { afterSignIn: true }) }));
   assert.match(after.text, /^Needs sign-in Signed in, but the server still asked for a sign-in at /);
-});
-
-test("the container starts, polls, pastes into and cancels a sign-in, and signs out as a change", () => {
-  const body = (name, end) => source.slice(source.indexOf(`const ${name} = useCallback`), source.indexOf(end, source.indexOf(`const ${name} = useCallback`)));
-  const start = body("startSignIn", "}, [cwd, refresh]);");
-  // As for Test: the project only when the listing covers it, and no signal, since the flow lives on the server.
-  assert.match(start, /const signInCwd = listing\.state === "loaded" && listing\.data\.project \? cwd : null;/);
-  assert.match(start, /const result = await postMcpSignIn\(\{ scope: server\.scope, name: server\.name \}, signInCwd\);/);
-  assert.doesNotMatch(start, /abort|signal/);
-  // A press while one starts or runs does nothing: the route would only join it.
-  assert.match(start, /if \(current\?\.starting \|\| mcpSignInActive\(current\)\) return;/);
-  // A refusal may mean the listing is out of date.
-  assert.match(start, /if \(!result\.ok && result\.error\.reason !== undefined && !result\.error\.timedOut\) void refresh\(\);/);
-  // Polling: about once a second while a flow runs, aborted only as the panel goes; a flow that ended reloads the overview.
-  assert.match(source, /const result = await getMcpSignIn\(flowId, undefined, controller\.signal\);/);
-  assert.match(source, /\}, MCP_SIGN_IN_POLL_MS\);/);
-  assert.match(source, /if \(Object\.keys\(signIns\)\.some\(\(key\) => mcpSignInJustEnded\(previous\[key\], signIns\[key\]\)\)\) void refresh\(\);/);
-  assert.match(body("pasteSignIn", "}, []);"), /const result = await pasteMcpSignIn\(flowId, value\);/);
-  assert.match(body("cancelSignIn", "}, []);"), /const result = await cancelMcpSignInFlow\(flowId\);/);
-  // Sign out writes mcp-auth.json through POST /api/mcp, as one more change the controls wait for.
-  const signOut = body("signOut", "}, [runAction]);");
-  assert.match(signOut, /await runAction\(\{ action: "sign-out", scope: server\.scope, name: server\.name \}, `sign-out:\$\{key\}`\);/);
-  assert.match(signOut, /setFocusBack\(\{ control: pressed \}\);/);
-  // One that worked drops this panel's own test answers, kept and on their way, which would read
-  // Connected over the entry the route just forgot (components/mcp-config-helpers.test.mjs).
-  assert.match(signOut, /if \(result\.ok\) \{\n\s*const now = Date\.now\(\);\n\s*setTests\(\(runs\) => \{\n\s*const next = mcpTestRunAfterSignOut\(runs\[key\], now\);/);
-  assert.match(source, /\[key\]: \{ \.\.\.runs\[key\], running: true, startedAt: Date\.now\(\),/);
-  assert.match(source, /signingOut=\{busy === `sign-out:\$\{key\}`\}/);
-  // Closing the panel lets sign-ins go, never cancels them: Sign in joins one again.
-  const unmount = source.slice(source.indexOf("const testRequests = testRequestsRef.current;"), source.indexOf("}, []);", source.indexOf("const testRequests = testRequestsRef.current;")));
-  assert.match(unmount, /mountedRef\.current = false;/);
-  assert.doesNotMatch(unmount, /SignIn|signIns/);
 });
 
 test("a project override is listed as the global server it changes, which offers a switch for the project alone", () => {

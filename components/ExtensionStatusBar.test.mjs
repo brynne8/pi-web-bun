@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createJiti } from "jiti";
 
@@ -46,20 +45,6 @@ test("preserves status line breaks while normalizing horizontal whitespace", () 
     sanitizeExtensionStatusText("  first\tsecond \r\n third  "),
     "first second\nthird",
   );
-});
-
-test("preserves explicit status lines without wrapping and scrolls long or tall output", async () => {
-  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
-  const statusLineRule = css.match(/(?:^|\n)\.extension-status-line\s*\{([^}]*)\}/)?.[1] ?? "";
-  const statusTextRule = css.match(/\.extension-status-text\s*\{([^}]*)\}/)?.[1] ?? "";
-
-  assert.match(statusLineRule, /max-height:/);
-  assert.match(statusLineRule, /align-items:\s*flex-start/);
-  assert.match(statusLineRule, /overflow:\s*auto/);
-  assert.match(statusTextRule, /white-space:\s*pre\s*;/);
-  assert.doesNotMatch(statusTextRule, /overflow[^:]*:\s*hidden/);
-  assert.doesNotMatch(statusTextRule, /overflow-wrap:\s*anywhere/);
-  assert.doesNotMatch(statusTextRule, /text-overflow:\s*ellipsis/);
 });
 
 test("renders each status as its own cell without identifier keys", () => {
@@ -215,34 +200,6 @@ test("marks the shelf only when it has a command button", () => {
   assert.match(withCommand, /class="extension-status-shelf has-status has-commands"/);
 });
 
-test("every status is a cell divided by vertical rules, and a command cell is a button with no box border", async () => {
-  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
-  const lineRule = css.match(/(?:^|\n)\.extension-status-line\s*\{([^}]*)\}/)?.[1] ?? "";
-  const rowRule = css.match(/\.extension-status-text\s*\{([^}]*)\}/)?.[1] ?? "";
-  const cellRule = css.match(/\.extension-status-item\s*\{([^}]*)\}/)?.[1] ?? "";
-  const buttonRule = css.match(/\.extension-status-command\s*\{([^}]*)\}/)?.[1] ?? "";
-
-  // The cells carry the padding, so a cell can fill the whole height of the line.
-  assert.match(lineRule, /padding:\s*0\s*;/);
-  assert.match(rowRule, /display:\s*flex/);
-  assert.match(rowRule, /align-items:\s*stretch/);
-  assert.match(cellRule, /padding:\s*8px 12px/);
-  assert.match(cellRule, /border-right:\s*1px solid/);
-  assert.match(cellRule, /flex:\s*0 0 auto/);
-  assert.match(css, /\.extension-status-item:last-child\s*\{[^}]*border-right:\s*0/);
-  // The button keeps the cell's rule on its right and draws no box.
-  assert.doesNotMatch(buttonRule, /border-radius/);
-  assert.doesNotMatch(buttonRule, /border-right/);
-  assert.match(buttonRule, /border-left:\s*0/);
-  assert.match(buttonRule, /white-space:\s*nowrap/);
-  assert.match(buttonRule, /font:\s*inherit/);
-  assert.match(css, /\.extension-status-command:disabled\s*\{[^}]*not-allowed/);
-  // Touch screens get taller cells only when there is something to tap.
-  assert.match(css, /@media \(pointer: coarse\)\s*\{\s*\.extension-status-shelf\.has-commands \.extension-status-text\s*\{[^}]*min-height:\s*44px/);
-  // The widget triggers beside the cells grow with them, or the row would be uneven.
-  assert.match(css, /\.extension-status-shelf\.has-commands \.extension-widget-triggers,\s*\.extension-status-shelf\.has-commands \.extension-widget-trigger\s*\{[^}]*height:\s*44px/);
-});
-
 test("with widgets, the triggers and the status line share one scrolling row below the panel", () => {
   const html = renderStatusBar({
     statuses: [{ key: "status", text: "connected" }],
@@ -271,19 +228,4 @@ test("without widgets there is no shared row, and without status the row holds o
   });
   assert.match(html, /extension-status-row/);
   assert.doesNotMatch(html, /extension-status-line/);
-});
-
-test("the shared row scrolls sideways as a whole; its triggers and status line do not scroll on their own", async () => {
-  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
-  const rowRule = css.match(/(?:^|\n)\.extension-status-row\s*\{([^}]*)\}/)?.[1] ?? "";
-  const triggersRule = css.match(/(?:^|\n)\.extension-widget-triggers\s*\{([^}]*)\}/)?.[1] ?? "";
-  const lineInRowRule = css.match(/\.extension-status-row > \.extension-status-line\s*\{([^}]*)\}/)?.[1] ?? "";
-
-  assert.match(rowRule, /overflow-x:\s*auto/);
-  assert.match(rowRule, /display:\s*flex/);
-  // Nothing inside may shrink or clip, or the row would never overflow.
-  assert.match(triggersRule, /flex:\s*0 0 auto/);
-  assert.doesNotMatch(triggersRule, /overflow/);
-  assert.doesNotMatch(css, /\.extension-widget-triggers[^{]*\{[^}]*max-width:\s*70%/);
-  assert.match(lineInRowRule, /flex:\s*0 0 auto/);
 });

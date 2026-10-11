@@ -816,3 +816,78 @@ html[data-keyboard-open] .sidebar-sheet {
   height: 40px;
   font-size: 14px;
 }
+
+/* A project menu's "Delete all sessions" question (a custom menu body;
+   components/SessionSidebar.tsx): what goes, then Delete and Cancel. */
+.sidebar-menu-question {
+  padding: 2px 4px 4px;
+}
+
+.sidebar-menu-question .sidebar-menu-header {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.sidebar-menu-question-text {
+  margin: 0;
+  padding: 2px 4px 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.sidebar-menu-question-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.sidebar-menu-question-confirm,
+.sidebar-menu-question-cancel {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sidebar-menu-question-cancel:hover {
+  background: var(--bg-hover);
+}
+
+/* Deleting cannot be undone: the red of a row's delete confirmation. */
+.sidebar-menu-question-confirm {
+  border-color: #ef4444;
+  background: #ef4444;
+  color: #fff;
+  font-weight: 600;
+}
+
+.sidebar-menu-question-confirm:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.sidebar-menu-question-confirm:focus-visible,
+.sidebar-menu-question-cancel:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.sidebar-sheet .sidebar-menu-question {
+  padding: 4px 16px 4px;
+}
+
+.sidebar-sheet .sidebar-menu-question-text {
+  font-size: 14px;
+}
+
+.sidebar-sheet .sidebar-menu-question-confirm {
+  height: 40px;
+  font-size: 14px;
+}

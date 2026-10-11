@@ -50,12 +50,22 @@ if (launchOptions.command === "start") {
   startServer(launchOptions);
 } else {
   runCommand(launchOptions).then(
-    (code) => process.exit(code),
+    exitWhenIdle,
     (error) => {
       console.error(error instanceof Error ? error.message : String(error));
-      process.exit(1);
+      exitWhenIdle(1);
     },
   );
+}
+
+// Leave once the event loop drains instead of calling process.exit() right
+// after a fetch(): on Windows, Node.js 23 up to 24.19 / 26.6 can then abort
+// with a libuv assertion (UV_HANDLE_CLOSING, win/async.c) while background
+// work from the fetch is still winding down (#1174, nodejs/node#56645). The
+// unref'd timer only fires if something still holds the loop open.
+function exitWhenIdle(code) {
+  process.exitCode = code;
+  setTimeout(() => process.exit(code), 2_000).unref();
 }
 
 function startServer({ port, hostname, openBrowser }) {

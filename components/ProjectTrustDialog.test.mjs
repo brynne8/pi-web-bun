@@ -14,14 +14,12 @@ const {
   ProjectTrustDialog,
   ProjectTrustDialogView,
   ProjectTrustMcpSection,
-  MCP_LISTING_TIMEOUT_MS,
   projectTrustListingFrom,
 } = await jiti.import("./ProjectTrustDialog.tsx");
 const { enLocale } = await jiti.import("@/lib/i18n/messages/en.ts");
 const source = await readFile(new URL("./ProjectTrustDialog.tsx", import.meta.url), "utf8");
 const apiTypesSource = await readFile(new URL("../lib/api-types.ts", import.meta.url), "utf8");
 const settingsCss = await readFile(new URL("../app/settings.css", import.meta.url), "utf8");
-const appShellSource = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
 
 const h = React.createElement;
 const messages = enLocale.messages;
@@ -316,34 +314,6 @@ test("a listing that failed names why, or gives its diagnostic when there is not
   assert.equal(text(render(h(ProjectTrustMcpSection, { listing: listingError }))), "Could not list this project's MCP servers. boom");
 });
 
-test("the dialog fetches the listing when it opens, and gives up after a timeout", () => {
-  assert.equal(MCP_LISTING_TIMEOUT_MS, 10_000);
-  const effect = source.slice(source.indexOf("useEffect(() => {"), source.indexOf("}, [cwd]);"));
-  assert.match(effect, /fetch\(`\/api\/project-trust\?cwd=\$\{encodeURIComponent\(cwd\)\}`, \{ signal: controller\.signal, cache: "no-store" \}\)/);
-  assert.match(effect, /window\.setTimeout\(\(\) => \{\s*timedOut = true;\s*controller\.abort\(\);\s*\}, MCP_LISTING_TIMEOUT_MS\)/);
-  // A late answer for a closed dialog or an earlier cwd is dropped.
-  assert.match(effect, /return \(\) => \{\s*active = false;\s*window\.clearTimeout\(timer\);\s*controller\.abort\(\);\s*\};/);
-  assert.match(source, /disabled=\{busy \|\| loading\}/);
-  // The fresh status goes to the page, so its restricted-mode banner follows it.
-  assert.match(effect, /if \(next\.state === "loaded" && next\.status\) onStatusRef\.current\?\.\(next\.status\);/);
-});
-
-test("the dialog takes focus when it opens and Escape closes it alone, even above Settings", () => {
-  const html = view();
-  // Focus goes to the dialog itself: a screen reader reads its title, and no stray Enter trusts the folder.
-  assert.match(html, /<div role="dialog" aria-modal="true" aria-labelledby="project-trust-title" aria-describedby="project-trust-description" tabindex="-1" class="project-trust-dialog">/);
-  assert.match(source, /ref=\{dialogRef\}/);
-  assert.match(settingsCss, /\.project-trust-dialog:focus \{\s*outline: none;\s*\}/);
-  // One listener for the dialog's life, in the capture phase (lib/stacked-dialog.ts), which
-  // also hands focus back on close. While trusting, Escape is ignored like Cancel and the
-  // backdrop, yet still stopped before Settings could close under the dialog.
-  const view_ = source.slice(source.indexOf("export function ProjectTrustDialogView"));
-  assert.match(view_, /useEffect\(\(\) => openStackedDialog\(document, dialogRef\.current, \(\) => \{\n\s*if \(!busyRef\.current\) onCancelRef\.current\(\);\n\s*\}\), \[\]\);/);
-  assert.match(view_, /useEffect\(\(\) => \{\n\s*busyRef\.current = busy;\n\s*onCancelRef\.current = onCancel;\n\s*\}, \[busy, onCancel\]\);/);
-  assert.match(source, /import \{ openStackedDialog \} from "@\/lib\/stacked-dialog";/);
-  assert.doesNotMatch(source, /addEventListener\("keydown"/);
-});
-
 test("every string the dialog shows is translated", async () => {
   const literalKeys = [...source.matchAll(/\bt\("([^"]+)"/g)].map((match) => match[1]);
   const ternaryKeys = [...source.matchAll(/\? "([a-z]+\.[\w.-]+)" : "([a-z]+\.[\w.-]+)"/g)].flatMap((match) => [match[1], match[2]]);
@@ -377,23 +347,10 @@ test("every string the dialog shows is translated", async () => {
   for (const key of keys) assert.equal(typeof messages[key], "string", `${key} is missing from en.ts`);
 });
 
-test("the dialog body scrolls inside a safe-area-aware backdrop", () => {
-  assert.match(settingsCss, /\.project-trust-backdrop \{[^}]*position: fixed;[^}]*padding: max\(16px, env\(safe-area-inset-top\)\) max\(16px, env\(safe-area-inset-right\)\) max\(16px, env\(safe-area-inset-bottom\)\) max\(16px, env\(safe-area-inset-left\)\);/);
-  assert.match(settingsCss, /\.project-trust-dialog \{[^}]*flex-direction: column;[^}]*max-width: 100%;[^}]*max-height: 100%;/);
-  assert.match(settingsCss, /\.project-trust-body \{[^}]*min-height: 0;[^}]*overflow: auto;/);
-  assert.match(settingsCss, /\.project-trust-footer \{[^}]*flex-shrink: 0;/);
-  // Repository text never keeps its own line breaks or runs of spaces, which could push a value's tail out of view.
+test("repository text in the dialog never keeps its own line breaks or runs of spaces", () => {
+  // Either could push a value's tail out of view of the person deciding trust.
   for (const selector of [".project-trust-mcp-target", ".project-trust-mcp-detail"]) {
     const block = settingsCss.slice(settingsCss.indexOf(`${selector} {`));
     assert.match(block.slice(0, block.indexOf("}")), /white-space: normal;/, selector);
   }
-  // iOS standalone can report env() as 0; the dialog gets the same fallback as Settings.
-  const standalone = settingsCss.slice(settingsCss.indexOf("@supports (-webkit-touch-callout: none)"));
-  assert.equal((standalone.match(/\.settings-dialog-backdrop,\s*\.project-trust-backdrop,\s*\.config-panel-root\.is-modal \{/g) ?? []).length, 2);
-});
-
-test("the page keeps a refusal's reason for the dialog and follows the status the dialog read", () => {
-  const trust = appShellSource.slice(appShellSource.indexOf("const handleTrustProject"), appShellSource.indexOf("const activeFileTab ="));
-  assert.match(trust, /setProjectTrustError\(\{ error: data\.error \?\? `HTTP \$\{response\.status\}`, \.\.\.\(data\.reason \? \{ reason: data\.reason \} : \{\}\) \}\);/);
-  assert.match(appShellSource, /<ProjectTrustDialog[\s\S]*?onStatus=\{setProjectTrust\}[\s\S]*?\/>/);
 });

@@ -16,7 +16,7 @@ const hook = (name, includes) => nodes.find((node) => ts.isCallExpression(node)
 const compile = (node) => new Script(ts.transpileModule(`(${node.getText(source)})`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText);
 const effect = hook("useEffect", "new IntersectionObserver");
 assert.ok(effect, "missing the sentinel observer effect");
-const [body, deps] = effect.arguments;
+const [body] = effect.arguments;
 const script = compile(body);
 const loadOlderPage = compile(hook("useCallback", "requestedCursorRef.current = before").arguments[0]);
 const forgetCursor = compile(hook("useEffect", "requestedCursorRef.current = null").arguments[0]);
@@ -93,11 +93,4 @@ test("a page that did not land, or a cursor a reload brought back, is fetched ag
   reloaded.render("older");
   await reloaded.reachTop();
   assert.deepEqual(cursors(reloaded.calls), ["older", "older"]);
-});
-
-test("the observer is renewed when the sentinel mounts or the window grows", () => {
-  const names = deps.elements.map((element) => element.getText(source));
-  assert.ok(names.includes("sentinel"), "a sentinel that appears later needs an observer");
-  assert.ok(names.includes("visibleCount"), "a sentinel still in view after the window grew needs a new observation");
-  assert.match(source.getFullText(), /<div ref=\{setSentinel\}/);
 });

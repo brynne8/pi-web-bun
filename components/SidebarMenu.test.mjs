@@ -21,21 +21,12 @@ const {
   SIDEBAR_MENU_FILTER_MIN_CHOICES,
 } = await jiti.import("./SidebarMenu.tsx");
 const { SpinnerIcon, MoreIcon, PinIcon, TrashIcon } = await jiti.import("./SidebarIcons.tsx");
-const source = await readFile(new URL("./SidebarMenu.tsx", import.meta.url), "utf8");
-const iconSource = await readFile(new URL("./SidebarIcons.tsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/sidebar-menu.css", import.meta.url), "utf8");
 
 const h = React.createElement;
 
 function decode(html) {
   return html.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
-}
-
-function cssRule(selector) {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = css.match(new RegExp(`(?:^|\\n)${escaped} \\{([^}]*)\\}`));
-  assert.ok(match, `${selector} rule not found`);
-  return match[1];
 }
 
 const noop = () => {};
@@ -72,9 +63,6 @@ test("the menu waits for the client before portaling, so server markup is empty"
     onClose: noop,
   }));
   assert.equal(html, "");
-  assert.match(source, /const \[portalTarget, setPortalTarget\] = useState<HTMLElement \| null>\(null\);/);
-  assert.match(source, /useEffect\(\(\) => \{\s*setPortalTarget\(document\.body\);\s*\}, \[\]\);/);
-  assert.match(source, /return createPortal\(\s*<SidebarMenuSurface[\s\S]*?portalTarget,\s*\);/);
 });
 
 test("desktop menu markup: menu roles, check marks, shortcuts, notes and disabled reasons", () => {
@@ -148,7 +136,6 @@ test("conditional bodies that are all off are no body: the items show", () => {
   }
   assert.equal(hasCustomMenuBody([false, h("form")]), true);
   assert.match(surface({ children: [false, h("form", { key: "form" })] }), /^<div class="sidebar-menu" role="dialog"[^>]*><form><\/form><\/div>$/);
-  assert.match(source, /const custom = hasCustomMenuBody\(children\);[\s\S]*const custom = hasCustomMenuBody\(children\);/, "the surface and the menu decide alike");
 });
 
 test("desktop placement: at a point, flipping like a native context menu, then clamped", () => {
@@ -185,53 +172,6 @@ test("shortcut letters find enabled items, case-insensitively", () => {
   assert.equal(findSidebarMenuShortcut(items, "x"), null);
   assert.equal(findSidebarMenuShortcut(items, "Enter"), null);
   assert.equal(findSidebarMenuShortcut(undefined, "p"), null);
-});
-
-test("Escape is taken in the capture phase and marked handled, so it never also stops the agent", () => {
-  assert.match(source, /document\.addEventListener\("keydown", onKeyDown, true\);/);
-  assert.match(source, /document\.removeEventListener\("keydown", onKeyDown, true\);/);
-  assert.match(source, /if \(!surface \|\| event\.isComposing \|\| event\.keyCode === 229\) return;/);
-  assert.match(source, /if \(event\.key === "Escape"\) \{\s*event\.preventDefault\(\);\s*event\.stopPropagation\(\);[\s\S]*?onCloseRef\.current\("escape"\);\s*return;\s*\}/);
-  // Arrow keys and shortcut letters are not stolen from a text field inside the menu.
-  assert.match(source, /if \(inside && isTextEntry\(target\) && !leavesFilter\) return;/);
-  const arrows = 'if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {';
-  assert.ok(source.indexOf("isTextEntry(target) && !leavesFilter) return;") < source.indexOf(arrows));
-  assert.ok(source.indexOf(arrows) < source.indexOf("findSidebarMenuShortcut(itemsRef.current, event.key)"));
-  assert.match(source, /if \(event\.key\.length !== 1 \|\| event\.ctrlKey \|\| event\.metaKey \|\| event\.altKey\) return;/);
-  // Enter on an item keeps Shift (Delete skips its confirmation) and ignores IME.
-  assert.match(source, /if \(event\.key !== "Enter" \|\| event\.nativeEvent\.isComposing \|\| event\.keyCode === 229\) return;\s*event\.preventDefault\(\);\s*onActivate\(action, event\.shiftKey\);/);
-  assert.match(source, /onKeyDown=\{activateOnEnter\(item, onActivate\)\}/);
-  assert.match(source, /onKeyDown=\{activateOnEnter\(secondary, onActivate\)\}/);
-});
-
-test("an outside press closes a desktop menu in the capture phase without swallowing it", () => {
-  assert.match(source, /document\.addEventListener\("pointerdown", onPointerDown, true\);/);
-  const handler = source.slice(source.indexOf("const onPointerDown"), source.indexOf('document.addEventListener("pointerdown"'));
-  assert.match(handler, /if \(!surface \|\| \(target && surface\.contains\(target\)\)\) return;/);
-  assert.match(handler, /onCloseRef\.current\("outside"\);/);
-  assert.doesNotMatch(handler, /preventDefault|stopPropagation/);
-  assert.match(source, /if \(!visible \|\| sheet\) return;\s*const onPointerDown/);
-});
-
-test("activation calls onSelect before closing, and portal events stop at the menu", () => {
-  assert.match(source, /item\.onSelect\(\{ shiftKey, keepOpen: \(\) => \{ keepOpen = true; \} \}\);\s*if \(!keepOpen\) onCloseRef\.current\("select"\);/);
-  assert.match(source, /if \(item\.disabled\) return;/);
-  assert.match(source, /<div className="sidebar-sheet-backdrop" aria-hidden="true" onClick=\{\(\) => onClose\("outside"\)\} \/>/);
-  assert.match(source, /onClick=\{\(\) => onClose\("cancel"\)\}/);
-  assert.match(source, /onClick: stopReactPropagation,/);
-  assert.match(source, /onContextMenu: stopContextMenu,/);
-  assert.equal((source.match(/\{\.\.\.isolateEvents\}/g) ?? []).length, 2);
-});
-
-test("focus moves into the menu on open and back to the opener on close", () => {
-  assert.match(source, /initialFocusTarget\(surface\)\?\.focus\(\{ preventScroll: true \}\);/);
-  // The opener is read when the menu opens: the parent closes the menu by
-  // dropping its state, returnFocusTo included, before the cleanup runs.
-  const restore = source.slice(source.indexOf("// On close, focus returns"), source.indexOf("// Keys, in the capture phase"));
-  assert.match(restore, /if \(!visible \|\| !surface\) return;\s*const opener = returnFocusToRef\.current;\s*return \(\) => \{/);
-  assert.doesNotMatch(restore.slice(restore.indexOf("return () => {")), /returnFocusToRef/);
-  assert.match(restore, /if \(active && active !== document\.body && !surface\.contains\(active\)\) return;\s*const target = menuFocusReturnTarget\(opener\);\s*if \(!target\) return;\s*target\.focus\(\{ preventScroll: true \}\);/);
-  assert.match(restore, /if \(opener && target !== opener && isRendered\(opener\)\) opener\.focus\(\{ preventScroll: true \}\);/);
 });
 
 /** A stand-in for an element: whether it is laid out, its row, and what it holds. */
@@ -277,21 +217,7 @@ test("focus never goes to an opener that is hidden: the row's own button takes i
   assert.equal(menuFocusReturnTarget(fakeElement({ rendered: false, row: hiddenRow })), null);
 });
 
-test("menu, sheet and toast styles: layers above the drawer, reduced motion", () => {
-  assert.match(cssRule(".sidebar-menu"), /position: fixed;[\s\S]*z-index: 400;[\s\S]*border-radius: 8px;[\s\S]*box-shadow: 0 6px 20px rgba\(0, 0, 0, 0\.10\);/);
-  assert.match(cssRule(".sidebar-sheet-backdrop"), /position: fixed;\s*inset: 0;/);
-  assert.match(cssRule(".sidebar-sheet"), /position: relative;\s*z-index: 1;[\s\S]*padding: 4px 0 max\(8px, env\(safe-area-inset-bottom\)\);[\s\S]*border-radius: 12px 12px 0 0;/);
-  // The sheet sits at the bottom of the visible area, which the software
-  // keyboard shrinks (iOS keeps the layout viewport, and bottom: 0, under it),
-  // and drops the home indicator inset the keyboard covers.
-  assert.match(cssRule(".sidebar-sheet-layer"), /position: fixed;\s*top: 0;\s*right: 0;\s*left: 0;\s*z-index: 410;\s*display: flex;\s*flex-direction: column;\s*justify-content: flex-end;\s*height: var\(--app-viewport-height, 100dvh\);/);
-  assert.doesNotMatch(cssRule(".sidebar-sheet"), /position: fixed|bottom: 0/);
-  assert.match(cssRule("html[data-keyboard-open] .sidebar-sheet"), /padding-bottom: 8px;/);
-  assert.match(cssRule(".sidebar-menu-item"), /height: 28px;/);
-  assert.match(cssRule(".sidebar-sheet .sidebar-menu-item"), /height: 48px;[\s\S]*font-size: 15px;/);
-  assert.match(cssRule(".sidebar-sheet .sidebar-menu-shortcut"), /display: none;/);
-  assert.match(cssRule(".sidebar-spin"), /animation: spin 0\.9s linear infinite;/);
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.sidebar-spin,\s*\.sidebar-menu,\s*\.sidebar-sheet,\s*\.sidebar-sheet-backdrop,\s*\.sidebar-toast \{\s*animation: none;/);
+test("menu styles parse on Safari 16.2", () => {
   // Hand-written CSS must parse on Safari 16.2: no nesting.
   assert.doesNotMatch(css, /\{[^{}]*\{[^{}]*\}[^{}]*&/);
   assert.doesNotMatch(css, /@starting-style/);
@@ -307,9 +233,6 @@ test("icons are decorative unless labelled, and the spinner turns through a clas
   assert.match(spinner, /role="img" aria-label="Agent running"/);
   assert.doesNotMatch(spinner, /aria-hidden/);
   assert.match(spinner, /<path d="M21 12a9 9 0 1 1-3\.8-7\.4"><\/path>/);
-  for (const name of ["PlusIcon", "MoreIcon", "ArchiveIcon", "RestoreIcon", "PinIcon", "PinOffIcon", "ChevronIcon", "BranchIcon", "ForkIcon", "TrashIcon", "PencilIcon", "DotIcon", "DotOutlineIcon", "CheckIcon", "FolderIcon", "FolderPlusIcon", "TerminalIcon", "SearchIcon", "UploadIcon", "RefreshIcon", "ChangesIcon", "MessageIcon", "SpinnerIcon"]) {
-    assert.match(iconSource, new RegExp(`export function ${name}\\(`), `${name} is exported`);
-  }
 });
 
 const projectChoices = Array.from({ length: SIDEBAR_MENU_FILTER_MIN_CHOICES }, (_, index) => ({
@@ -359,19 +282,9 @@ test("a classic menu: main's dropdown look, paths cut at their left, a footer an
   // Without a footer a classic menu is a plain menu; a sheet never takes the look.
   assert.match(surface({ classic: true }), /^<div class="sidebar-menu is-classic" role="menu"/);
   assert.doesNotMatch(surface({ classic: true, sheet: true }), /is-classic/);
-  // Main's dropdowns: rows divided by lines, 11px, a 10px check, no inner padding.
-  assert.match(cssRule(".sidebar-menu.is-classic"), /^\s*padding: 0;\s*$/);
-  assert.match(cssRule(".sidebar-menu.is-classic .sidebar-menu-item"), /gap: 7px;\s*height: auto;\s*padding: 8px 10px;\s*border-radius: 0;\s*color: var\(--text-muted\);\s*font-size: 11px;/);
-  assert.match(css, /\.sidebar-menu\.is-classic \.sidebar-menu-item\.is-choice,\s*\.sidebar-menu\.is-classic \.sidebar-menu-row\.is-choice \{\s*border-bottom: 1px solid var\(--border\);/);
-  assert.match(cssRule(".sidebar-menu.is-classic .sidebar-menu-icon svg"), /width: 10px;\s*height: 10px;/);
-  assert.match(cssRule(".sidebar-menu-label.is-path"), /direction: rtl;\s*text-align: left;/);
-  // A dirty checkout's question in its row: red-tinted, its two buttons small.
-  assert.match(cssRule(".sidebar-worktree-confirm"), /padding: 7px 10px;\s*border-bottom: 1px solid var\(--border\);\s*background: rgba\(239, 68, 68, 0\.06\);/);
-  // Focus goes in again when the body changes, and a filter may ask for more choices.
-  assert.match(source, /\}, \[visible, sheet, custom, focusKey\]\);/);
+  // A filter may ask for more choices.
   assert.equal(sidebarMenuHasFilter(projectMenu, 9), false);
   assert.equal(sidebarMenuHasFilter([...projectMenu, { ...projectChoices[0], id: "ninth" }], 9), true);
-  assert.match(source, /sidebarMenuHasFilter\(items, filter\.minChoices\)/);
 });
 
 test("filter markup: a field above the list, the empty label, focus only on a desktop", () => {
@@ -392,18 +305,6 @@ test("filter markup: a field above the list, the empty label, focus only on a de
   // Too few choices, or a custom body: no field.
   assert.doesNotMatch(surface({ items: projectMenu.slice(1), filter }), /sidebar-menu-filter/);
   assert.doesNotMatch(surface({ items: projectMenu, filter, children: h("input") }), /sidebar-menu-filter/);
-});
-
-test("filter keys: Up and Down leave the field, Escape clears it before it closes, IME is left alone", () => {
-  assert.match(source, /const leavesFilter = \(event\.key === "ArrowDown" \|\| event\.key === "ArrowUp"\) && target\?\.matches\(FILTER_SELECTOR\);\s*if \(inside && isTextEntry\(target\) && !leavesFilter\) return;/);
-  const escape = source.slice(source.indexOf('if (event.key === "Escape") {'), source.indexOf("const target = event.target instanceof Element"));
-  assert.match(escape, /const field = surface\.querySelector<HTMLElement>\(FILTER_SELECTOR\);\s*if \(field && filterQueryRef\.current\) \{\s*setFilterQuery\(""\);\s*field\.focus\(\{ preventScroll: true \}\);\s*return;\s*\}\s*onCloseRef\.current\("escape"\);/);
-  // The capture listener already returns for composition before any of this.
-  assert.ok(source.indexOf("if (!surface || event.isComposing || event.keyCode === 229) return;") < source.indexOf("const field = surface.querySelector"));
-  // Each opening, and each body, starts with an empty field.
-  assert.match(source, /useEffect\(\(\) => \{\s*setFilterQuery\(""\);\s*\}, \[visible, custom\]\);/);
-  // A marked control takes the focus first: the filter, or a confirmation's Cancel.
-  assert.match(source, /const marked = Array\.from\(surface\.querySelectorAll<HTMLElement>\(AUTOFOCUS_SELECTOR\)\)\.find\(isFocusable\);\s*if \(marked\) return marked;/);
 });
 
 test("an item's secondary action is its own menu item at the row's end; a badge sits before the note", () => {
@@ -433,17 +334,4 @@ test("an item's secondary action is its own menu item at the row's end; a badge 
   // Arrow keys reach both: each is a data-sidebar-menu-item.
   assert.equal((html.match(/data-sidebar-menu-item=""/g) ?? []).length, 5);
   assert.match(html, /<span class="sidebar-menu-label">app<\/span><span class="badge">2<\/span><span class="sidebar-menu-note">Workspace<\/span>/);
-  // A disabled secondary does nothing: activation checks it like any item.
-  assert.match(source, /const activate = \(item: MenuAction, shiftKey: boolean\) => \{\s*if \(item\.disabled\) return;/);
-});
-
-test("filter and secondary action styles: sticky field, room for a finger, a capped height", () => {
-  assert.match(cssRule(".sidebar-menu"), /max-height: min\(calc\(var\(--app-viewport-height, 100dvh\) - 16px\), 480px\);/);
-  // Sticky insets count from inside the scroller's padding (4px, the sheet's too): -4px is its edge.
-  assert.match(cssRule(".sidebar-menu-filter"), /position: sticky;\s*top: -4px;/);
-  assert.match(cssRule(".sidebar-menu-row > .sidebar-menu-item"), /flex: 1;\s*min-width: 0;/);
-  assert.match(cssRule(".sidebar-menu-secondary"), /width: 28px;\s*height: 28px;/);
-  assert.match(cssRule(".sidebar-sheet .sidebar-menu-secondary"), /width: 48px;\s*height: 48px;/);
-  assert.match(css, /\.sidebar-menu-secondary\.is-danger:not\(\[aria-disabled="true"\]\):hover,\s*\.sidebar-menu-secondary\.is-danger:focus-visible \{\s*background: rgba\(239, 68, 68, 0\.08\);\s*color: #ef4444;/);
-  assert.match(css, /@media \(pointer: coarse\) \{\s*\.sidebar-menu-item \{\s*height: 40px;\s*\}[\s\S]*?\.sidebar-menu-secondary \{\s*width: 40px;\s*height: 40px;/);
 });

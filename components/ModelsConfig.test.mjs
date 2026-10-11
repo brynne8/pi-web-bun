@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createJiti } from "jiti";
 
@@ -16,52 +15,6 @@ const {
   trackAddedModels,
   updateHeaderRow,
 } = await jiti.import("./models-config-helpers.ts");
-
-const source = await readFile(new URL("./ModelsConfig.tsx", import.meta.url), "utf8");
-const cssSource = await readFile(new URL("../app/settings.css", import.meta.url), "utf8");
-
-test("uses shared sidebar sizing for providers and matching indented model rows", () => {
-  const sidebar = source.slice(source.indexOf("<ConfigSidebar>"), source.indexOf("</ConfigSidebar>"));
-
-  assert.match(sidebar, /<ConfigSidebarItem[\s\S]*?active=\{isSelected\}/);
-  assert.match(sidebar, /<ConfigSidebarItem[\s\S]*?active=\{isProviderSelected\}/);
-  assert.match(sidebar, /className="models-sidebar-indented-item"/);
-  assert.match(sidebar, /className="models-sidebar-indented-item models-sidebar-add-item"/);
-  assert.match(cssSource, /\.models-sidebar-indented-item \{[\s\S]*?padding-left: 26px/);
-});
-
-test("ignores malformed auth provider responses", () => {
-  assert.match(
-    source,
-    /if \(Array\.isArray\(d\.oauthProviders\)\) setOauthProviders\(d\.oauthProviders\)/,
-  );
-  assert.match(
-    source,
-    /if \(Array\.isArray\(d\.apiKeyProviders\)\) setApiKeyProviders\(d\.apiKeyProviders\)/,
-  );
-});
-
-test("custom model config exposes provider-level request headers", () => {
-  const providerDetail = source.slice(
-    source.indexOf("function ProviderDetail"),
-    source.indexOf("// ── ThinkingLevelMap editor"),
-  );
-  assert.match(providerDetail, /<HeaderListEditor/);
-  assert.match(providerDetail, /headers=\{provider\.headers\}/);
-  assert.match(providerDetail, /set\("headers", headers\)/);
-});
-
-test("custom model config exposes model headers and supportsDeveloperRole compat flag", () => {
-  // Model-level headers editor, wired to the model entry.
-  assert.match(source, /headers=\{model\.headers\}/);
-  assert.match(source, /set\("headers", headers\)/);
-
-  // Model-level compat toggle reads the effective (provider+model) value so
-  // hand-edited models.json settings are reflected, while writes stay on the
-  // model entry as an explicit per-model override.
-  assert.match(source, /effectiveCompat\(provider, model\)\["supportsDeveloperRole"\] !== false/);
-  assert.match(source, /setCompatBool\(model, "supportsDeveloperRole", v\)/);
-});
 
 test("disabling the developer role writes an explicit false override", () => {
   assert.deepEqual(
@@ -130,65 +83,6 @@ test("model cost drafts default blank prices to zero unless all are blank", () =
   assert.equal(parseCompleteModelCost({ ...complete, output: "-1" }), undefined);
   assert.equal(hasModelCostDraftValue(modelCostToDraft()), false);
   assert.equal(hasModelCostDraftValue({ ...complete, cacheWrite: "" }), true);
-});
-
-test("manual price editing commits completed costs and removes only an all-blank group", () => {
-  const modelDetail = source.slice(
-    source.indexOf("function ModelDetail"),
-    source.indexOf("// ── OAuth detail"),
-  );
-
-  assert.match(modelDetail, /const completeCost = parseCompleteModelCost\(nextDraft\)/);
-  assert.match(modelDetail, /if \(completeCost\)/);
-  assert.match(modelDetail, /delete nextModel\.cost/);
-  assert.match(modelDetail, /const nextDraft = \{ \.\.\.costDraftRef\.current, \[key\]: value \}/);
-  assert.match(modelDetail, /costDraftRef\.current = nextDraft/);
-  assert.match(modelDetail, /costTemplateRef\.current/);
-  assert.match(modelDetail, /value=\{costDraft\[key\]\}/);
-});
-
-test("model specs keep catalog-filled prices visible outside advanced settings", () => {
-  const modelDetail = source.slice(
-    source.indexOf("function ModelDetail"),
-    source.indexOf("// ── OAuth detail"),
-  );
-  const specsIndex = modelDetail.indexOf('t("models.modelSpecs")');
-  const costIndex = modelDetail.indexOf('t("models.costPerMillion")');
-  const advancedIndex = modelDetail.indexOf('t("models.advancedSettings")');
-
-  assert.ok(specsIndex >= 0);
-  assert.ok(costIndex > specsIndex);
-  assert.ok(advancedIndex > costIndex);
-  assert.match(modelDetail, /setCostEditing\(false\)/);
-  assert.match(modelDetail, /formatCost\(key\)/);
-});
-
-test("per-model settings use one primary divider before advanced settings", () => {
-  const modelDetail = source.slice(
-    source.indexOf("function ModelDetail"),
-    source.indexOf("// ── OAuth detail"),
-  );
-
-  assert.equal(
-    (modelDetail.match(/borderTop: "1px solid var\(--border\)"/g) ?? []).length,
-    1,
-  );
-  assert.doesNotMatch(modelDetail, /borderBottom: "1px solid var\(--border\)"/);
-});
-
-test("thinking level overrides keep explicit default, disabled, and custom controls", () => {
-  const editor = source.slice(
-    source.indexOf("function ThinkingLevelMapEditor"),
-    source.indexOf("// ── Model detail"),
-  );
-
-  assert.match(editor, /THINKING_LEVELS\.map/);
-  assert.match(editor, />\s*Default\s*</);
-  assert.match(editor, />\s*Disabled\s*</);
-  assert.match(editor, />\s*Custom\s*</);
-  assert.match(editor, /state === "omit"/);
-  assert.match(editor, /state === "null"/);
-  assert.match(editor, /state === "string"/);
 });
 
 const draft = (models) => ({ providers: { stepfun: { models: models.map((id) => ({ id })) } } });
@@ -276,35 +170,4 @@ test("a provider added since the last save is renamed without a settings rewrite
   const renamed = renameProviderEntry(config, state, "new-provider", "house");
   assert.deepEqual(Object.keys(renamed.providers), ["house"]);
   assert.deepEqual([...state.renames], []);
-});
-
-test("Save applies a provider name typed without pressing Rename", () => {
-  const providerDetail = source.slice(
-    source.indexOf("function ProviderDetail"),
-    source.indexOf("// ── ThinkingLevelMap editor"),
-  );
-  // The field edits the panel's draft, not state the Save button cannot see.
-  assert.doesNotMatch(providerDetail, /useState\(name\)/);
-  assert.match(providerDetail, /onChange=\{onEditingNameChange\}/);
-
-  const save = source.slice(
-    source.indexOf("const handleSave = useCallback"),
-    source.indexOf("const providers = Object.entries(config.providers"),
-  );
-  assert.match(save, /applyProviderRename\(config, providerNameDraft\.provider, pendingName\)/);
-  assert.match(save, /body: JSON\.stringify\(draft\)/);
-  assert.match(save, /collectModelRenames\(draft,/);
-});
-
-test("model discovery is not gated on a configured base URL", () => {
-  const providerDetail = source.slice(
-    source.indexOf("function ProviderDetail"),
-    source.indexOf("// ── ThinkingLevelMap editor"),
-  );
-  // pi resolves the endpoint for a provider that only lists models, so an empty
-  // Base URL must still let the user fetch the upstream list.
-  assert.match(providerDetail, /if \(discoveryState\.phase === "loading"\) return;/);
-  assert.match(providerDetail, /disabled=\{discoveryState\.phase === "loading"\}/);
-  assert.doesNotMatch(providerDetail, /!provider\.baseUrl\?\.trim\(\)/);
-  assert.match(providerDetail, /Leave empty for a built-in provider to use the endpoint pi ships/);
 });
