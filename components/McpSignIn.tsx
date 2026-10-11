@@ -41,7 +41,8 @@ function signInFailureText(failure: McpActionFailure, t: Translate, timedOutKey 
  * sign-in page as a link with the paste box always shown, since a browser on
  * another device cannot reach the loopback listener the page sends it back
  * to; and how it ended. Why a button cannot be used is visible text it points
- * at. A server with its own Authorization header does not sign in.
+ * at. A server with its own Authorization header does not sign in and gets
+ * no row: the Headers row lists that header.
  */
 export function McpSignInRow({
   server,
@@ -88,6 +89,8 @@ export function McpSignInRow({
   }, [active]);
 
   if (!server.usesOAuth) {
+    // Its own Authorization header, which the Headers row lists, is how it signs in: nothing to add.
+    if (server.authProvider === undefined && server.headerNames.some((header) => header.toLowerCase() === "authorization")) return null;
     return (
       <ConfigDetailGridRow label={t("mcp.detail.signIn")}>
         {server.authProvider !== undefined
@@ -287,7 +290,7 @@ function McpSignInAuthorize({
 /**
  * How the panel's last sign-in ended, and for a failure the SDK's words. A
  * `shared` one names the entry it was recorded for instead of pointing at
- * this entry's Connection row.
+ * this entry's Status row.
  */
 function McpSignInOutcome({ flow, shared }: { flow: McpSignInFlowInfo; shared: boolean }) {
   const { t } = useI18n();

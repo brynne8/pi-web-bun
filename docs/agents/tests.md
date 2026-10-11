@@ -1,6 +1,6 @@
 # Tests
 
-`bun test` is the target; `npm test` (Node's runner, the `test` script) is the second opinion, and upstream only has that one — so a rebase onto upstream always brings the work in this note. Compare failures, never totals: Node counts subtests and suites of its own accord, so the same tree reads roughly 2,774 tests on Bun and 2,815 on Node — 320 files and one skip either way. Both totals fell by a few hundred upstream's `f364bc3`, which dropped the assertions that restated a component's source text.
+`bun test` is the target; `npm test` (Node's runner, the `test` script) is the second opinion, and upstream only has that one — so a rebase onto upstream always brings the work in this note. Compare failures, never totals: Node counts subtests and suites of its own accord, so the same tree reads roughly 2,794 tests on Bun and 2,838 on Node — 321 files and one skip either way. Both totals fell by a few hundred upstream's `f364bc3`, which dropped the assertions that restated a component's source text.
 
 ## What behaves differently under Bun, and what to use instead
 

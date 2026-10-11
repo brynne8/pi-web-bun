@@ -18,7 +18,7 @@ const nodeRequire = createRequire(import.meta.url);
 delete nodeRequire.cache[realpathSync(fileURLToPath(new URL("./useAudio.ts", import.meta.url)))];
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true, tryNative: false, alias: { react: shimPath } });
 const { renderHook } = await import(shimPath);
-const { AUDIO_IDLE_SUSPEND_MS, useAudio } = await jiti.import("./useAudio.ts");
+const { AUDIO_IDLE_SUSPEND_MS, AUDIO_STALE_CHIME_MS, useAudio } = await jiti.import("./useAudio.ts");
 
 const node = () => ({ connect() {}, start() {}, stop() {}, frequency: {}, gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} } });
 
@@ -70,7 +70,7 @@ test.beforeEach(() => {
   globalThis.window = {};
   globalThis.localStorage = { getItem: (key) => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, value) };
   globalThis.AudioContext = FakeAudioContext;
-  mock.timers.enable({ apis: ["setTimeout"] });
+  mock.timers.enable({ apis: ["setTimeout", "Date"] });
 });
 
 test.afterEach(() => {
@@ -215,4 +215,76 @@ test("turning sound off suspends at once and drops a chime still resuming", asyn
   view.result.playDoneSound();
   await resolveResumes(ctx);
   assert.equal(ctx.tones, 2, "back on, the same context plays");
+});
+
+test("a hold keeps the context running through a run and its chime, then lets it suspend", async () => {
+  const view = renderHook(() => useAudio());
+  view.result.unlockAudio();
+  const [ctx] = contexts;
+  await resolveResumes(ctx);
+  const release = view.result.holdAudio();
+  mock.timers.tick(AUDIO_IDLE_SUSPEND_MS * 60);
+  assert.deepEqual(ctx.calls, ["resume"], "no suspend while held, and no second resume of a running context");
+
+  view.result.playDoneSound();
+  await resolveResumes(ctx);
+  assert.equal(ctx.tones, 2);
+  mock.timers.tick(AUDIO_IDLE_SUSPEND_MS * 60);
+  assert.equal(ctx.state, "running", "the chime's own idle timer does not end the hold");
+
+  release();
+  release();
+  mock.timers.tick(AUDIO_IDLE_SUSPEND_MS - 1);
+  assert.equal(ctx.state, "running");
+  mock.timers.tick(1);
+  assert.deepEqual(ctx.calls, ["resume", "resume", "suspend"], "suspended once, after the release");
+});
+
+test("a hold resumes a suspended context, and every hold must be released", async () => {
+  const view = renderHook(() => useAudio());
+  const first = view.result.holdAudio();
+  const [ctx] = contexts;
+  assert.deepEqual(ctx.calls, ["resume"]);
+  await resolveResumes(ctx);
+  const second = view.result.holdAudio();
+  first();
+  mock.timers.tick(AUDIO_IDLE_SUSPEND_MS * 10);
+  assert.equal(ctx.state, "running", "the second hold still keeps it running");
+  second();
+  mock.timers.tick(AUDIO_IDLE_SUSPEND_MS);
+  assert.deepEqual(ctx.calls, ["resume", "suspend"]);
+});
+
+test("a hold while sound is off resumes nothing; turning sound on keeps the held context running", async () => {
+  stored.set("pi-sound-enabled", "false");
+  const view = renderHook(() => useAudio());
+  const release = view.result.holdAudio();
+  assert.equal(contexts.length, 0, "no context while sound is off");
+  view.result.onSoundToggle();
+  view.flush();
+  const [ctx] = contexts;
+  await resolveResumes(ctx);
+  mock.timers.tick(AUDIO_IDLE_SUSPEND_MS * 10);
+  assert.equal(ctx.state, "running");
+
+  view.result.onSoundToggle();
+  view.flush();
+  assert.equal(ctx.calls.at(-1), "suspend", "sound off suspends even a held context");
+  release();
+});
+
+test("a chime the browser held back for longer than AUDIO_STALE_CHIME_MS is dropped", async () => {
+  const view = renderHook(() => useAudio());
+  view.result.playDoneSound();
+  const [ctx] = contexts;
+  mock.timers.tick(AUDIO_STALE_CHIME_MS + 1);
+  await resolveResumes(ctx);
+  assert.equal(ctx.tones, 0, "no chime once the user is back");
+  mock.timers.tick(AUDIO_IDLE_SUSPEND_MS);
+  assert.deepEqual(ctx.calls, ["resume", "suspend"]);
+
+  view.result.playDoneSound();
+  mock.timers.tick(AUDIO_STALE_CHIME_MS);
+  await resolveResumes(ctx);
+  assert.equal(ctx.tones, 2, "a resume within the limit still plays");
 });

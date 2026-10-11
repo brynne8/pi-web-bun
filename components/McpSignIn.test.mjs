@@ -67,10 +67,14 @@ function buttons(html) {
   return [...html.matchAll(/<button([^>]*)>([^<]*)<\/button>/g)].map(([, attributes, label]) => ({ attributes, label }));
 }
 
-test("a server with its own Authorization header says so, with nothing to press", () => {
+test("a server with its own Authorization header has no Sign-in row: its Headers row lists the header", () => {
+  assert.equal(row({ server: { ...oauth, usesOAuth: false, headerNames: ["Accept", "authorization"] } }), "");
+  // One that signs in some other way without OAuth still says how, with nothing to press.
   const html = row({ server: { ...oauth, usesOAuth: false } });
   assert.equal(text(html), "Sign-in Authorization header");
   assert.deepEqual(buttons(html), []);
+  const provider = row({ server: { ...oauth, usesOAuth: false, headerNames: ["Authorization"], authProvider: "github" } });
+  assert.match(text(provider), /^Sign-in Sends the token of the pi provider github/);
 });
 
 test("an OAuth server offers Sign in, says what it does and, once something is stored, that it may replace it, and Sign out", () => {
@@ -169,11 +173,11 @@ test("waiting for the browser shows the page as a link, the paste box, and where
 
 test("how the sign-in ended stays under the row, with Sign in again", () => {
   const result = (state, extra = {}) => ({ state, tools: [], toolCount: 1, durationMs: 4, testedAt: 1, afterSignIn: true, ...extra });
-  assert.match(text(row({ run: { flow: flow("done", { result: result("connected") }) } })), /Signed in\. Connection above shows what the server offers\./);
+  assert.match(text(row({ run: { flow: flow("done", { result: result("connected") }) } })), /Signed in\. Status above shows what the server offers\./);
   assert.match(text(row({ run: { flow: flow("done", { alreadySignedIn: true, result: result("connected") }) } })), /Already signed in: the server connected without a new sign-in\./);
   assert.match(text(row({ run: { flow: flow("done", { refreshed: true, result: result("connected") }) } })), /Signed in again with the stored refresh token, without the browser\./);
   const after = row({ run: { flow: flow("done", { result: result("failed", { error: "ECONNRESET" }) }) } });
-  assert.match(after, /<span role="status" class="mcp-config-line is-warning">Signed in, but the server did not connect afterwards\. Connection above says why\.<\/span>/);
+  assert.match(after, /<span role="status" class="mcp-config-line is-warning">Signed in, but the server did not connect afterwards\. Status above says why\.<\/span>/);
   const failed = row({ run: { flow: flow("failed", { failure: "sign-in-failed", error: "registration failed: •••" }) } });
   assert.match(failed, /<span role="status" class="mcp-config-line is-error">The sign-in failed\.<\/span><span class="mcp-config-line is-error">Error: <code class="mcp-config-chip">registration failed: •••<\/code><\/span>/);
   assert.match(text(row({ run: { flow: flow("expired") } })), /The sign-in was not finished within 5 minutes, so Pi Web stopped waiting\./);
@@ -190,16 +194,16 @@ test("how the sign-in ended stays under the row, with Sign in again", () => {
   assert.match(text(row({ run: { signedOut: { removed: false } } })), /Nothing was stored for this server, so there was nothing to sign out of\./);
 });
 
-test("a sign-in joined from the other entry of the name and URL ends naming that entry, not this one's Connection row", () => {
+test("a sign-in joined from the other entry of the name and URL ends naming that entry, not this one's Status row", () => {
   const result = { state: "connected", tools: [], toolCount: 1, durationMs: 4, testedAt: 1, afterSignIn: true };
   const done = text(row({ run: { flow: flow("done", { scope: "project", result }) } }));
   assert.match(done, /Signed in through the other docs entry, which has the same URL, so the tokens serve this entry too\. Press Test connection to see what this entry's server offers\./);
-  assert.doesNotMatch(done, /Connection above/);
+  assert.doesNotMatch(done, /Status above/);
   assert.match(text(row({ run: { flow: flow("done", { scope: "project", alreadySignedIn: true, result }) } })), /The other docs entry, which has the same URL, was already signed in/);
   const failed = text(row({ run: { flow: flow("failed", { scope: "project", failure: "connect-failed", result: { ...result, state: "failed" } }) } }));
-  assert.match(failed, /The sign-in through the other docs entry, which has the same URL, found nothing to sign in to: that entry's server did not connect, and did not ask for a sign-in\. Its Connection row says why\./);
+  assert.match(failed, /The sign-in through the other docs entry, which has the same URL, found nothing to sign in to: that entry's server did not connect, and did not ask for a sign-in\. Its Status row says why\./);
   // The entry that started it keeps its own words.
-  assert.match(text(row({ run: { flow: flow("done", { result }) } })), /Signed in\. Connection above shows what the server offers\./);
+  assert.match(text(row({ run: { flow: flow("done", { result }) } })), /Signed in\. Status above shows what the server offers\./);
 });
 
 test("a failed cancel is shown while the sign-in runs, and not once it has ended", () => {

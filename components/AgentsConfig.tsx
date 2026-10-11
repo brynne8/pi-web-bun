@@ -54,6 +54,7 @@ const EMPTY_PROFILE: EditableProfile = {
   loadSkills: false,
   loadExtensions: false,
   codemode: "off",
+  mcp: "off",
   promptMode: "append",
   inheritContext: false,
   runInBackground: false,
@@ -90,6 +91,7 @@ function editableProfile(profile: SubagentProfile): EditableProfile {
     ...(profile.skills !== undefined ? { skills: [...profile.skills] } : {}),
     loadExtensions: profile.loadExtensions,
     codemode: profile.codemode ?? "off",
+    mcp: profile.mcp ?? "off",
     ...(profile.extensions !== undefined ? { extensions: [...profile.extensions] } : {}),
     promptMode: profile.promptMode,
     ...(profile.model ? { model: profile.model } : {}),
@@ -99,6 +101,17 @@ function editableProfile(profile: SubagentProfile): EditableProfile {
     runInBackground: profile.runInBackground,
     enabled: profile.enabled,
   };
+}
+
+/**
+ * The model a profile reference names. It may end in pi's `:<thinking level>` (`provider/model:high`),
+ * which the runtime reads as the model plus its level; a listed id that contains a colon matches whole.
+ */
+function profileModelBase(reference: string, isListed: (reference: string) => boolean): string {
+  if (isListed(reference)) return reference;
+  const colon = reference.lastIndexOf(":");
+  const level = reference.slice(colon + 1);
+  return colon > 0 && level && (THINKING_OPTIONS as readonly string[]).includes(level) ? reference.slice(0, colon) : reference;
 }
 
 function profileKey(profile: Pick<SubagentProfile, "scope" | "name">): string {
@@ -373,13 +386,15 @@ export function AgentsConfig({
       ? displayProfilePath(selected, cwd) ?? t("agents.builtinPath")
       : "";
   const fullPath = creating ? displayedPath : selected?.filePath ?? displayedPath;
-  const selectedModelAvailable = !draft.model || modelOptions.some((model) => `${model.provider}/${model.id}` === draft.model);
+  const isListedModel = (reference: string) => modelOptions.some((model) => `${model.provider}/${model.id}` === reference);
+  const draftModelBase = draft.model && profileModelBase(draft.model, isListedModel);
+  const selectedModelAvailable = !draftModelBase || isListedModel(draftModelBase);
   const selectedModel = (() => {
-    if (!draft.model) return null;
-    const separator = draft.model.indexOf("/");
+    if (!draftModelBase) return null;
+    const separator = draftModelBase.indexOf("/");
     return separator < 0
-      ? { provider: "", modelId: draft.model }
-      : { provider: draft.model.slice(0, separator), modelId: draft.model.slice(separator + 1) };
+      ? { provider: "", modelId: draftModelBase }
+      : { provider: draftModelBase.slice(0, separator), modelId: draftModelBase.slice(separator + 1) };
   })();
   const controlStyle = disabled ? { ...inputStyle, ...disabledInputStyle } : inputStyle;
   const switchDisabled = creating
@@ -388,6 +403,8 @@ export function AgentsConfig({
   const update = <K extends keyof EditableProfile>(key: K, value: EditableProfile[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
   };
+  // As `buildSubagentPromptPlan()` decides: no tools, skills or extensions.
+  const chatOnlyDraft = draft.tools.length === 0 && !draft.loadSkills && !draft.loadExtensions;
 
   const toggleEnabled = async (enabled: boolean) => {
     if (creating) {
@@ -614,6 +631,8 @@ export function AgentsConfig({
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 20px" }}>
                       <Toggle label={t("agents.loadSkills")} disabled={disabled} checked={draft.loadSkills} onChange={(checked) => update("loadSkills", checked)} />
                       <Toggle label={t("agents.loadExtensions")} disabled={disabled} checked={draft.loadExtensions} onChange={(checked) => update("loadExtensions", checked)} />
+                      {/* A chat-only child cannot start with MCP on; the switch still turns it off. */}
+                      <Toggle label={t("agents.mcp")} disabled={disabled || (chatOnlyDraft && draft.mcp !== "on")} checked={draft.mcp === "on"} onChange={(checked) => update("mcp", checked ? "on" : "off")} />
                     </div>
                     {/* `skills:` and `extensions:` lists are edited in the profile file; show what they load. */}
                     {draft.loadSkills && draft.skills !== undefined && (
@@ -628,6 +647,15 @@ export function AgentsConfig({
                         {draft.extensions.length > 0
                           ? t("agents.extensionsOnly", { extensions: draft.extensions.join(", ") })
                           : t("agents.extensionsNone")}
+                      </span>
+                    )}
+                    {!disabled && chatOnlyDraft ? (
+                      <span style={{ color: "var(--text-dim)", fontSize: 11, lineHeight: 1.4 }}>
+                        {t("agents.mcpChatOnly")}
+                      </span>
+                    ) : draft.mcp === "on" && (
+                      <span style={{ color: "var(--text-dim)", fontSize: 11, lineHeight: 1.4 }}>
+                        {t("agents.mcpHint")}
                       </span>
                     )}
                   </Field>
@@ -660,7 +688,9 @@ export function AgentsConfig({
                           onChange={(provider, modelId) => update("model", `${provider}/${modelId}`)}
                           onClear={() => update("model", undefined)}
                           emptyLabel={modelsLoading ? t("agents.modelsLoading") : t("agents.inherit")}
-                          selectedLabel={draft.model && !selectedModelAvailable ? t("agents.modelUnavailable", { model: draft.model }) : undefined}
+                          selectedLabel={draft.model && !selectedModelAvailable
+                            ? t("agents.modelUnavailable", { model: draft.model })
+                            : draft.model !== draftModelBase ? draft.model : undefined}
                           disabled={disabled || modelsLoading || (modelOptions.length === 0 && !draft.model)}
                           ariaLabel={t("agents.model")}
                           variant="field"

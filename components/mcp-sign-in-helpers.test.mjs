@@ -115,7 +115,7 @@ test("how a sign-in ended is one sentence, in a tone", () => {
   assert.equal(mcpSignInOutcomeTone(flow("cancelled")), "off");
 });
 
-test("a sign-in joined from another entry of the URL never points at this entry's Connection row", () => {
+test("a sign-in joined from another entry of the URL never points at this entry's Status row", () => {
   const server = { scope: "global", name: "docs" };
   assert.equal(mcpSignInShared(flow("done"), server), false);
   assert.equal(mcpSignInShared(flow("done", { name: "docs-alias" }), server), true);

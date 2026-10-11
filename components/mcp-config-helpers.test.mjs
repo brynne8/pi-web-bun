@@ -1146,9 +1146,12 @@ test("an open session's report refines a row as a test's does, in a session's wo
   assert.equal(mcpRowStateLabelKey("connected", { origin: "test", state: "connected" }), "mcp.state.connected");
   assert.equal(mcpRowStateLabelKey("needs-auth", report("needs-auth")), "mcp.state.needs-auth");
   assert.equal(mcpRowStateLabelKey("disabled", report("connected")), "mcp.state.disabled");
-  // The Connection row reports what a test or a session saw; the Status row adds no sentence of its own.
+  // The status lines say what a test or a session saw; the state adds no sentence of its own.
   for (const state of ["connected", "needs-auth", "failed", "connecting"]) assert.equal(mcpRowStateDetailKey(state), undefined, state);
+  // Nor where its label already says why it does not connect.
+  for (const state of ["disabled", "not-trusted", "replaced", "overridden", "mcp-off", "on"]) assert.equal(mcpRowStateDetailKey(state), undefined, state);
   assert.equal(mcpRowStateDetailKey("conflict"), "mcp.stateDetail.conflict");
+  assert.equal(mcpRowStateDetailKey("disconnected"), "mcp.stateDetail.disconnected");
   assert.equal(mcpRowStateDetailKey("invalid"), undefined, "the pane words a refusal with its reason");
   assert.deepEqual(mcpSessionStateView(report("disconnected")), { key: "mcp.session.state.disconnected", tone: "warning" });
   assert.deepEqual(mcpSessionStateView(report("not-trusted")), { key: "mcp.session.state.not-trusted", tone: "warning" });
@@ -1174,7 +1177,7 @@ test("an open session's report refines a row as a test's does, in a session's wo
   assert.equal(mcpWithTestResults(data, answer(4_000)).servers[0].status.state, "connected");
 });
 
-test("a connection a session closed since reads like an untested entry, and its Connection row says when it closed", () => {
+test("a connection a session closed since reads like an untested entry, and its Status row says when it closed", () => {
   const closed = { origin: "session", state: "connected", sessionId: "s", cwd: "/repo", updatedAt: 3_000, closedAt: 9_000 };
   assert.equal(mcpStatusRowState(closed), "on");
   assert.equal(mcpServerRowState(server({ status: closed }), on), "on");

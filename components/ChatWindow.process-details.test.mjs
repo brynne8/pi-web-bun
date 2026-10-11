@@ -47,7 +47,7 @@ test("a turn's failure renders below the fold, not inside it", () => {
   // Only a run the output limit cut off, with no answer anywhere in the turn and the
   // session's tail still where it stopped, offers to compact.
   assert.match(source, /const canRecover = !answered && isAssistantTruncated\(notice\) && !hasAssistantAnswer\(notice\)/);
-  assert.match(source, /&& endIdx === messages\.length && !streamState\.isStreaming;/);
+  assert.match(source, /&& endIdx === messages\.length && !isStreaming;/);
   // A part never renders the notice itself, or it would print inside the group as well.
   assert.match(messageSource, /\{!isTurnPart && \(providerError \|\| truncated\) && \(/);
 });

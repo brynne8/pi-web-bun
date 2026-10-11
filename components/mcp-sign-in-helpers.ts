@@ -153,7 +153,7 @@ export const MCP_SIGN_IN_FAILURE_KEYS: Record<McpSignInFailure, string> = {
 /**
  * Whether `flow` is another entry's sign-in, which this entry joined because
  * both have the same URL: what its connections found is recorded for that
- * entry only, so this one's Connection row does not show it.
+ * entry only, so this one's Status row does not show it.
  */
 export function mcpSignInShared(
   flow: Pick<McpSignInFlowInfo, "scope" | "name">,
@@ -165,7 +165,7 @@ export function mcpSignInShared(
 /**
  * How an ended flow ended, as one sentence; `failed` adds the SDK's words
  * after it. A `shared` flow (`mcpSignInShared()`) never points at this
- * entry's Connection row, which shows nothing the flow found.
+ * entry's Status row, which shows nothing the flow found.
  */
 export function mcpSignInOutcomeKey(
   flow: Pick<McpSignInFlowInfo, "phase" | "alreadySignedIn" | "refreshed" | "result" | "failure">,

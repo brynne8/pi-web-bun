@@ -115,7 +115,7 @@ export function mcpRowContext(data: Pick<McpResponse, "mcp" | "project">): McpRo
 /**
  * The row state a last known status gives an entry the file lets connect. Two
  * session reports say nothing about now, so the entry reads `on` and its
- * Connection row says what that session saw: a connection the session closed
+ * Status row says what that session saw: a connection the session closed
  * since (it went idle or ended), and a project the session found untrusted,
  * an older trust than the listing, which says sessions read the project now.
  */
@@ -166,18 +166,16 @@ export function mcpRowStateLabelKey(state: McpServerRowState, status: McpServerS
 }
 
 /**
- * The sentence under a server's state in its pane: why it does or does not
- * connect. None for `invalid` and `web-password`, which the pane words with
- * the reason itself, none for `connected`, `needs-auth`, `failed` and
- * `connecting`, which the Connection row right under it reports with where and
- * when they were seen, and none for `on`, which needs no explaining.
+ * The sentence after a server's status lines in its pane, only where neither
+ * the state's label nor those lines say it: what happens next for a dropped
+ * connection, what to do about a taken name. None for `invalid` and
+ * `web-password`, which the pane words with the reason itself, none for
+ * `connected`, `needs-auth`, `failed` and `connecting`, whose status lines say
+ * where and when they were seen, and none for the states that say why the
+ * entry does not connect in their label (`disabled`, `not-trusted`,
+ * `replaced`, `overridden`, `mcp-off`; MCP off is also said above the list).
  */
 export const MCP_ROW_STATE_DETAIL_KEYS: Partial<Record<McpServerRowState, string>> = {
-  disabled: "mcp.server.disabled",
-  "not-trusted": "mcp.stateDetail.not-trusted",
-  replaced: "mcp.server.shadowedByProject",
-  overridden: "mcp.server.overriddenByProject",
-  "mcp-off": "mcp.stateDetail.mcp-off",
   disconnected: "mcp.stateDetail.disconnected",
   conflict: "mcp.stateDetail.conflict",
 };
@@ -229,7 +227,7 @@ export function mcpStatusTime(status: McpServerStatus): number {
 }
 
 /**
- * A status's time in the Connection row: the time of day, with the date when
+ * A status's time in the Status row: the time of day, with the date when
  * it was not today. Records last as long as the server process, and a session
  * that connected a server yesterday must not read like one that did a minute ago.
  */
@@ -244,7 +242,7 @@ export function mcpStatusTimeText(time: number, locale: string, now: number = Da
     : date.toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" });
 }
 
-/** The state word of a session's report in the Connection row. */
+/** The state word of a session's report in the Status row, when the entry's state came from elsewhere. */
 export const MCP_SESSION_STATE_KEYS: Record<McpSessionState, string> = {
   connecting: "mcp.session.state.connecting",
   connected: "mcp.session.state.connected",

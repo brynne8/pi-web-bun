@@ -309,7 +309,7 @@
     },
     "model": {
      "type": "string",
-     "description": "Optional provider/modelId override."
+     "description": "Optional provider/modelId override. Append \":<level>\" (off, minimal, low, medium, high, xhigh, max) to also set the thinking level for this run, e.g. \"provider/model:high\"."
     },
     "isolation": {
      "type": "string",
