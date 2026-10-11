@@ -87,12 +87,21 @@ export function recordPendingNotification(entry: PendingNotification): void {
   registry.set(entry.parentSessionId, list);
 }
 
-/** The markers of the reports already present in a session's transcript. */
+/**
+ * The markers of the reports already present in a session's transcript.
+ *
+ * pi appends a custom message as a **`custom_message`** entry whose `details` sits at the entry's
+ * top level (`appendCustomMessageEntry()`, `core/session-manager.js`), and `getEntries()` hands
+ * back those raw entries. Reading `entry.message.details` off a `"message"`-typed entry instead
+ * found nothing at all, so a delivered batch never cleared the reports it carried and the index
+ * went on listing results the parent was already holding — with a count that overstated the
+ * backlog, which is the one thing this index must never do.
+ */
 export function deliveredNotificationIds(entries: readonly unknown[]): Set<string> {
   const ids = new Set<string>();
-  for (const entry of entries as readonly { type?: string; message?: { details?: unknown } }[]) {
-    if (entry?.type !== "message") continue;
-    const details = entry.message?.details as { notificationId?: unknown } | undefined;
+  for (const entry of entries as readonly { type?: string; details?: unknown }[]) {
+    if (entry?.type !== "custom_message") continue;
+    const details = entry.details as { notificationId?: unknown } | undefined;
     if (typeof details?.notificationId === "string") ids.add(details.notificationId);
   }
   return ids;

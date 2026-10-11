@@ -25,6 +25,7 @@ import { toolFieldsOfInput } from "@/lib/tool-fields";
 import { mcpToolLabel, prettyMcpResultText } from "@/lib/mcp-tool-display";
 import { BgTaskNotificationView } from "./BgTaskNotificationView";
 import { BG_TASK_NOTIFICATION_CUSTOM_TYPE, stripBgTaskNotificationPrefix } from "@/lib/bg-task-notification";
+import { stripSubagentNotificationPrefix } from "@/lib/subagent-notification";
 import { streamRateKey, streamRateStart, streamTokensPerSecond, type StreamRateStart } from "@/lib/stream-token-rate";
 import type {
   AgentMessage,
@@ -1905,19 +1906,6 @@ function CompactionFileList({ title, files }: { title: string; files: string[] }
   );
 }
 
-/** One report inside a batch: the card that report always had, by its own custom type. */
-function ReportBlock({ text, customType, cwd, onOpenFile }: { text: string; customType?: string; cwd?: string; onOpenFile?: (filePath: string, page?: number) => void }) {
-  if (customType === BG_TASK_NOTIFICATION_CUSTOM_TYPE) {
-    return (
-      <BgTaskNotificationView
-        text={text}
-        fallback={<pre style={{ margin: 0, color: "var(--text-muted)", fontSize: 12, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{text}</pre>}
-      />
-    );
-  }
-  return <MarkdownBody className="markdown-custom-message" cwd={cwd} onOpenFile={onOpenFile}>{text}</MarkdownBody>;
-}
-
 function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessage; cwd?: string; onOpenFile?: (filePath: string, page?: number) => void }) {
   const { t } = useI18n();
   // Expanded by default: pi's TUI always draws a displayed custom message in full.
@@ -1930,10 +1918,15 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
   const detailsText = hasDetails ? safeJson(message.details) : "";
   const title = formatCustomType(message.customType);
   const isBgTaskNotification = message.customType === BG_TASK_NOTIFICATION_CUSTOM_TYPE;
-  // A batch of settled background reports: one message, one card per report inside it. Each block
-  // is that report's own text, and `details.reports` says which card it gets.
-  const batchDetails = message.details as { kind?: string; reports?: { customType?: string }[] } | undefined;
-  const isSettledReportBatch = batchDetails?.kind === "pi-web-settled-reports";
+  // A batch of settled background reports is one queue element holding one text block per report,
+  // and each report's own entry in `details.reports` says which card it gets. It renders as one
+  // card per report — the card that report always had — because a report that arrives in a batch
+  // is not a different report on screen. Drawing the batch as a single card instead took every
+  // report's own header, collapse and copy away, and put a subagent report's model-only guard on
+  // the screen. The batch's own type is spelled out here because `lib/settled-report-note.ts`
+  // imports `node:crypto` and cannot be pulled into a component.
+  const batchReports = (message.details as { kind?: string; reports?: { id?: string; customType?: string; details?: unknown }[] } | undefined)?.reports;
+  const isSettledReportBatch = (message.details as { kind?: string } | undefined)?.kind === "pi-web-settled-reports";
   const batchBlocks = typeof message.content === "string"
     ? []
     : message.content
@@ -1947,6 +1940,31 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
       setTimeout(() => setCopied(false), 1500);
     });
   };
+
+  // One card per report: the report's own custom type picks the body, its own `details` rides
+  // along, and the header, the collapse and the copy are the ones that card always had. The
+  // synthetic message is not a batch, so this terminates on the report's own type.
+  if (isSettledReportBatch && batchBlocks.length > 0) {
+    return (
+      <>
+        {batchBlocks.map((blockText, index) => (
+          <CustomMessageView
+            key={batchReports?.[index]?.id ?? index}
+            message={{
+              role: "custom",
+              customType: batchReports?.[index]?.customType ?? message.customType,
+              content: blockText,
+              display: true,
+              details: batchReports?.[index]?.details,
+              timestamp: message.timestamp,
+            }}
+            cwd={cwd}
+            onOpenFile={onOpenFile}
+          />
+        ))}
+      </>
+    );
+  }
 
   return (
     <div style={{ marginBottom: 16 }}>
@@ -2026,25 +2044,14 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
                   })}
                 </div>
               )}
-              {isSettledReportBatch
-                ? batchBlocks.map((blockText, index) => (
-                    <div key={index} style={index > 0 ? { marginTop: 12 } : undefined}>
-                      <ReportBlock
-                        text={blockText}
-                        customType={batchDetails?.reports?.[index]?.customType}
-                        cwd={cwd}
-                        onOpenFile={onOpenFile}
-                      />
-                    </div>
-                  ))
-                : text
-                  ? <BgTaskNotificationView
-                      text={text}
-                      fallback={isBgTaskNotification
-                        ? <pre style={{ margin: 0, color: "var(--text-muted)", fontSize: 12, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{stripBgTaskNotificationPrefix(text)}</pre>
-                        : <MarkdownBody className="markdown-custom-message" cwd={cwd} onOpenFile={onOpenFile}>{text}</MarkdownBody>}
-                    />
-                  : <span style={{ color: "var(--text-dim)", fontSize: 12 }}>{t("i18n.noMessage")}</span>}
+              {text
+                ? <BgTaskNotificationView
+                    text={text}
+                    fallback={isBgTaskNotification
+                      ? <pre style={{ margin: 0, color: "var(--text-muted)", fontSize: 12, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{stripBgTaskNotificationPrefix(text)}</pre>
+                      : <MarkdownBody className="markdown-custom-message" cwd={cwd} onOpenFile={onOpenFile}>{stripSubagentNotificationPrefix(text)}</MarkdownBody>}
+                  />
+                : <span style={{ color: "var(--text-dim)", fontSize: 12 }}>{t("i18n.noMessage")}</span>}
             </div>
 
             <div
@@ -2157,12 +2164,14 @@ function formatCustomType(type: string): string {
 }
 
 /**
- * The collapsed card's one-line preview of a custom message. A background
- * report's first paragraph is a guard for the model alone, so the preview reads
- * the text with it taken back off: the header is on screen like any body is.
+ * The collapsed card's one-line preview of a custom message. A background report's first
+ * paragraph is a guard for the model alone, so the preview reads the text with it taken back
+ * off: the header is on screen like any body is. Both reports carry one — a background
+ * command's and a subagent's — and neither belongs in a header.
  */
 export function getCustomMessagePreview(text: string): string {
-  return stripBgTaskNotificationPrefix(text).slice(0, 300).replace(/\s+/g, " ").trim();
+  const body = stripSubagentNotificationPrefix(stripBgTaskNotificationPrefix(text));
+  return body.slice(0, 300).replace(/\s+/g, " ").trim();
 }
 
 

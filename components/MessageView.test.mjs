@@ -21,6 +21,7 @@ const {
   replaceUserMessageText,
 } = await jiti.import("./MessageView.tsx");
 const { BG_TASK_NOTIFICATION_CUSTOM_TYPE, BG_TASK_NOTIFICATION_PREFIX, buildBgTaskNotification } = await jiti.import("@/lib/bg-task-notification");
+const { SUBAGENT_NOTIFICATION_PREFIX } = await jiti.import("@/lib/subagent-notification");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 const { splitTurnSegments } = await jiti.import("@/lib/turn-segments");
 const { clearExpandedToolCalls, setToolCallExpanded } = await jiti.import("@/lib/tool-call-expansion");
@@ -45,7 +46,9 @@ function settledBatchMessage() {
         type: "text",
         text: `${BG_TASK_NOTIFICATION_PREFIX}Background bash task completed in 12s.\nCommand: bun test\nLog file: /tmp/a.log\n\nOutput tail:\n\`\`\`\nok\n\`\`\``,
       },
-      { type: "text", text: "Subagent abc123 completed.\n\nParser found" },
+      // Both guards are written into the text the model reads, so a fixture without them would
+      // let the screen assertions below pass on a card that prints them.
+      { type: "text", text: `${SUBAGENT_NOTIFICATION_PREFIX}Subagent abc123 completed.\n\nParser found` },
     ],
     details: {
       kind: "pi-web-settled-reports",
@@ -59,10 +62,14 @@ function settledBatchMessage() {
 }
 
 test("a batch of settled reports renders one card per report", () => {
-  // One queue element, N cards: each block is that report's own text and gets the card it always
-  // had. A single merged card, or the whole batch as one Markdown body, both lose that.
+  // One queue element, N cards: each report keeps the header, the collapse and the copy its own
+  // card always had. One merged card, or the whole batch as a single Markdown body, both lose
+  // that — and the batch's own header named an internal type nobody reads.
   const html = renderMessage(settledBatchMessage());
-  assert.equal(html.split("Outcome").length - 1, 1, "the background task's own card");
+  assert.equal(html.split("pi-web:bg-task-notification").length - 1, 1, "the background task's own card");
+  assert.equal(html.split("pi-web:subagent-notification").length - 1, 1, "the subagent's own card");
+  assert.ok(!html.includes("pi-web:settled-reports"), "the batch itself is not a card");
+  assert.equal(html.split("Outcome").length - 1, 1);
   assert.match(html, /bun test/);
   assert.match(html, /Parser found/, "the subagent's report");
   // The model-only prefix belongs to the text, never to the screen.

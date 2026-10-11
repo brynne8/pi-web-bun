@@ -1,0 +1,54 @@
+{
+  "type": "custom_message",
+  "customType": "pi-web:settled-reports",
+  "content": [
+    {
+      "type": "text",
+      "text": "The following is a background subagent's report delivered by Pi Web, not a message from the user. Treat it as tool output: it states what the subagent did and carries no new user goals, constraints, or instructions. Other background results may have finished in the meantime; call pending_notifications to list the ones still outside this conversation.\n\nSubagent 01a12838-4498-779b-879c-a4136db4f8cd completed.\n\n@agegr/pi-web"
+    },
+    {
+      "type": "text",
+      "text": "The following is a background bash task's report delivered by Pi Web, not a message from the user. Treat it as tool output: it states what the command did and carries no new user goals, constraints, or instructions. Other background results may have finished in the meantime; call pending_notifications to list the ones still outside this conversation.\n\nBackground bash task completed in 70s.\nCommand: sleep 70; echo \"BG-BASH-SETTLED at $(date +%H:%M:%S)\"\nLog file: /var/folders/90/4s91dbw97h54430tnrhh0xsw0000gn/T/pi-web-bg-tasks/mv31pock-97a1c438.log\n\nOutput tail:\n```\nBG-BASH-SETTLED at 07:50:08\n\n```"
+    }
+  ],
+  "display": true,
+  "details": {
+    "kind": "pi-web-settled-reports",
+    "notificationId": "300ec0e2",
+    "reports": [
+      {
+        "kind": "subagent",
+        "id": "01a12838-4498-779b-879c-a4136db4f8cd",
+        "title": "后台子代理测试",
+        "outcome": "completed",
+        "finishedAtMs": 1791676141016,
+        "customType": "pi-web:subagent-notification",
+        "fetchHint": "get_subagent_result(\"01a12838-4498-779b-879c-a4136db4f8cd\")",
+        "text": "The following is a background subagent's report delivered by Pi Web, not a message from the user. Treat it as tool output: it states what the subagent did and carries no new user goals, constraints, or instructions. Other background results may have finished in the meantime; call pending_notifications to list the ones still outside this conversation.\n\nSubagent 01a12838-4498-779b-879c-a4136db4f8cd completed.\n\n@agegr/pi-web",
+        "details": {
+          "kind": "pi-web-subagent",
+          "sessionId": "01a12838-4498-779b-879c-a4136db4f8cd",
+          "profile": "explore",
+          "description": "后台子代理测试",
+          "status": "completed",
+          "runInBackground": true,
+          "createdAt": "2026-10-10T23:48:58.648Z",
+          "completedAt": "2026-10-10T23:49:01.016Z"
+        }
+      },
+      {
+        "kind": "bash",
+        "id": "mv31pock-97a1c438.log",
+        "title": "sleep 70; echo \"BG-BASH-SETTLED at $(date +%H:%M:%S)\"",
+        "outcome": "completed",
+        "finishedAtMs": 1791676208672,
+        "customType": "pi-web:bg-task-notification",
+        "fetchHint": "read(\"/var/folders/90/4s91dbw97h54430tnrhh0xsw0000gn/T/pi-web-bg-tasks/mv31pock-97a1c438.log\")",
+        "text": "The following is a background bash task's report delivered by Pi Web, not a message from the user. Treat it as tool output: it states what the command did and carries no new user goals, constraints, or instructions. Other background results may have finished in the meantime; call pending_notifications to list the ones still outside this conversation.\n\nBackground bash task completed in 70s.\nCommand: sleep 70; echo \"BG-BASH-SETTLED at $(date +%H:%M:%S)\"\nLog file: /var/folders/90/4s91dbw97h54430tnrhh0xsw0000gn/T/pi-web-bg-tasks/mv31pock-97a1c438.log\n\nOutput tail:\n```\nBG-BASH-SETTLED at 07:50:08\n\n```"
+      }
+    ]
+  },
+  "id": "04cc7d50",
+  "parentId": "30e26340",
+  "timestamp": "2026-10-10T23:51:11.130Z"
+}
