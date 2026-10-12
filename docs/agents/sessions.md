@@ -62,6 +62,17 @@ The chat renders the last `visibleCount` rows, kept at least the loaded message 
 
 Files: `lib/turn-segments.ts`, `lib/turn-views.ts`, `components/TurnFooter.tsx` (this fork's); `lib/turn-written-files.ts`, `lib/message-display.ts`, `components/TurnWrittenFiles.tsx` (upstream's, edited here: the changed-file list and the notice are lifted out of the answer message and rendered by `TurnFooter`, once per turn); `components/ChatWindow.tsx`, `components/MessageView.tsx` (`AssistantNotice`).
 
+## Thinking renders as Markdown at the card's own size (`ThinkingBlock`, `components/MessageView.tsx`)
+
+The expanded body goes through the same `SafeMarkdownBody` an answer uses, tagged `markdown-thinking`: headings, lists, tables, links and fenced code inside a reasoning block render instead of showing their markup. Deferred history loads, the oversized-payload guard, mermaid and Prism highlighting all come along for free, because it is the same component as the answer's.
+
+- **Nothing inside may grow past the card.** The card is `calc(11px + var(--chat-font-size-offset, 0px))` in `var(--font-mono)`, while `.markdown-body` is 14px with em-scaled headings (`h1` 1.16em), a 13px table and `1.05em` KaTeX, and `CodeBlock` sizes its own `<pre>` inline at 12.5px. So every size under `.markdown-thinking` is `font-size: inherit`; the code block's rule needs `!important` because that one is written inline by the component, and each rule is written `.markdown-body.markdown-thinking …` so the order in `globals.css` never decides which of the two wins. Colours are left to the card (`color: inherit`) — thinking stays muted, including its headings.
+- `isStreaming` is passed down: without it a live thinking block re-parses its whole text on every streamed chunk, where `splitMarkdownBlocks()` keeps the finished paragraphs parsed. `cwd` and `onOpenFile` are passed for the same reason the answer's links work — a path written as a link opens in the app rather than as a dead href.
+- Two things stay plain text: the collapsed one-line preview (`getThinkingPreview`, and a `ReactMarkdown` with `allowedElements={[]}` that strips markup to nothing) — a preview line has no room for a table — and the loading and error strings, which are UI copy, not model output.
+- Upstream prints the block as one run of pre-wrapped plain text (`demo/components/MessageView.tsx`). The card, its 11px, and the preview line are upstream's and are unchanged here.
+
+Files: `components/MessageView.tsx` (`ThinkingBlock`); `.markdown-thinking` in `app/globals.css`; `components/MarkdownBody.tsx`, `lib/markdown-blocks.ts`, `lib/thinking-expansion-preference.ts` (upstream's).
+
 ## Compaction summary card (`CompactionMessageView`, `components/MessageView.tsx`)
 Collapsed by default, as pi's TUI `CompactionSummaryMessageComponent` (#1026): the header, "Conversation compacted" and pi's "Compacted from N tokens" (`details.tokensBefore`, set by the reader). The title is the toggle (a button with `aria-expanded`); the description, the summary Markdown and the file lists mount only when expanded. Session search indexes only user and assistant `message` entries (`lib/session-search.ts`), so no hit lands inside a summary and the card needs no `reveal` like Process details.
 

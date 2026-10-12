@@ -1070,6 +1070,37 @@ pre, code {
   margin: 6px 0;
 }
 
+/* Thinking is Markdown like the answer, but it lives inside a card typed at
+   11px mono and nothing it renders may grow past that: every size here is the
+   card's own size, never a step up from the answer's 14px scale. */
+.markdown-body.markdown-thinking {
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+.markdown-body.markdown-thinking :is(h1, h2, h3, h4, h5, h6) {
+  font-size: inherit;
+  margin: 7px 0 3px;
+  line-height: 1.3;
+  color: inherit;
+}
+.markdown-body.markdown-thinking p { margin: 0 0 6px; }
+.markdown-body.markdown-thinking ul,
+.markdown-body.markdown-thinking ol { margin: 3px 0 6px; }
+.markdown-body.markdown-thinking li { margin: 1px 0; }
+.markdown-body.markdown-thinking blockquote { margin: 4px 0; padding: 4px 9px; }
+.markdown-body.markdown-thinking .markdown-inline-code { font-size: inherit; }
+.markdown-body.markdown-thinking table { font-size: inherit; }
+.markdown-body.markdown-thinking .markdown-table-wrap,
+.markdown-body.markdown-thinking .markdown-code-block { margin: 5px 0; }
+.markdown-body.markdown-thinking .katex { font-size: 1em; }
+.markdown-body.markdown-thinking .katex-display { margin: 0.4em 0; }
+/* CodeBlock sizes its <pre> inline, so only an important override keeps a
+   fenced snippet from reading larger than the thinking around it. */
+.markdown-body.markdown-thinking .markdown-code-block :is(pre, code) {
+  font-size: inherit !important;
+}
+
 .compaction-file-details {
   margin-top: 10px;
   padding-top: 8px;

@@ -1026,7 +1026,7 @@ function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDur
     return <div data-message-text data-search-target={searchTarget || undefined}><TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} /></div>;
   }
   if (block.type === "thinking") {
-    return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} />;
+    return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} />;
   }
   if (block.type === "toolCall") {
     const tc = block as ToolCallContent;
@@ -1041,9 +1041,12 @@ function TextBlock({ block, isStreaming, cwd, onOpenFile }: { block: TextContent
   return <SafeMarkdownBody isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>{block.text}</SafeMarkdownBody>;
 }
 
-export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
+export function ThinkingBlock({ block, duration, isStreaming, cwd, onOpenFile, sessionId, entryId, blockIndex }: {
   block: ThinkingContent;
   duration?: number;
+  isStreaming?: boolean;
+  cwd?: string;
+  onOpenFile?: (filePath: string, page?: number) => void;
   sessionId?: string;
   entryId?: string;
   blockIndex: number;
@@ -1142,11 +1145,21 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex 
             flex: 1,
             minWidth: 0,
             color: error ? "#f87171" : "var(--text-muted)",
-            whiteSpace: "pre-wrap",
             overflowWrap: "anywhere",
           }}
         >
-           {loading ? t("i18n.loadingThinking") : error ?? (block.deferred ? content : block.thinking)}
+          {loading || error ? (
+            <span style={{ whiteSpace: "pre-wrap" }}>{loading ? t("i18n.loadingThinking") : error}</span>
+          ) : (
+            <SafeMarkdownBody
+              className="markdown-thinking"
+              isStreaming={isStreaming}
+              cwd={cwd}
+              onOpenFile={onOpenFile}
+            >
+              {block.deferred ? content ?? "" : block.thinking}
+            </SafeMarkdownBody>
+          )}
         </div>
       )}
       {duration !== undefined && (

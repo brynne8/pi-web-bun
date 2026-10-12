@@ -139,6 +139,40 @@ test("previews the first thinking line and reveals the full text with the saved 
   }
 });
 
+test("renders the thinking body as markdown without growing past the card's type", () => {
+  const previousWindow = globalThis.window;
+  try {
+    globalThis.window = { localStorage: { getItem: () => "true" } };
+    const html = renderToStaticMarkup(React.createElement(
+      I18nProvider,
+      null,
+      React.createElement(ThinkingBlock, {
+        block: { type: "thinking", thinking: "Two options:\n\n- **keep** the fold\n- drop it" },
+        blockIndex: 0,
+      }),
+    ));
+    // The body goes through the same markdown pipeline as an answer, tagged with
+    // the class the card's own size comes from.
+    assert.match(html, /class="markdown-body markdown-thinking"/);
+    assert.match(html, /<li><strong>keep<\/strong> the fold<\/li>/);
+
+    // The card is 11px mono, so nothing the markdown brings may set a larger size:
+    // the body, its headings, its inline code and a fenced block all keep the card's.
+    const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+    for (const rule of [
+      /\.markdown-body\.markdown-thinking\s*\{[^}]*font-size:\s*inherit/,
+      /\.markdown-body\.markdown-thinking :is\(h1[^)]*\)\s*\{[^}]*font-size:\s*inherit/,
+      /\.markdown-body\.markdown-thinking \.markdown-inline-code\s*\{[^}]*font-size:\s*inherit/,
+      /\.markdown-body\.markdown-thinking \.markdown-code-block :is\(pre, code\)\s*\{[^}]*font-size:\s*inherit !important/,
+    ]) {
+      assert.match(css, rule);
+    }
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
 test("shows deferred thinking previews without loading the full content", () => {
   const html = renderMessage({
     role: "assistant",
