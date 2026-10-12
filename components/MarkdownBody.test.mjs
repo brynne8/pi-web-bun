@@ -134,7 +134,7 @@ test("keeps prices and bold headings intact across a paragraph line break", () =
 test("keeps adjacent amounts, ranges and decimals as currency", () => {
   for (const prices of ["$15+$15", "$20–$30", "$1,200.50 or $900.00", "**$20** and *$6*", "US$20 / CA$30"]) {
     const html = renderMarkdown(prices);
-    assert.doesNotMatch(html, /class="katex/, prices);
+    assert.doesNotMatch(html, /class="katex"/, prices);
     assert.equal((html.match(/\$/g) ?? []).length, 2, prices);
   }
 });
@@ -157,14 +157,80 @@ test("retains single-dollar equations, numeric math, balanced padding and multil
   }
 });
 
-test("file previews and minimap Markdown use the same currency-safe math rules", () => {
-  const html = renderToStaticMarkup(React.createElement(ReactMarkdown, {
+test("keeps shell variables out of math in every pairing", () => {
+  for (const prose of [
+    "echo $HOME and $PATH in the shell",
+    "echo $HOME and$PATH",
+    "$HOME 和 $PATH 的取值",
+    "配置 $PORT=8080 和 $HOST=localhost",
+    "先 echo $USER 再设 $LANG",
+  ]) {
+    const html = renderMarkdown(prose);
+    assert.doesNotMatch(html, /class="katex"/, prose);
+    assert.match(html, /\$/, prose);
+  }
+});
+
+test("a refused $VAR costs the text after it nothing", () => {
+  // The refusal happens while pairing, so a formula later in the paragraph
+  // still pairs. A variable the author wrapped in dollars ($PATH$) is a
+  // malformed form and is not promised anything.
+  const cases = [
+    ["见 $HOME 和 $x + 1$ 两个", /<annotation encoding="application\/x-tex">x \+ 1<\/annotation>/],
+    ["先输出 $HOME 再算 $2 + 2 = 4$", /2 \+ 2 = 4/],
+    ["输出 $HOME 与 $\\alpha$ 两值", /alpha/],
+  ];
+  for (const [markdown, formula] of cases) {
+    const html = renderMarkdown(markdown);
+    assert.equal((html.match(/class="katex"/g) ?? []).length, 1, markdown);
+    assert.match(html, formula, markdown);
+    assert.match(html, /\$HOME/, markdown);
+  }
+});
+
+test("keeps a formula whose content is uppercase, an abbreviation or short CJK", () => {
+  for (const math of [
+    "$E=mc^2$", "$PV=nRT$", "$AX=b$", "$AB$ 两条线段", "$R^2 = 0.95$", "$W_{1/2}$",
+    "$f(x) = ax^2 + bx + c$", "设 $pH = 7$ 时", "$R$ 上的连续函数", "$MSE$ 收敛",
+    "$DNA$ 双螺旋", "$x y z$ 三个变量", "$速度 v$ 随时间", "其中 $x = 1 $ 成立",
+    "$\\text{总损失函数为交叉熵}$", "sum $\\sum_{i=1}^n i $ here", "设 $\\text{输入维度为 } d$ 时",
+  ]) {
+    const html = renderMarkdown(math);
+    assert.match(html, /class="katex"/, math);
+    assert.doesNotMatch(html, /katex-error/, math);
+  }
+});
+
+test("demotes math holding CJK-only punctuation, not a Latin quote or dash", () => {
+  for (const prose of ["这里 $a，b$ 两个数", "看 $「重点」$ 这项", "$《论语》$ 引用"]) {
+    const html = renderMarkdown(prose);
+    assert.doesNotMatch(html, /class="katex"/, prose);
+    assert.match(html, /\$/, prose);
+  }
+  for (const math of ["引号不算：$x$“这里”$y$", "破折号不算：$a$——$b$", "省略号不算：$p$…$q$"]) {
+    assert.equal((renderMarkdown(math).match(/class="katex"/g) ?? []).length, 2, math);
+  }
+});
+
+test("demotes a CJK sentence inside one dollar pair", () => {
+  for (const prose of ["$模型输出概率分布$", "$总损失函数为交叉熵$"]) {
+    const html = renderMarkdown(prose);
+    assert.doesNotMatch(html, /class="katex"/, prose);
+    assert.match(html, /\$/, prose);
+  }
+});
+
+test("file previews and minimap Markdown use the same prose and currency math rules", () => {
+  const preview = (markdown) => renderToStaticMarkup(React.createElement(ReactMarkdown, {
     remarkPlugins: markdownPreviewRemarkPlugins,
     rehypePlugins: markdownPreviewRehypePlugins,
-  }, "**Price: $20/month**\nPlus a $6 fee. Formula: $2 + 2 = 4$."));
+  }, markdown));
+  const html = preview("**Price: $20/month**\nPlus a $6 fee. Formula: $2 + 2 = 4$.");
   assert.match(html, /<strong>Price: \$20\/month<\/strong>/);
   assert.match(html, /Plus a \$6 fee/);
   assert.equal((html.match(/class="katex"/g) ?? []).length, 1);
+  assert.doesNotMatch(preview("echo $HOME and $PATH in the shell"), /class="katex"/);
+  assert.match(preview("$E=mc^2$"), /class="katex"/);
 });
 
 test("leaves escaped currency, code and link destinations intact", () => {

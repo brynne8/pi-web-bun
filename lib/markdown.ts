@@ -7,6 +7,7 @@ import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
 import remarkMath from "remark-math";
+import { isProseMathText, remarkProseDisplayMath } from "./markdown-prose-math";
 import type { Plugin } from "unified";
 import type { Extension } from "micromark-util-types";
 
@@ -497,11 +498,22 @@ function remarkSplitAutolinkLiterals() {
   };
 }
 
-// Reject ambiguous single-dollar pairs during tokenization, before math can
-// swallow Markdown emphasis or links. A price's next dollar ("$20 ... $6")
-// cannot close math, nor can the space before a later formula ("$20 and $x$").
-// Keep the upstream tokenizer/resolver for real math, code, escapes and $$.
-const remarkCurrencySafeMath: Plugin = function () {
+// Refuses a single-`$` pair that is not a formula, during tokenization, so the
+// opening `$` never becomes a delimiter and the text after it is scanned from
+// there. Two families of refusal, both on the pair's content:
+//
+// - A price (`$20 ... $6`, `$20 and $x$`) cannot open math: a price's next
+//   dollar would otherwise swallow the words up to the next formula, which is
+//   why this has to happen before pairing rather than on the parsed tree.
+//   Balanced padding ($ x + y $) and multiline math stay supported; a
+//   one-sided space next to an amount is prose.
+// - Prose that only looks like a formula (`$HOME …`, CJK punctuation, a
+//   sentence of CJK letters): see `isProseMathText()` in
+//   `lib/markdown-prose-math.ts`.
+//
+// The upstream tokenizer and resolver stay in charge of real math, code,
+// escapes and `$$`.
+const remarkNotMathPairs: Plugin = function () {
   remarkMath.call(this);
   const data = this.data() as { micromarkExtensions?: Extension[] };
   const extension = data.micromarkExtensions?.at(-1);
@@ -515,10 +527,9 @@ const remarkCurrencySafeMath: Plugin = function () {
         const source = this.sliceSerialize({ start, end: this.now() });
         if (source.startsWith("$") && !source.startsWith("$$")) {
           const content = source.slice(1, -1);
+          if (isProseMathText(content)) return nok(code);
           const startsWithAmount = /^\s*[+-]?(?:\d|\.\d)/.test(content);
           const closesBeforeNumber = code !== null && code >= 48 && code <= 57;
-          // Balanced padding ($ x + y $) remains supported, as does multiline
-          // math. A one-sided space is prose, not an inline-math boundary.
           const mismatchedPadding = /^\s/.test(content) !== /\s$/.test(content);
           if (startsWithAmount && (closesBeforeNumber || mismatchedPadding)) return nok(code);
         }
@@ -533,7 +544,8 @@ export const markdownRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [
   [remarkGfm, remarkGfmOptions],
   remarkCjkFriendly,
   remarkSplitAutolinkLiterals,
-  remarkCurrencySafeMath,
+  remarkNotMathPairs,
+  remarkProseDisplayMath,
 ];
 
 // User messages keep every typed line break, as the TUI shows them (#680). The
@@ -599,7 +611,8 @@ export const markdownPreviewRemarkPlugins: ReactMarkdownOptions["remarkPlugins"]
   [remarkGfm, remarkGfmOptions],
   remarkCjkFriendly,
   remarkSplitAutolinkLiterals,
-  remarkCurrencySafeMath,
+  remarkNotMathPairs,
+  remarkProseDisplayMath,
 ];
 
 export const markdownRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [

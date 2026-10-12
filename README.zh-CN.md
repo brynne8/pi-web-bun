@@ -24,6 +24,7 @@
 - **工具卡片上的参数按行排**：参数全是普通值的工具调用，会一行一个参数地排成表格，而不是一整块 JSON——不必数引号、也不必展开嵌套。只要有一个值是对象或数组，这张卡片就退回 JSON，因为藏掉一棵子树的表格等于让你看不到那个参数。
 - **按顺序读下来的运行**：模型写的句子留在它写下的位置，中间连着的思考和工具调用各自折进自己那一组「处理详情」，这次运行最后由单独一行收尾——token 数、这一轮改过的文件，和一个把写下的全部内容交出去的「复制」按钮。
 - **思考过程按 Markdown 渲染**：展开的思考卡片会把标题、列表、表格和围栏代码渲染出来，而不是露出一堆标记符号。
+- **文中的 shell 变量不会变成公式**：句子里的 `$HOME`、`$PATH`，还有夹在两个美元符号中间的中文句子，都按原样显示，不再被渲染成数学公式。
 - **Git worktree**：从侧边栏切换 checkout，同时把同一仓库不同 worktree 的会话归在一起。
 - **网页配置**：无需离开 Pi Web，即可管理 Provider 登录和 API Key、模型、模型测试、插件包及技能。
 - **英文、简体中文和繁体中文界面**：Pi Web 首次打开时跟随浏览器语言，也可从顶部栏切换语言。
@@ -120,6 +121,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 **思考过程按 Markdown 渲染。** 展开的思考块走的是和回复同一套 Markdown 流水线：标题、列表、表格和围栏代码都渲染出来，不再把标记符号直接摆给你看，写成链接的路径也能在应用里打开。字号仍是这张卡片一贯的那一号。原版的处理是把整段思考当成一串保留换行的纯文本。（[说明](./docs/agents/sessions.md#thinking-renders-as-markdown-at-the-cards-own-size-thinkingblock-componentsmessageviewtsx)）
 
 **子代理由 profile 配置，不由模型猜。** 子代理的思考档位、轮次上限、是否继承这段对话，都由它的 profile 决定，于是一次运行可以从产出它的那份 profile 复现。`model` 是调用方唯一还能指定的参数，因为换某个模型跑一次是常见且明确的需求，而工具描述里列着每个 profile 自己的模型。要让子代理看哪些文件，就写在 `prompt` 里，它用自己的 `read` 去打开，被委派出去的会话因此只占它真正需要的上下文。原版另外接受调用上的 `input_files` 列表（[#1138](https://github.com/agegr/pi-web/pull/1138)）。（[说明](./docs/agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）
+
+**文中的 shell 变量不再被当成公式。** 一个单独的 `$`，只要后面还有另一个 `$`，就会开一个公式，所以一句讲 `$HOME` 和 `$PATH` 的话会以数学斜体显示出来，夹在两个美元符号中间的中文句子也一样。这个分支会看两个定界符中间是什么——shell 变量名、只有 CJK 文本才有的标点、若干个汉字——并把那段文字原样留下，而 `$E=mc^2$`、`$PV=nRT$` 和一个短汉字量名仍按公式渲染。原版的数学解析只看定界符，它唯一的开关是把行内公式整个关掉，而不是只关掉那些其实是文字的一对（[remark-math](https://github.com/remarkjs/remark-math)）。（[说明](./docs/agents/sessions.md#math-delimiters-and-prose-that-only-looks-like-a-formula)）
 
 ### 不算 fork 差异的部分
 
