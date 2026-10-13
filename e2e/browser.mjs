@@ -44,6 +44,13 @@ const IGNORED_BROWSER_ERRORS = [
   // build reads the same tag and says nothing at any level, so no local run ever sees it.
   // Nothing is broken either way, so the pattern stays pinned to this one key and sentence.
   /^Viewport argument key "interactive-widget" not recognized and ignored\.$/,
+  // The running-state poll is a relative fetch with its own AbortController
+  // (components/SessionSidebar.tsx) and the client builds no absolute URL anywhere, so the only
+  // document WebKit can deny it to is one whose origin has already gone: a poll still in flight
+  // while the page navigates. The line above is the same event in Chromium's words.
+  // Pinned to this endpoint and this sentence, because a real cross-origin call to some other
+  // route is a bug worth failing on.
+  /\/api\/agent\/running due to access control checks\.$/,
 ];
 
 /** Whether a pageerror or console-error text is this harness's own noise, not the app's. */
