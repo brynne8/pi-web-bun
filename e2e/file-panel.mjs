@@ -14,7 +14,12 @@ export async function checkFilePanel(page, filePath) {
   await showSidebarFiles(page);
   // The DOM title normalizes Windows paths to forward slashes
   // (lib/file-paths.ts normalizeFilePathSlashes), so match in that form.
-  await page.getByTitle(filePath.replace(/\\/g, "/"), { exact: true }).click();
+  //
+  // A DOM click on the row's own target, not a pointer click: the row's name span is `flex: 1`,
+  // so its box runs under the hover-only mention and download buttons and its centre is inside
+  // the mention button. See the file-row bullet in docs/agents/tests.md — the outcome depends on
+  // a pixel and on where the pointer happened to rest, and this check is about the preview.
+  await page.getByTitle(filePath.replace(/\\/g, "/"), { exact: true }).dispatchEvent("click");
   const panel = page.locator("#file-panel");
   const iframe = panel.locator("iframe");
   await iframe.waitFor();
