@@ -49,7 +49,8 @@ export async function checkFilesPlacement(page) {
   await page.getByRole("separator", { name: "Resize file browser", exact: true }).waitFor();
   const fileSearch = files.getByRole("button", { name: "Search files", exact: true });
   const fileQuery = page.locator("#file-search-input");
-  if (await fileSearch.getAttribute("aria-expanded") !== "true") await fileSearch.click();
+  // aria-expanded is mirrored from the sidebar; it is not proof the field is mounted.
+  if (!(await fileQuery.count())) await fileSearch.click();
   await fileQuery.fill("e2e-placement");
   // FileExplorer's root, not the scroll box the sidebar always renders around it.
   const tree = await page.locator("#session-sidebar-panel-files .sidebar-files-scroll > *").first().elementHandle();

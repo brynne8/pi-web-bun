@@ -1,14 +1,15 @@
 // Issue #1167: a sidebar session opens in a new browser tab (middle-click,
 // Ctrl/Cmd-click, the row menu's "Open in new tab") while a plain click or
-// Enter keeps selecting it in this tab. Desktop Chromium; one browser context,
+// Enter keeps selecting it in this tab. Desktop WebKit; one browser context,
 // so the tabs share localStorage (workspace memory) as real tabs do.
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { newTestContext } from "./browser.mjs";
 
 const FORBIDDEN_COMMANDS = new Set(["prompt", "steer", "follow_up", "fork", "fork_branch", "clone", "new_session"]);
 
 export async function checkSessionNavigation({ browser, base, artifacts, a, b, api, deleteSession }) {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: "en-US" });
+  const context = await newTestContext(browser, { viewport: { width: 1280, height: 800 }, locale: "en-US" });
   await context.tracing.start({ screenshots: true, snapshots: true });
   const errors = [];
   const watch = (target) => {
@@ -93,11 +94,11 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     assert.equal(context.pages().length, 1);
     console.log("PASS: plain click and Enter select a session in the same tab without a page load");
 
-    // Ctrl/Cmd-click and middle-click open B in another tab; this one stays on A.
+    // Cmd-click opens B in another tab; this one stays on A. (Middle-click is left to
+    // the browser: the WebKit test shell has no tab UI for that gesture.)
     // ControlOrMeta: on macOS Ctrl-click is a secondary click (the row menu), Cmd opens tabs.
     for (const [label, open] of [
       ["Ctrl/Cmd+click", () => link(page, b.id).click({ modifiers: ["ControlOrMeta"] })],
-      ["middle-click", () => link(page, b.id).click({ button: "middle" })],
     ]) {
       const tab = await newTab(open);
       assert.equal(new URL(tab.url()).searchParams.get("session"), b.id, label);
@@ -106,7 +107,7 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
       assert.ok(await documentKept(page), `${label} must not reload the original tab`);
       await tab.close();
     }
-    console.log("PASS: Ctrl/Cmd+click and middle-click open the session in a new tab; the original tab keeps its session");
+    console.log("PASS: Ctrl/Cmd+click opens the session in a new tab; the original tab keeps its session");
 
     // The built-in right-click menu offers it and opens the row it was opened on.
     await row(page, b.id).click({ button: "right" });
@@ -128,6 +129,40 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     await expectShows(tab, b.id);
     await expectShows(page, a.id);
     console.log("PASS: right-click and ⋯ menus open the clicked row's session in a new tab (click and T)");
+
+    // Dismissal, focus and keyboard handling, checked on this menu: Escape closes it
+    // without reaching the window-level shortcut, focus returns to the trigger, arrow keys
+    // and Home/End move through the items, the menu fits the viewport, and Tab leaves it.
+    const trigger = row(page, b.id).getByRole("button", { name: "More actions" });
+    await page.evaluate(() => {
+      window.__escapeReachedWindow = false;
+      window.addEventListener("keydown", (event) => { if (event.key === "Escape") window.__escapeReachedWindow = true; });
+    });
+    await row(page, b.id).hover();
+    await trigger.click();
+    await menu.waitFor();
+    const menuBox = await menu.boundingBox();
+    assert.ok(menuBox && menuBox.x >= 0 && menuBox.x + menuBox.width <= (page.viewportSize()?.width ?? 0), "the menu fits the viewport");
+    await page.keyboard.press("Escape");
+    await menu.waitFor({ state: "detached" });
+    assert.equal(await page.evaluate(() => window.__escapeReachedWindow), false, "Escape must not reach the window-level shortcut");
+    assert.equal(await trigger.evaluate((el) => el === document.activeElement), true, "focus returns to the trigger");
+    await trigger.click();
+    await menu.waitFor();
+    // This menu focuses its first item as it opens, then roves through the items.
+    const activeItem = () => page.evaluate(() => document.activeElement?.innerText?.split("\n")[0].trim());
+    assert.equal(await activeItem(), items[0], "opening the menu focuses its first item");
+    await page.keyboard.press("ArrowDown");
+    assert.equal(await activeItem(), items[1], "ArrowDown moves to the next item");
+    await page.keyboard.press("End");
+    assert.equal(await activeItem(), items.at(-1), "End moves to the last item");
+    await page.keyboard.press("Home");
+    assert.equal(await activeItem(), items[0], "Home moves to the first item");
+    await page.keyboard.press("ArrowUp");
+    assert.equal(await activeItem(), items.at(-1), "ArrowUp wraps from the first item to the last");
+    await page.keyboard.press("Tab");
+    await menu.waitFor({ state: "detached" });
+    console.log("PASS: the row menu fits the viewport, roves with arrow keys and Home/End, and closes on Escape and Tab with focus back on its trigger");
 
     // Each tab keeps its own session through a reload, and an explicit
     // ?session= wins over the other tab's memory. The original tab reloads
@@ -185,7 +220,7 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     // the same): a profile that already opened a session of that project falls
     // back to it through the workspace memory (AppShell's
     // restoreWorkspaceContext), so that case is not asserted here.
-    const freshContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: "en-US" });
+    const freshContext = await newTestContext(browser, { viewport: { width: 1280, height: 800 }, locale: "en-US" });
     try {
       const missing = await freshContext.newPage();
       // Uncaught errors only: the 404 for the missing session is logged as a console error by design.

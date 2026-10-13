@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { launchBrowser, newTestContext } from "./browser.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const mode = process.env.E2E_SERVER_MODE || "dev";
@@ -170,8 +170,8 @@ try {
 
   // The headless shell has no PDF viewer (it downloads the file instead), so the
   // full Chromium build is required to observe the page the viewer lands on.
-  browser = await chromium.launch({ channel: "chromium" });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: "en-US" });
+  browser = await launchBrowser();
+  const context = await newTestContext(browser, { viewport: { width: 1280, height: 800 }, locale: "en-US" });
   const page = await context.newPage();
   page.setDefaultTimeout(30_000);
   const errors = [];

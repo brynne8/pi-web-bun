@@ -86,9 +86,10 @@ Three kinds of difference. [Running on Bun](#running-on-bun) is what it takes to
 | Skills install | `npx skills add …` | `bun x skills add …` |
 | Plugin update check | `npm view … version --json` | `bun pm view … version --json` |
 | Test suite | Node's runner (`npm test`) | Both runners, both green: `bun test` and `npm test` |
+| Browser regression tests | Playwright Chromium (`npx playwright install --with-deps chromium`) | Playwright's Apple WebKit build: `npm run test:e2e:install` fetches it and CI installs `--with-deps webkit`; no Chromium binary is installed or launched here ([docs/agents/tests.md](./docs/agents/tests.md#e2e-playwright)) |
 | Dev build output | The dev server and `next build` share `.next/` | `PI_WEB_DIST_DIR` points the dev script at `.next-dev/`, so a build or `next start` no longer pollutes the dev server's directory |
 | Lockfiles | `package-lock.json` | `bun.lock` is gitignored; `bun-types` is recorded in the tracked `package-lock.json`, because CI's `npm ci` refuses a `package.json` the lock does not match |
-| CI | `.github/workflows/ci.yml` on Node.js | the same `ci.yml`, untouched — this fork adds no Bun job, so the Bun checks above are run locally |
+| CI | `.github/workflows/ci.yml` on Node.js | the same `ci.yml`, with the browser it installs switched to `--with-deps webkit` — this fork adds no Bun job, so the Bun checks above are run locally |
 
 **Terminal.** node-pty's native addon cannot keep the pty master fd alive under Bun: the fd is closed right after `spawn()`, the child reads EOF on stdin and an interactive shell exits before it can print a prompt ([agegr/pi-web#745](https://github.com/agegr/pi-web/issues/745), cf. [oven-sh/bun#7362](https://github.com/oven-sh/bun/issues/7362)). Bun's own PTY support (`Bun.spawn({ terminal })`) holds the fd for the process's lifetime, so `lib/terminal-bun-pty.ts` implements the small node-pty-compatible surface `lib/terminal-manager.ts` drives — spawn, `onData`, `onExit`, `write`, `resize`, `kill` and `pid` — and node-pty keeps serving Node.js and Windows. No polling reader, no fd lifetime hack, no extra dependency.
 

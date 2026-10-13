@@ -71,6 +71,7 @@ Restart Pi Web after repair.
 
 Run `npm test` for native PTY, lease, output cursor, input queue, and storage
 checks. `npm run test:terminal` starts an isolated development server and runs
-desktop/mobile browser checks using generated session fixtures. Install the
-Playwright Chromium browser first with `npx playwright install chromium`.
+desktop/mobile browser checks using generated session fixtures. Install the browser
+first with `npm run test:e2e:install` (Playwright's WebKit build; the suite installs
+no Chromium — see [agents/tests.md](agents/tests.md)).
 The browser check prints the temporary location of its screenshots and log.

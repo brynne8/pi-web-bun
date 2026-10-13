@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { launchBrowser, newTestContext } from "./browser.mjs";
 import { showSidebarFiles, showSidebarSessions } from "./sidebar.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -57,9 +57,9 @@ try {
     assert.ok(i < 120 && server.exitCode === null, "Server did not become ready");
     await delay(500);
   }
-  browser = await chromium.launch();
+  browser = await launchBrowser();
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
-    const context = await browser.newContext({ viewport, locale: "en-US" });
+    const context = await newTestContext(browser, { viewport, locale: "en-US" });
     const page = await context.newPage();
     page.setDefaultTimeout(30_000);
     const errors = [];

@@ -8,12 +8,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { launchBrowser, newTestContext } from "./browser.mjs";
 import { checkFilePanel, filePanelFixture } from "./file-panel.mjs";
 import { checkExtensionDialogSizing, checkExtensionDialogs, extensionSource } from "./extension-dialog.mjs";
 import { checkChatAppearance } from "./chat-appearance.mjs";
 import { checkCodeBackground } from "./code-background.mjs";
-import { checkModelDiscovery } from "./model-discovery.mjs";
+import { checkModelDiscovery, installModelDiscoveryStub } from "./model-discovery.mjs";
 import { checkFilesPlacement, showSidebarSessions } from "./sidebar.mjs";
 import { checkSessionNavigation } from "./session-navigation.mjs";
 
@@ -237,16 +237,27 @@ try {
     console.log("PASS: external session-file appends are visible on force/mount reads");
   }
 
-  browser = await chromium.launch();
+  browser = await launchBrowser();
   for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
-    context = await browser.newContext({ viewport, locale: "en-US" });
+    context = await newTestContext(browser, { viewport, locale: "en-US" });
     await context.tracing.start({ screenshots: true, snapshots: true });
     page = await context.newPage();
     page.setDefaultTimeout(30_000);
+    // ModelsConfig reads /api/models-config once on mount, so the fixture has to be
+    // in place before the first navigation. See e2e/model-discovery.mjs.
+    const modelDiscoveryStub = await installModelDiscoveryStub(page);
     const errors = [];
     const olderResponses = [];
-    page.on("pageerror", (error) => errors.push(error.message));
-    page.on("console", (event) => { if (event.type() === "error") errors.push(event.text()); });
+    // Errors the harness itself causes, or that a browser reports only during teardown.
+    // Narrow on purpose: a real app error must not match any of these.
+    const IGNORED_CONSOLE_ERRORS = [
+      /Service Worker is disabled because the context is sandboxed/, // browser.mjs blocks workers
+      /ResizeObserver loop completed with undelivered notifications/,
+      /^Failed to load context: TypeError: Load failed$/, // a fetch a navigation cancelled
+    ];
+    const noteError = (text) => { if (!IGNORED_CONSOLE_ERRORS.some((pattern) => pattern.test(text))) errors.push(text); };
+    page.on("pageerror", (error) => noteError(error.message));
+    page.on("console", (event) => { if (event.type() === "error") noteError(event.text()); });
     page.on("response", (response) => {
       if (response.url().startsWith(base) && response.status() >= 500) errors.push(`${response.status()} ${response.url()}`);
       const url = new URL(response.url());
@@ -271,10 +282,19 @@ try {
       await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
       const preview = page.locator("[data-minimap-preview-box]");
       const turn = preview.locator("[data-minimap-preview-index]").filter({ hasText: text(4998) });
-      const result = {
+      const read = async () => ({
         number: await turn.locator("span[aria-hidden='true']").first().textContent(),
         earlier: await preview.locator("[data-minimap-preview-earlier]").textContent(),
-      };
+      });
+      // The preview counts rendered turns, so a read can land before the last page is
+      // counted. Sample until three consecutive reads agree.
+      let result = await read();
+      for (let attempt = 0, same = 0; attempt < 25 && same < 2; attempt++) {
+        await delay(100);
+        const next = await read();
+        same = next.number === result.number && next.earlier === result.earlier ? same + 1 : 0;
+        result = next;
+      }
       await page.screenshot({ path: join(artifacts, screenshot) });
       await page.mouse.move(0, 0);
       await preview.waitFor({ state: "detached" });
@@ -486,12 +506,17 @@ try {
       });
       await hideSidebar.or(showSidebar).waitFor({ state: "visible" });
       if (await showSidebar.isVisible()) await showSidebar.click();
+      // The toggle keeps settling after a breakpoint change, so a click can land before it
+      // takes effect. The sidebar being open is what matters, not how many clicks it took.
+      await hideSidebar.waitFor({ state: "visible", timeout: 5_000 }).catch(async () => {
+        if (await showSidebar.isVisible()) await showSidebar.click();
+      });
       await hideSidebar.waitFor({ state: "visible" });
       // The files sit below the sessions on a desktop; Settings › General ›
       // File browser brings the tabs back, and goes back.
       await checkFilesPlacement(page);
       console.log("PASS: files below the sessions by default, tabs from Settings and back");
-      await checkModelDiscovery(page);
+      await checkModelDiscovery(page, modelDiscoveryStub);
     }
     await page.goto(`${base}/?session=${CODE_BACKGROUND}`, { waitUntil: "domcontentloaded" });
     await page.locator(".markdown-code-block pre").waitFor();

@@ -5,9 +5,16 @@ scanner, reverse reader, sidebar changes, and timing benchmarks are not included
 
 ```sh
 npm ci
-npx playwright install chromium
+npm run test:e2e:install   # downloads the WebKit build only; never Chromium
 npm run test:e2e
 ```
+
+These tests drive Apple WebKit (`playwright`'s `webkit` build) through `launchBrowser`
+in `e2e/browser.mjs`; Chromium is not used and must not be reintroduced.
+
+On Linux the browser needs system libraries too, so run
+`sudo npx playwright install --with-deps webkit` once. Windows (win64), WSL and the
+Ubuntu x64/arm64 builds all exist; nothing here is macOS-only.
 
 The script starts and stops its own Turbopack dev server on an available
 loopback port. Run it in a checkout without an active dev server; Next.js
@@ -39,8 +46,8 @@ Coverage:
   without remounting the file tree (its file search keeps its query).
 - Unknown sessions and paths outside the fixture project are rejected.
 - Sidebar sessions open in browser tabs (`session-navigation.mjs`, desktop
-  Chromium, one context so tabs share storage): a plain click and Enter
-  select in place without a page load; Ctrl+click, middle-click and the row
+  WebKit, one context so tabs share storage): a plain click and Enter
+  select in place without a page load; Ctrl+click and the row
   menu's Open in new tab (right-click, ⋯, T; just before Delete) open the clicked row's session in
   a new tab while the original keeps its own; both tabs keep their session
   through reloads; pinned and archived rows link the same way; nothing
