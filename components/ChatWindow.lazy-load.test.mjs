@@ -23,12 +23,15 @@ const forgetCursor = compile(hook("useEffect", "requestedCursorRef.current = nul
 
 // Mounts the observer effect with the given history state; `reachTop()` is the
 // sentinel coming into view, `render(cursor)` the next cursor rendering.
-function mount({ hasEarlierMessages, landed = true }) {
+// `restoring: true` is a session re-opened where the reader had been, whose
+// position has not landed yet (`pendingScrollRestore`).
+function mount({ hasEarlierMessages, landed = true, restoring = false }) {
   const calls = { visibleCount: 50, loads: [] };
   let observed = null;
   const context = createContext({
     sentinel: {}, scrollContainerRef: { current: { scrollHeight: 4000, scrollTop: 0 } },
     loadingOlderRef: { current: false }, prevScrollDistanceRef: { current: null }, requestedCursorRef: { current: null },
+    pendingScrollRestoreRef: { current: restoring ? { anchorEntryId: "e1", anchorOffset: 120 } : null },
     hasEarlierMessages, historyCursor: "older", session: { id: "a" }, sessionIdRef: { current: "a" }, activeLeafId: "leaf",
     captureScrollDistance, getNextVisibleCount,
     setVisibleCount: (update) => { calls.visibleCount = update(calls.visibleCount); },
@@ -60,6 +63,19 @@ async function reachTop(state) {
 }
 
 const cursors = (calls) => calls.loads.map((args) => args[2]);
+
+test("a reading position that has not landed yet outranks the sentinel", async () => {
+  // The restore fetches its own pages, so a page fetched here would be prepended with
+  // this callback's own distance-from-bottom restore and shove the viewport back to the
+  // top of what is loaded — where the sentinel still shows and it asks again.
+  for (const hasEarlierMessages of [true, false]) {
+    const { calls, context, reachTop } = mount({ hasEarlierMessages, restoring: true });
+    await reachTop();
+    assert.deepEqual(cursors(calls), [], `no page is fetched while a restore is pending (older history ${hasEarlierMessages ? "on the server" : "fully loaded"})`);
+    assert.equal(calls.visibleCount, 50, "the window is not widened either");
+    assert.equal(context.prevScrollDistanceRef.current, null, "and no distance is captured that would later restore the viewport to the top");
+  }
+});
 
 test("with every message loaded, reaching the top widens the window over rows still hidden", async () => {
   assert.deepEqual(await reachTop({ hasEarlierMessages: false }), { visibleCount: 100, loads: [], scrollDistance: 4000 });
