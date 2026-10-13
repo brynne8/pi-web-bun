@@ -1760,7 +1760,7 @@ function McpStatusStateWord({ view }: { view: { key: string; tone: McpStateTone 
 
 /**
  * What the last test found: when and how long, the error and stderr, and what
- * the server said about itself; its resources only when it offers any, and
+ * the server said about itself; that it offers resources when it does, and
  * the folder a stdio server ran in unless the Working directory row names
  * that very folder.
  */
@@ -1789,11 +1789,7 @@ function McpTestStatusLines({
           {t("mcp.test.serverInfo", { name: revealHiddenCharacters(info.title ?? info.name), version: revealHiddenCharacters(info.version) })}
         </span>
       )}
-      {(status.resources ?? 0) + (status.resourceTemplates ?? 0) > 0 && (
-        <span className="mcp-config-line is-dim">
-          {t("mcp.test.resources", { resources: status.resources ?? 0, templates: status.resourceTemplates ?? 0 })}
-        </span>
-      )}
+      {status.resources && <span className="mcp-config-line is-dim">{t("mcp.test.resources")}</span>}
       {status.cwd !== undefined && status.cwd !== entryCwd && (
         <span className="mcp-config-line is-dim">{t("mcp.test.ranIn", { path: displayPath(status.cwd) })}</span>
       )}

@@ -1071,8 +1071,7 @@ test("a connected test shows what it listed, and the row reads connected", () =>
       { name: "bidi‮tool", readOnly: false, exposure: "codemode" },
     ],
     serverInfo: { name: "docs-server", version: "2.1.0" },
-    resources: 4,
-    resourceTemplates: 1,
+    resources: true,
   });
   const html = testView({ status });
   const markup = decode(html);
@@ -1084,11 +1083,11 @@ test("a connected test shows what it listed, and the row reads connected", () =>
   assert.equal(label, "Connected when tested");
   assert.match(value, /^<span class="mcp-config-line">3 tool\(s\) listed in 0\.4 s, tested at [^.]+\.<\/span>/);
   assert.match(shown, /Server: docs-server 2\.1\.0/);
-  assert.match(shown, /4 resource\(s\) and 1 resource template\(s\)\./);
+  assert.match(shown, /Offers resources\./);
   assert.doesNotMatch(shown, /Ran in/, "an HTTP server runs in no folder");
   assert.match(text(markup), /Status Connected when tested 3 tool\(s\) listed/);
   // A server that offers no resources does not say so.
-  assert.doesNotMatch(statusRow(testView({ status: { ...status, resources: 0, resourceTemplates: 0 } })).text, /resource/);
+  assert.doesNotMatch(statusRow(testView({ status: { ...status, resources: undefined } })).text, /resource/);
   // The tools it listed go under the Tools row's choice, in the same row.
   const tools = markup.match(/<div class="config-detail-grid-label">Tools<\/div><div class="config-detail-grid-value">([\s\S]*?)<\/div>/)?.[1];
   assert.ok(tools, "a Tools row");

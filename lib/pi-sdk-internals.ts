@@ -105,36 +105,6 @@ export interface McpTool {
   _meta?: Record<string, unknown>;
 }
 
-/** pi-mcp's `ContentAnnotations`. */
-export interface McpContentAnnotations {
-  audience?: ("user" | "assistant")[];
-  priority?: number;
-  lastModified?: string;
-}
-
-/** pi-mcp's `Resource`, from `resources/list`. */
-export interface McpResource {
-  uri: string;
-  name: string;
-  title?: string;
-  description?: string;
-  mimeType?: string;
-  size?: number;
-  annotations?: McpContentAnnotations;
-  _meta?: Record<string, unknown>;
-}
-
-/** pi-mcp's `ResourceTemplate`, from `resources/templates/list`. */
-export interface McpResourceTemplate {
-  uriTemplate: string;
-  name: string;
-  title?: string;
-  description?: string;
-  mimeType?: string;
-  annotations?: McpContentAnnotations;
-  _meta?: Record<string, unknown>;
-}
-
 /** pi-mcp's `OAuthChallenge`, parsed from a server's `WWW-Authenticate` header. */
 export interface McpOAuthChallenge {
   resourceMetadataUrl?: URL;
@@ -185,9 +155,8 @@ export interface McpServerConnection {
   state: McpServerState;
   error: string | undefined;
   tools: McpTool[];
+  /** Whether the server offers resources; the SDK lists them only when a resource tool asks. */
   hasResources: boolean;
-  resources: McpResource[];
-  resourceTemplates: McpResourceTemplate[];
   /** Server instructions from `initialize`. */
   instructions: string | undefined;
   /** Last OAuth challenge from the server; sign-in uses its resource metadata URL and scope. */

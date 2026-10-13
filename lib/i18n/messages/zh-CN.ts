@@ -932,7 +932,7 @@ export const zhCNLocale: LocalePlugin = {
     "mcp.test.error": "错误：",
     "mcp.test.stderr": "它最后写入 stderr 的内容：",
     "mcp.test.serverInfo": "服务器：{name} {version}",
-    "mcp.test.resources": "{resources} 个资源和 {templates} 个资源模板。",
+    "mcp.test.resources": "提供资源。",
     "mcp.test.ranIn": "运行于 {path}。",
     "mcp.test.queued": "等待了 {seconds} 秒，因为另一个会执行 shell 命令的服务器正在测试。",
     "mcp.test.readOnly": "只读",
