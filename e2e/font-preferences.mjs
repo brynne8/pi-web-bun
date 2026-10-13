@@ -86,10 +86,25 @@ export async function checkFontPreferences(page) {
   await ui.fill("serif");
   const serifHeight = await textarea.evaluate((el) => el.clientHeight);
   await ui.fill("monospace");
-  await page.waitForFunction((oldHeight) => {
+  // What must be true is what a reader sees: the box fits what the new family draws. Whether the
+  // height itself moves is the machine's choice — how many lines this draft wraps into under the
+  // generic `serif` and `monospace` depends on which fonts are installed here, and a CI image
+  // where they come out equal has no height change to wait for (30s of waiting, and a bare
+  // TimeoutError with nothing measured in it). The direction that must grow the draft is
+  // asserted where the change is guaranteed to move metrics: the width and font-size sliders in
+  // chat-appearance.mjs. Failing here still reports both families and both heights.
+  const measuredFit = () => textarea.evaluate((el) => ({
+    height: el.clientHeight, scroll: el.scrollHeight, family: getComputedStyle(el).fontFamily,
+  }));
+  const fit = await page.waitForFunction(() => {
     const input = document.querySelector(".chat-input-textarea");
-    return input.clientHeight !== oldHeight && (input.scrollHeight <= input.clientHeight + 1 || input.clientHeight >= 199);
-  }, serifHeight);
+    if (!input || (input.scrollHeight > input.clientHeight + 1 && input.clientHeight < 199)) return null;
+    return { height: input.clientHeight, scroll: input.scrollHeight, family: getComputedStyle(input).fontFamily };
+  }, null, { timeout: 10_000 }).then((handle) => handle.jsonValue(), measuredFit);
+  assert.ok(fit.scroll <= fit.height + 1 || fit.height >= 199,
+    `The draft must fit the family it is drawn in: ${serifHeight}px under serif, `
+    + `${fit.height}px box with ${fit.scroll}px of content under ${fit.family}`);
+  console.log(`  draft refit on family change: serif ${serifHeight}px -> monospace ${fit.height}px of ${fit.scroll}px`);
   await resetUi.click();
 
   assert.deepEqual(await page.evaluate(() => ({
