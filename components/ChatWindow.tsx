@@ -653,6 +653,14 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries[0]?.isIntersecting) return;
+        // A reading position that has not landed yet outranks the sentinel. While a restore is
+        // pending, every page this callback asks for is prepended with its own distance-from-
+        // bottom restore (`prevScrollDistanceRef` below), which holds the *bottom* of the
+        // content and therefore shoves the viewport back to the top of everything loaded —
+        // and with the sentinel still in view, it asks again, page after page. On a fast
+        // machine the anchor lands before this can pile up; on a slow one the reading
+        // position is simply lost. The restore fetches whatever pages it needs itself.
+        if (pendingScrollRestoreRef.current) return;
         // Skip while a page is already loading.
         if (loadingOlderRef.current) return;
         if (!hasEarlierMessages) {
@@ -681,7 +689,9 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [sentinel, visibleCount, historyCursor, hasEarlierMessages, session, loadOlderPage, sessionIdRef, scrollContainerRef]);
+    // `pendingScrollRestore` renews the observer when a restore lands: a sentinel that stayed
+    // intersecting the whole time would otherwise report no change and never load again.
+  }, [sentinel, visibleCount, historyCursor, hasEarlierMessages, session, loadOlderPage, sessionIdRef, scrollContainerRef, pendingScrollRestore]);
 
   // Keep the rendered window at least as large as what's loaded, so prepended
   // (older) pages stay visible instead of being sliced off the top.
