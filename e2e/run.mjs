@@ -432,6 +432,22 @@ try {
       const readingOffset = (target) => target.evaluate((element) => (
         element.getBoundingClientRect().top - element.closest(".overflow-y-auto").getBoundingClientRect().top
       ));
+      // A settled offset, never a first sample. Returning to older history keeps working after
+      // the anchor appears: the window widens for the rows one message renders as, and pages
+      // still arrive, so a measurement taken the moment the entry is visible photographs a
+      // moving layout. Two readings that agree is the reading position. A value that never
+      // settles is its own finding, and both numbers go into the message — a Mac settles on the
+      // second sample and a loaded CI runner is where this has been failing.
+      const settledReadingOffset = async (target) => {
+        let previous = await readingOffset(target);
+        for (let attempt = 1; attempt <= 20; attempt++) {
+          await page.waitForTimeout(400);
+          const next = await readingOffset(target);
+          if (Math.abs(next - previous) < 1) return { offset: next, settled: true, samples: attempt + 1 };
+          previous = next;
+        }
+        return { offset: previous, settled: false, samples: 21 };
+      };
       const positionForReading = async (target) => {
         await target.evaluate((element) => {
           const scroll = element.closest(".overflow-y-auto");
@@ -444,14 +460,22 @@ try {
       await page.getByText("Scroll up to load earlier messages", { exact: true }).evaluate((element) => element.scrollIntoView({ block: "start", behavior: "instant" }));
       await olderPage;
       const olderMessage = page.locator("[data-entry-id='e4920']");
-      const olderOffset = await positionForReading(olderMessage);
+      await positionForReading(olderMessage);
+      // Where it was read from, captured the same way it is compared: a capture taken mid-drift
+      // would make the comparison measure nothing.
+      const captured = await settledReadingOffset(olderMessage);
+      assert.ok(captured.settled, `the reading position is stable where it is being read from (still moving after ${captured.samples} samples, last ${Math.round(captured.offset)}px)`);
+      const olderOffset = captured.offset;
       // Leaving a session and coming back must restore the reading position. What followed here
       // was upstream's: it expanded the one group its turn had and expected the answer not to
       // move once the group came back collapsed. This fork folds each run of thinking and tool
       // calls, so that geometry is the branch's own design and is not asserted from e2e.
       await selectSession("Render **E2E markdown**", "user");
       await selectSession(text(0), "e4920");
-      assert.ok(Math.abs(await readingOffset(olderMessage) - olderOffset) < 5, "Returning to older history must restore its reading offset");
+      const back = await settledReadingOffset(olderMessage);
+      assert.ok(back.settled, `the reading position comes to rest after returning (still moving after ${back.samples} samples, last ${Math.round(back.offset)}px, was ${Math.round(olderOffset)}px)`);
+      assert.ok(Math.abs(back.offset - olderOffset) < 5,
+        `Returning to older history must restore its reading offset (settled ${Math.round(back.offset)}px from the top, was ${Math.round(olderOffset)}px)`);
 
       // Hold pagination until a different branch has loaded, exercising effect cancellation.
       let releaseHistory;
