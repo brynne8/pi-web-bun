@@ -179,6 +179,37 @@ export function FolderPlusIcon(props: SidebarIconProps) {
   );
 }
 
+/** The `@` of "put this path into the chat". */
+export function MentionIcon(props: SidebarIconProps) {
+  return (
+    <SidebarIcon {...props}>
+      <circle cx="12" cy="12" r="3.6" />
+      <path d="M15.6 8.4v4.4a2.8 2.8 0 0 0 5.6 0v-1a9.6 9.6 0 1 0-3.7 7.6" />
+    </SidebarIcon>
+  );
+}
+
+/** Down onto a shelf: keep a copy of this file in the browser. */
+export function DownloadIcon(props: SidebarIconProps) {
+  return (
+    <SidebarIcon {...props}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </SidebarIcon>
+  );
+}
+
+/** A folder with one entry marked: show this file where it lives on disk. */
+export function RevealIcon(props: SidebarIconProps) {
+  return (
+    <SidebarIcon {...props}>
+      <path d="M3 8a2 2 0 0 1 2-2h3.4l1.9 1.9H19a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+      <circle cx="12" cy="14" r="1.6" fill="currentColor" stroke="none" />
+    </SidebarIcon>
+  );
+}
+
 export function TerminalIcon(props: SidebarIconProps) {
   return (
     <SidebarIcon {...props}>

@@ -443,6 +443,7 @@ export const enLocale: LocalePlugin = {
     "files.insertPath": "Insert path into chat",
     "files.mention": "mention",
     "files.download": "Download file",
+    "files.rowActions": "Actions for {name}",
     "files.outsideLink": "Links to {target}, outside this project",
     "files.outsideLinkEncloses": "That folder contains this project or your home folder.",
     "files.allowOutsideLink": "Allow browsing",

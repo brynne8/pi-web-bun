@@ -20,7 +20,7 @@ export async function GET(request: Request) {
   return NextResponse.json({ supported, reason, platform: process.platform });
 }
 
-/** Opens the session workspace in the OS file manager. */
+/** Opens the session workspace, or reveals one file in it, in the OS file manager. */
 export async function POST(request: Request) {
   try {
     const { supported, reason } = availabilityFor(request);
@@ -28,22 +28,34 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: reason }, { status: 403 });
     }
 
-    const body = await request.json() as { cwd?: unknown };
-    if (typeof body.cwd !== "string" || !body.cwd.trim()) {
+    const body = await request.json() as { cwd?: unknown; revealFile?: unknown };
+    // `revealFile` asks for one file to be selected among its folder's contents;
+    // without it the target is a directory to open, as before.
+    const revealFile = typeof body.revealFile === "string" && body.revealFile.trim()
+      ? body.revealFile
+      : null;
+    if (!revealFile && (typeof body.cwd !== "string" || !body.cwd.trim())) {
       return NextResponse.json({ error: "cwd-required" }, { status: 400 });
     }
-    const target = resolve(body.cwd);
+    const target = resolve(revealFile ?? body.cwd as string);
     // Authorize before touching the path, so a location outside the allowed
     // roots answers 403 whether or not it exists.
     const roots = await getAllowedFileRoots();
     if (!isExistingFilePathAllowed(target, roots)) {
       return NextResponse.json({ error: "access-denied" }, { status: 403 });
     }
-    if (!(await stat(target)).isDirectory()) {
+    const stats = await stat(target);
+    if (revealFile) {
+      // A directory here would be revealed as a folder icon, which is not what a
+      // reveal of a row means; the caller passes a file path or opens the folder.
+      if (!stats.isFile()) {
+        return NextResponse.json({ error: "not-a-file" }, { status: 400 });
+      }
+    } else if (!stats.isDirectory()) {
       return NextResponse.json({ error: "not-a-directory" }, { status: 400 });
     }
 
-    await launchFileManager(target);
+    await launchFileManager(target, process.platform, revealFile ? "reveal" : "open");
     return NextResponse.json({ opened: true });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });

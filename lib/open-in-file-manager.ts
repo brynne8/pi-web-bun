@@ -1,5 +1,6 @@
 import { spawn } from "child_process";
 import { isIP } from "net";
+import { dirname } from "path";
 
 const FILE_MANAGER_BY_PLATFORM = new Map<string, string>([
   ["win32", "explorer.exe"],
@@ -13,17 +14,38 @@ export function isFileManagerSupported(platform: string): boolean {
 }
 
 /**
- * Builds the command that opens a directory in the OS file manager.
+ * What to ask the file manager for: show a folder's contents, or show one file
+ * inside the folder that holds it. Receiving a reveal is what a reader means by
+ * "look at this file" — the folder alone does not say which of its entries the
+ * row was.
+ */
+export type FileManagerView = "open" | "reveal";
+
+/**
+ * Builds the command that shows something in the OS file manager.
+ *
+ * A reveal selects one file where the platform can (`open -R`, `explorer /select,`)
+ * and falls back to its folder where it cannot: no Linux file manager has a
+ * reveal-from-the-terminal command, and opening the folder still answers the
+ * question the reader asked.
  * @param platform A Node `process.platform` value
- * @param target The directory to open
+ * @param target The directory to open, or the file to reveal
+ * @param view `reveal` shows one file among its folder's contents
  * @returns The command and its arguments, or null on an unsupported platform
  */
 export function fileManagerCommand(
   platform: string,
   target: string,
+  view: FileManagerView = "open",
 ): { command: string; args: string[] } | null {
   const command = FILE_MANAGER_BY_PLATFORM.get(platform);
-  return command ? { command, args: [target] } : null;
+  if (!command) return null;
+  if (view !== "reveal") return { command, args: [target] };
+  if (platform === "darwin") return { command, args: ["-R", target] };
+  // explorer.exe takes the switch and the path as one argument, in its own
+  // separator: `explorer /select,C:\work\repo\file.ts`.
+  if (platform === "win32") return { command, args: [`/select,${target.replaceAll("/", "\\")}`] };
+  return { command, args: [dirname(target)] };
 }
 
 /**
@@ -50,19 +72,23 @@ export function isLoopbackHost(host: string | null | undefined): boolean {
 }
 
 /**
- * Opens a directory in the OS file manager.
+ * Opens a directory, or reveals a file, in the OS file manager.
  *
  * On macOS, `open` launches an `.app` bundle instead of showing it, so callers
- * should only pass project directories such as the explorer root.
- * @param target The directory to open (the caller checks access)
+ * using the default `open` view should only pass project directories such as the
+ * explorer root. A `reveal` passes `open -R`, which shows the bundle in Finder
+ * without running it.
+ * @param target The directory to open, or the file to reveal (the caller checks access)
  * @param platform A Node `process.platform` value
+ * @param view Whether to reveal one file rather than open a folder
  * @returns Resolves once the command has started
  */
 export function launchFileManager(
   target: string,
   platform: string = process.platform,
+  view: FileManagerView = "open",
 ): Promise<void> {
-  const spec = fileManagerCommand(platform, target);
+  const spec = fileManagerCommand(platform, target, view);
   if (!spec) return Promise.reject(new Error(`Unsupported platform: ${platform}`));
   return new Promise((resolve, reject) => {
     const child = spawn(spec.command, spec.args, { detached: true, stdio: "ignore" });

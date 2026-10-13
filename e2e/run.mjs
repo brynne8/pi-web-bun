@@ -10,6 +10,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { launchBrowser, newTestContext } from "./browser.mjs";
 import { checkFilePanel, filePanelFixture } from "./file-panel.mjs";
+import { checkFileRowMenu } from "./file-row-menu.mjs";
 import { checkExtensionDialogSizing, checkExtensionDialogs, extensionSource } from "./extension-dialog.mjs";
 import { checkChatAppearance } from "./chat-appearance.mjs";
 import { checkCodeBackground } from "./code-background.mjs";
@@ -29,6 +30,11 @@ const sessionDir = join(agentDir, "sessions", "e2e");
 mkdirSync(project);
 const previewFile = join(project, "preview.html");
 writeFileSync(previewFile, filePanelFixture);
+// A directory of its own for the file-row menu (e2e/file-row-menu.mjs): a folder row has
+// nothing to download, and the fixture project would otherwise hold one file and no folders.
+const nestedDir = join(project, "nested");
+mkdirSync(nestedDir, { recursive: true });
+writeFileSync(join(nestedDir, "inner.html"), "<!doctype html><html><body>nested</body></html>\n");
 mkdirSync(sessionDir, { recursive: true });
 const timestamp = "2026-08-23T00:00:00.000Z";
 const LONG = "e2e-long-session";
@@ -239,7 +245,9 @@ try {
 
   browser = await launchBrowser();
   for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
-    context = await newTestContext(browser, { viewport, locale: "en-US" });
+    // acceptDownloads for the file row's Download item (e2e/file-row-menu.mjs); nothing else
+    // in the suite downloads, so accepting is inert for every other check.
+    context = await newTestContext(browser, { viewport, locale: "en-US", acceptDownloads: true });
     await context.tracing.start({ screenshots: true, snapshots: true });
     page = await context.newPage();
     page.setDefaultTimeout(30_000);
@@ -496,6 +504,9 @@ try {
     await checkExtensionDialogs(page, artifacts, viewport.width);
     await checkExtensionDialogSizing(page, viewport.width);
     if (viewport.width > 600) {
+      // A row's actions, on the desktop leg only: at 390px the same menu is the
+      // sidebar's bottom sheet, and a phone has no right-click to open it with.
+      await checkFileRowMenu(page, previewFile, "preview.html", filePanelFixture);
       await page.goto(`${base}/?session=${RICH}`, { waitUntil: "domcontentloaded" });
       await page.locator(".markdown-code-block pre").waitFor();
       await checkChatAppearance(page);

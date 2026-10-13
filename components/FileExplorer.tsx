@@ -1,6 +1,7 @@
 "use client";
 
 import { forwardRef, useState, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { getFileIcon, FolderIcon } from "./FileIcons";
 import { DismissButton } from "./DismissButton";
 import {
@@ -47,11 +48,32 @@ interface FileNode {
   hidden?: HiddenReason;
 }
 
+/**
+ * One row of the file tree, or of the changed-files list, as the row's right-click
+ * menu receives it. `relativePath` is what a mention inserts into the chat (the
+ * same words the `@` picker types); `path` is what a download and a reveal act on.
+ */
+export interface FileRowTarget {
+  /** Absolute path on the machine Pi Web runs on. */
+  path: string;
+  /** The same path from the project root. */
+  relativePath: string;
+  name: string;
+  isDir: boolean;
+}
+
 interface Props {
   cwd: string;
   onOpenFile: (filePath: string, fileName: string, options?: OpenFileOptions) => void;
   refreshKey?: number;
-  onAtMention?: (relativePath: string, isDir: boolean) => void;
+  /**
+   * Opens a row's menu at the pointer. A row acts through this menu and through
+   * nothing else: the actions used to be two buttons drawn over the row's own
+   * name on hover, which covered the part of the row a reader aims at (see the
+   * file-row bullet in docs/agents/tests.md). Without this prop a row has no
+   * menu and keeps the browser's own one.
+   */
+  onRowMenu?: (target: FileRowTarget, position: { x: number; y: number }) => void;
   onAtMentions?: (relativePaths: string[]) => void;
   onUploadBusyChange?: (busy: boolean) => void;
   changesCollapsed: boolean;
@@ -204,7 +226,6 @@ export function TreeNode({
   depth,
   cwd,
   onOpenFile,
-  onAtMention,
   expandedPaths,
   onToggleExpanded,
   refreshToken,
@@ -219,7 +240,6 @@ export function TreeNode({
   depth: number;
   cwd: string;
   onOpenFile: (filePath: string, fileName: string, options?: OpenFileOptions) => void;
-  onAtMention?: (relativePath: string, isDir: boolean) => void;
   expandedPaths: Set<string>;
   onToggleExpanded: (fullPath: string, open: boolean) => void;
   refreshToken?: string;
@@ -337,6 +357,11 @@ export function TreeNode({
     <div>
       <div
         onClick={handleClick}
+        // What the right-click menu acts on, read at the explorer's root: every
+        // row of the tree, the search results and the changed list says the same
+        // thing about itself, so a new kind of row is not left without a menu.
+        data-file-row-path={node.fullPath}
+        data-file-row-is-dir={node.isDir ? "true" : "false"}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         style={{
@@ -423,73 +448,6 @@ export function TreeNode({
             <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" />
           </svg>
         )}
-        {onAtMention && hovered && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onAtMention(getRelativeFilePath(node.fullPath, cwd), node.isDir);
-            }}
-            title={t("files.insertPath")}
-            style={{
-              position: "absolute",
-              right: !node.isDir ? 28 : 4,
-              top: "50%",
-              transform: "translateY(-50%)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 4,
-              padding: "0 8px",
-              height: 20,
-              background: "var(--bg-panel)",
-              border: "1px solid var(--border)",
-              borderRadius: 4,
-              color: "var(--accent)",
-              cursor: "pointer",
-              fontSize: 11,
-              fontWeight: 600,
-              whiteSpace: "nowrap",
-            }}
-          >
-            <MentionIcon />
-            {t("files.mention")}
-          </button>
-        )}
-        {hovered && !node.isDir && (
-          <a
-            href={`/api/files/${encodeFilePathForApi(node.fullPath)}?type=download`}
-            download
-            onClick={(e) => e.stopPropagation()}
-            title={t("files.download")}
-            style={{
-              position: "absolute",
-              right: 4,
-              top: "50%",
-              transform: "translateY(-50%)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 4,
-              padding: "0 5px",
-              height: 20,
-              background: "var(--bg-panel)",
-              border: "1px solid var(--border)",
-              borderRadius: 4,
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontSize: 11,
-              fontWeight: 600,
-              whiteSpace: "nowrap",
-              textDecoration: "none",
-            }}
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-          </a>
-        )}
       </div>
       {node.isDir && open && pendingLinkTarget && (
         <div
@@ -545,7 +503,6 @@ export function TreeNode({
               depth={depth + 1}
               cwd={cwd}
               onOpenFile={onOpenFile}
-              onAtMention={onAtMention}
               expandedPaths={expandedPaths}
               onToggleExpanded={onToggleExpanded}
               refreshToken={refreshToken}
@@ -581,13 +538,11 @@ function ChangeRow({
   status,
   cwd,
   onOpenFile,
-  onAtMention,
   t,
 }: {
   status: GitFileStatus;
   cwd: string;
   onOpenFile: OpenFileHandler;
-  onAtMention?: (relativePath: string, isDir: boolean) => void;
   t: Translate;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -600,6 +555,8 @@ function ChangeRow({
   return (
     <div
       onClick={() => onOpenFile(status.filePath, name, { modeHint: "diff" })}
+      data-file-row-path={status.filePath}
+      data-file-row-is-dir="false"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       title={status.filePath}
@@ -658,38 +615,6 @@ function ChangeRow({
           {baseName}
         </span>
       </span>
-      {onAtMention && hovered && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onAtMention(rel, false);
-          }}
-          title={t("files.insertPath")}
-          style={{
-            position: "absolute",
-            right: 4,
-            top: "50%",
-            transform: "translateY(-50%)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 4,
-            padding: "0 8px",
-            height: 20,
-            background: "var(--bg-panel)",
-            border: "1px solid var(--border)",
-            borderRadius: 4,
-            color: "var(--accent)",
-            cursor: "pointer",
-            fontSize: 11,
-            fontWeight: 600,
-            whiteSpace: "nowrap",
-          }}
-        >
-          <MentionIcon />
-          {t("files.mention")}
-        </button>
-      )}
     </div>
   );
 }
@@ -698,7 +623,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   cwd,
   onOpenFile,
   refreshKey,
-  onAtMention,
+  onRowMenu,
   onAtMentions,
   onUploadBusyChange,
   changesCollapsed,
@@ -1009,8 +934,26 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     );
   }, [cwd, onAtMentions, uploadSummary]);
 
+  // One handler for every row, found from the event's own target: the tree, the
+  // search results and the changed list all mark themselves with the path they
+  // stand for. Right-clicking outside a row (the header keys, the upload area) is
+  // left alone, so the browser's menu still appears there.
+  const handleRowContextMenu = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!onRowMenu) return;
+    const row = (event.target as HTMLElement | null)?.closest?.("[data-file-row-path]");
+    const path = row?.getAttribute("data-file-row-path");
+    if (!row || !path) return;
+    // The browser's menu offers Copy and Save As on a name the reader was trying
+    // to act on; this row has its own actions instead.
+    event.preventDefault();
+    onRowMenu(
+      { path, relativePath: getRelativeFilePath(path, cwd), name: getFileName(path), isDir: row.getAttribute("data-file-row-is-dir") === "true" },
+      { x: event.clientX, y: event.clientY },
+    );
+  }, [cwd, onRowMenu]);
+
   return (
-    <div style={{ minHeight: "100%" }}>
+    <div style={{ minHeight: "100%" }} onContextMenu={handleRowContextMenu}>
       <input ref={uploadInputRef} type="file" multiple hidden onChange={handleUploadInput} />
       {showUploadFeedback && (
         <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
@@ -1176,7 +1119,6 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                     depth={0}
                     cwd={cwd}
                     onOpenFile={onOpenFile}
-                    onAtMention={onAtMention}
                     expandedPaths={searchExpanded}
                     onToggleExpanded={(fullPath, open) => {
                       setSearchExpanded((prev) => {
@@ -1220,7 +1162,6 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
               status={status}
               cwd={cwd}
               onOpenFile={onOpenFile}
-              onAtMention={onAtMention}
               t={t}
             />
           ))}
@@ -1241,7 +1182,6 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 depth={0}
                 cwd={cwd}
                 onOpenFile={onOpenFile}
-                onAtMention={onAtMention}
                 expandedPaths={expandedPaths}
                 onToggleExpanded={handleToggleExpanded}
                 refreshToken={refreshToken}

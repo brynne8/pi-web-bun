@@ -70,6 +70,7 @@ import {
   type SessionUiStateRequest,
 } from "@/lib/session-ui-state-shared";
 import { focusIfLost, type FocusDocument } from "@/lib/stacked-dialog";
+import { encodeFilePathForApi } from "@/lib/file-paths";
 import { useFilesPlacement } from "@/hooks/useFilesPlacement";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -79,7 +80,7 @@ import { useSessionUiState } from "@/hooks/useSessionUiState";
 import { archiveViewState, filesFoldState, useSidebarMotion } from "@/hooks/useSidebarMotion";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { DismissButton } from "./DismissButton";
-import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
+import { FileExplorer, type FileExplorerHandle, type FileRowTarget } from "./FileExplorer";
 import { PiWebTitle } from "./PiWebTitle";
 import { ProjectWorktreePicker, type ProjectWorktreePickerHandle, type WorktreeRemoval } from "./ProjectWorktreePicker";
 import { SessionSearch } from "./SessionSearch";
@@ -93,8 +94,10 @@ import {
   ChevronIcon,
   DotIcon,
   DotOutlineIcon,
+  DownloadIcon,
   EyeIcon,
   FolderIcon,
+  MentionIcon,
   MessageIcon,
   ForkIcon,
   OpenInNewTabIcon,
@@ -104,6 +107,7 @@ import {
   PlusIcon,
   RefreshIcon,
   RestoreIcon,
+  RevealIcon,
   SearchIcon,
   TerminalIcon,
   TrashIcon,
@@ -281,7 +285,9 @@ type SessionRow = Extract<SidebarRow, { kind: "session" }>;
 /** The one popup menu of the sidebar; kept here, above the virtualized rows. `askDelete`: a group menu turned into its "Delete all sessions" question. */
 type SidebarMenuState =
   | { kind: "row"; row: SessionRow; anchor: SidebarMenuAnchor; opener: HTMLElement | null }
-  | { kind: "group"; project: SidebarProject; olderCount: number; anchor: SidebarMenuAnchor; opener: HTMLElement; askDelete?: boolean };
+  | { kind: "group"; project: SidebarProject; olderCount: number; anchor: SidebarMenuAnchor; opener: HTMLElement; askDelete?: boolean }
+  /** A row of the file tree or the changed list, opened at the pointer by a right-click. */
+  | { kind: "file"; target: FileRowTarget; anchor: SidebarMenuAnchor; opener: HTMLElement | null };
 
 const UNREAD_SESSIONS_STORAGE_KEY = "pi-web:unread-session-ids";
 const LAST_CUSTOM_CWD_STORAGE_KEY = "pi-web:last-custom-cwd";
@@ -811,14 +817,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [selectedCwd, selectedCwdProp]);
 
   /** Resolves true when it failed: the message is then in the files' body. */
-  const openInFileManager = useCallback(async (): Promise<boolean> => {
-    const dir = selectedCwd ?? selectedCwdProp;
-    if (!dir) return false;
+  const askFileManager = useCallback(async (body: { cwd?: string; revealFile?: string }): Promise<boolean> => {
     try {
       const res = await fetch("/api/open-in-explorer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cwd: dir }),
+        body: JSON.stringify(body),
       });
       if (res.ok) {
         setFileManagerError(null);
@@ -830,7 +834,26 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       setFileManagerError(error instanceof Error ? error.message : String(error));
     }
     return true;
-  }, [selectedCwd, selectedCwdProp]);
+  }, []);
+
+  const openInFileManager = useCallback((): Promise<boolean> => {
+    const dir = selectedCwd ?? selectedCwdProp;
+    return dir ? askFileManager({ cwd: dir }) : Promise.resolve(false);
+  }, [askFileManager, selectedCwd, selectedCwdProp]);
+
+  /** A row's reveal: the file manager shows this file among its folder's contents. */
+  const revealFileInManager = useCallback(
+    (filePath: string): Promise<boolean> => askFileManager({ revealFile: filePath }),
+    [askFileManager],
+  );
+
+  /** A row's download: the same hand-off to the browser its hover link used to make. */
+  const downloadFile = useCallback((filePath: string) => {
+    const anchor = document.createElement("a");
+    anchor.href = `/api/files/${encodeFilePathForApi(filePath)}?type=download`;
+    anchor.download = "";
+    anchor.click();
+  }, []);
 
   const fileManagerLabel = t(
     fileManager?.platform === "darwin"
@@ -2326,6 +2349,43 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     );
   };
 
+  // What a row of the files does with itself: put its path in the chat, keep a copy
+  // of it, or see it where it lives on disk. These were two buttons drawn over the
+  // row's own name on hover, which covered the part of the row a reader aims at; a
+  // right-click is where they belong, since a row's actions are not the row. A
+  // directory has nothing to download, and the menu is the row's only action, so it
+  // is also why no ⋯ button sits in the row.
+  const fileMenuItems = (target: FileRowTarget): SidebarMenuItem[] => [
+    {
+      type: "item",
+      id: "mention",
+      label: t("files.insertPath"),
+      icon: <MentionIcon />,
+      disabled: !onAtMention,
+      onSelect: () => { onAtMention?.(target.relativePath, target.isDir); },
+    },
+    ...(target.isDir ? [] : [{
+      type: "item" as const,
+      id: "download",
+      label: t("files.download"),
+      icon: <DownloadIcon />,
+      onSelect: () => { downloadFile(target.path); },
+    }]),
+    {
+      type: "item",
+      id: "reveal",
+      label: fileManagerLabel,
+      icon: <RevealIcon />,
+      // Only the server can raise a file-manager window, and only for a browser on
+      // that machine: a phone on the LAN is told why the item does nothing.
+      disabled: fileManagerUnavailable,
+      disabledReason: fileManagerUnavailable && fileManagerErrorMessage
+        ? fileManagerErrorMessage
+        : undefined,
+      onSelect: () => { void revealFileInManager(target.path); },
+    },
+  ];
+
   let menuTitle: string | undefined;
   let menuLabel = "";
   // Room for "Archive sessions older than 7 days · N".
@@ -2344,6 +2404,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     menuItems = groupMenuItems(project, menu.olderCount);
     if (menu.askDelete) menuBody = projectDeleteBody(project);
     menuWidth = 264;
+  } else if (menu?.kind === "file") {
+    menuTitle = menu.target.name;
+    menuLabel = t("files.rowActions", { name: menu.target.name });
+    menuItems = fileMenuItems(menu.target);
   }
 
   // The tree row (and the button in it) that the open menu belongs to.
@@ -2856,7 +2920,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 cwd={explorerCwd}
                 onOpenFile={onOpenFile ?? (() => {})}
                 refreshKey={explorerKey}
-                onAtMention={onAtMention}
+                onRowMenu={(target, position) => {
+                  setMenu({
+                    kind: "file",
+                    target,
+                    anchor: { kind: "point", x: position.x, y: position.y },
+                    // No button opened this menu; focus goes back to the row's
+                    // container, the same as after a session row's right-click.
+                    opener: null,
+                  });
+                }}
                 onAtMentions={onAtMentions}
                 onUploadBusyChange={setExplorerUploadBusy}
                 changesCollapsed={changesCollapsed}

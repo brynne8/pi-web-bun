@@ -443,6 +443,7 @@ export const zhTWLocale: LocalePlugin = {
     "files.insertPath": "將路徑插入聊天",
     "files.mention": "提及",
     "files.download": "下載檔案",
+    "files.rowActions": "{name} 的操作",
     "files.outsideLink": "連結到專案外部：{target}",
     "files.outsideLinkEncloses": "此資料夾包含目前的專案或你的主目錄。",
     "files.allowOutsideLink": "允許瀏覽",

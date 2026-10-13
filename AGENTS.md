@@ -66,7 +66,7 @@ app/api/
   cwd/browse/route.ts              GET browse any readable directory for the cwd picker | POST create child directory
   default-cwd/route.ts             POST create ~/pi-cwd/YYYYMMDD (local date)
   home/route.ts                    GET user home directory
-  open-in-explorer/route.ts        GET availability | POST open a cwd in the OS file manager (loopback only)
+  open-in-explorer/route.ts        GET availability | POST open a cwd, or reveal one file, in the OS file manager (loopback only)
   files/[...path]/route.ts         GET ?type=list|read|download|meta|preview|watch | POST ?type=upload|upload-check|allow-link
   file-index/route.ts              GET file list for @-mentions
   git/status/route.ts              GET changed files for a cwd
