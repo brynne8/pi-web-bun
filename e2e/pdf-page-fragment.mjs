@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { launchBrowser, newTestContext } from "./browser.mjs";
+import { launchBrowser, newTestContext, noteBrowserError } from "./browser.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const mode = process.env.E2E_SERVER_MODE || "dev";
@@ -175,8 +175,8 @@ try {
   const page = await context.newPage();
   page.setDefaultTimeout(30_000);
   const errors = [];
-  page.on("pageerror", (error) => errors.push(error.message));
-  page.on("console", (event) => { if (event.type() === "error") errors.push(event.text()); });
+  page.on("pageerror", (error) => noteBrowserError(errors, error.message));
+  page.on("console", (event) => { if (event.type() === "error") noteBrowserError(errors, event.text()); });
 
   await page.goto(`${base}/?session=${SESSION}`, { waitUntil: "domcontentloaded" });
 

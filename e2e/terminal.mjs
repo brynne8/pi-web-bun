@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { launchBrowser, newTestContext } from "./browser.mjs";
+import { launchBrowser, newTestContext, noteBrowserError } from "./browser.mjs";
 import { showSidebarFiles, showSidebarSessions } from "./sidebar.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -64,7 +64,7 @@ try {
     page.setDefaultTimeout(30_000);
     const errors = [];
     const created = new Set();
-    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("pageerror", (error) => noteBrowserError(errors, error.message));
     page.on("request", (request) => {
       if (new URL(request.url()).pathname === "/api/terminal" && request.method() === "POST") created.add(request.postDataJSON().id);
     });

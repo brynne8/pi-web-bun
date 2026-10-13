@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { launchBrowser, newTestContext } from "./browser.mjs";
+import { launchBrowser, newTestContext, noteBrowserError } from "./browser.mjs";
 
 const base = process.env.E2E_BASE_URL || "http://127.0.0.1:30141";
 const artifacts = fileURLToPath(new URL("../test-results/themes/", import.meta.url));
@@ -29,7 +29,7 @@ try {
     const context = await newTestContext(browser, { viewport: { width, height: 900 }, locale: "en-US", colorScheme: "light", reducedMotion: "reduce" });
     const page = await context.newPage();
     const errors = [];
-    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("pageerror", (error) => noteBrowserError(errors, error.message));
     // Keep the check independent of the user's session catalogue.
     await page.route(/\/api\/sessions(?:\?.*)?$/, (route) => route.fulfill({ json: { sessions: [] } }));
     await page.goto(base);

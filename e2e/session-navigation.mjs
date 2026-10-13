@@ -4,7 +4,7 @@
 // so the tabs share localStorage (workspace memory) as real tabs do.
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { newTestContext } from "./browser.mjs";
+import { newTestContext, noteBrowserError } from "./browser.mjs";
 
 const FORBIDDEN_COMMANDS = new Set(["prompt", "steer", "follow_up", "fork", "fork_branch", "clone", "new_session"]);
 
@@ -13,8 +13,8 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
   await context.tracing.start({ screenshots: true, snapshots: true });
   const errors = [];
   const watch = (target) => {
-    target.on("pageerror", (error) => errors.push(error.message));
-    target.on("console", (event) => { if (event.type() === "error") errors.push(event.text()); });
+    target.on("pageerror", (error) => noteBrowserError(errors, error.message));
+    target.on("console", (event) => { if (event.type() === "error") noteBrowserError(errors, event.text()); });
     target.on("response", (response) => {
       if (response.url().startsWith(base) && response.status() >= 500) errors.push(`${response.status()} ${response.url()}`);
     });
@@ -224,7 +224,7 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     try {
       const missing = await freshContext.newPage();
       // Uncaught errors only: the 404 for the missing session is logged as a console error by design.
-      missing.on("pageerror", (error) => errors.push(error.message));
+      missing.on("pageerror", (error) => noteBrowserError(errors, error.message));
       await missing.goto(`${base}/?session=e2e-does-not-exist`, { waitUntil: "domcontentloaded" });
       await panel(missing).locator(".session-tree-session").first().waitFor();
       await missing.waitForTimeout(1500);

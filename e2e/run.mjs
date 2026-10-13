@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { launchBrowser, newTestContext } from "./browser.mjs";
+import { launchBrowser, newTestContext, noteBrowserError } from "./browser.mjs";
 import { checkFilePanel, filePanelFixture } from "./file-panel.mjs";
 import { checkFileRowMenu } from "./file-row-menu.mjs";
 import { checkExtensionDialogSizing, checkExtensionDialogs, extensionSource } from "./extension-dialog.mjs";
@@ -256,20 +256,10 @@ try {
     const modelDiscoveryStub = await installModelDiscoveryStub(page);
     const errors = [];
     const olderResponses = [];
-    // Errors the harness itself causes, or that a browser reports only during teardown.
-    // Narrow on purpose: a real app error must not match any of these.
-    const IGNORED_CONSOLE_ERRORS = [
-      /Service Worker is disabled because the context is sandboxed/, // browser.mjs blocks workers
-      /ResizeObserver loop completed with undelivered notifications/,
-      /^Failed to load context: TypeError: Load failed$/, // a fetch a navigation cancelled
-      // The viewport meta carries `interactive-widget=resizes-content` on purpose (app/layout.tsx:
-      // the Chromium-only virtual-keyboard key an Android reader needs). WebKit on the Linux CI
-      // image reads the meta and prints this at error level, once per parse; the macOS WebKit
-      // build reads the same tag and says nothing at any level. Nothing is broken either way, so
-      // the pattern stays pinned to this one key and this one sentence.
-      /^Viewport argument key "interactive-widget" not recognized and ignored\.$/,
-    ];
-    const noteError = (text) => { if (!IGNORED_CONSOLE_ERRORS.some((pattern) => pattern.test(text))) errors.push(text); };
+    // Errors the harness itself causes are one predicate in e2e/browser.mjs, not a list here:
+    // every module asserts its own error list, so a pattern that lives in one collector leaves
+    // the next module to fail on the same browser line (noteBrowserError's comment there).
+    const noteError = (text) => noteBrowserError(errors, text);
     page.on("pageerror", (error) => noteError(error.message));
     page.on("console", (event) => { if (event.type() === "error") noteError(event.text()); });
     page.on("response", (response) => {
