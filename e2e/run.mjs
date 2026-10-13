@@ -254,6 +254,12 @@ try {
       /Service Worker is disabled because the context is sandboxed/, // browser.mjs blocks workers
       /ResizeObserver loop completed with undelivered notifications/,
       /^Failed to load context: TypeError: Load failed$/, // a fetch a navigation cancelled
+      // The viewport meta carries `interactive-widget=resizes-content` on purpose (app/layout.tsx:
+      // the Chromium-only virtual-keyboard key an Android reader needs). WebKit on the Linux CI
+      // image reads the meta and prints this at error level, once per parse; the macOS WebKit
+      // build reads the same tag and says nothing at any level. Nothing is broken either way, so
+      // the pattern stays pinned to this one key and this one sentence.
+      /^Viewport argument key "interactive-widget" not recognized and ignored\.$/,
     ];
     const noteError = (text) => { if (!IGNORED_CONSOLE_ERRORS.some((pattern) => pattern.test(text))) errors.push(text); };
     page.on("pageerror", (error) => noteError(error.message));
