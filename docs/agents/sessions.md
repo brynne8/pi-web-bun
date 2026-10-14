@@ -217,6 +217,13 @@ New sessions and the files tab ("the files tab" here is the files section below 
 
 Files: `lib/markdown.ts` (`normalizeDisplayMath`, `remarkNotMathPairs`, the plugin lists), `lib/markdown-prose-math.ts`, `components/MarkdownBody.test.mjs`, `lib/markdown-prose-math.test.mjs`.
 
+## Hand-written anchors in rendered Markdown land (`lib/markdown.ts`, `rehypeMatchClobberedIds`)
+- The sanitizer's `defaultSchema` clobbers ids: every `id` in content gains the `user-content-` prefix, so untrusted content cannot shadow the page's own elements. GitHub does this on both sides — cmark-gfm also rewrites same-document `href="#x"` to `#user-content-x` — so a hand-written pair (`<a id="s2"></a>` and `[S2](#s2)`, the shape of a hand-built table of contents) still lands after rendering. Upstream copied only the id half, which broke every in-document anchor pair: the element gained the prefix and the link pointing at it did not.
+- `rehypeMatchClobberedIds` runs after sanitizing and prefixes fragment links exactly as unconditionally as sanitizing prefixes ids, so an id and an href that matched before sanitizing still match afterwards. Footnotes need it for the same reason: `mdast-util-to-hast` generates both their sides already prefixed and sanitizing prefixes the id once more, so an href left as generated would strand the link behind the doubled prefix. A bare `#` has no fragment to pair and stays as written; a link from content to one of the page's own ids stays unreachable — that is the clobber protection doing its job, not this rule.
+- Registered in both rehype lists, so chat answers and the file preview read the same rule. `lib/markdown-anchors.test.mjs` pins the hand-written pair, the footnote links, a raw-HTML anchor's fragment, and the untouched external fragment and bare `#`.
+
+Files: `lib/markdown.ts` (`markdownClobberPrefix`, `rehypeMatchClobberedIds`, the plugin lists), `lib/markdown-anchors.test.mjs`.
+
 ## Exported session HTML
 - `/api/sessions/[id]/export` delegates to pi's export helper, then makes the generated HTML's recursive tree helpers iterative, so very deep linear sessions do not overflow the browser call stack.
 

@@ -128,6 +128,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **文件行自己的右键菜单。** 在项目文件树里右键某一行——在 Git 改动清单里右键也一样——这一行会给出三个操作：把路径插入聊天、下载这个文件、在访达 / 文件资源管理器 / 文件管理器里看到它，而且是选中这个文件本身，不只是打开它所在的目录。悬停时不会再有任何东西画在这一行上面，所以你点名字点到的仍然是文件。原版的处理是把前两项做成悬停时浮在文件名上的按钮；它通往文件管理器的入口只打开工作区所在目录，没有按文件的入口（[#907](https://github.com/agegr/pi-web/pull/907)）。（[说明](./docs/agents/files-and-access.md#a-rows-own-actions)）
 
+**渲染文档里的页内跳转能落地。** 一份自己带导航的 Markdown——手写目录配锚点链接，或者脚注——里的目标会被清洗器改名：内容中每个 `id` 都被加上 GitHub 那套 `user-content-` 前缀（防不可信内容冒充页面自身元素），而指向它们的链接却原样留着，于是每一个页内跳转、每一条脚注都落在空处。这个分支给链接加前缀的规则与清洗器给 id 加前缀完全一致——GitHub 两边就是配套改的——`<a id="s2">` 和 `[S2](#s2)` 渲染后仍然对得上。指向应用自身元素的链接依旧够不着，那是防护在起作用，不算毛病。原版只有这条规则的一半，只改 id（[hast-util-sanitize](https://github.com/syntax-tree/hast-util-sanitize)）。（[说明](./docs/agents/sessions.md#hand-written-anchors-in-rendered-markdown-land-libmarkdownts-rehypematchclobberedids)）
+
 ### 不算 fork 差异的部分
 
 下面这些来自上游，本仓库有它们只是因为上游写了它们：让「停止」不落在「压缩」接手的格子里、以免误双击（`0a38de9`，[#1131](https://github.com/agegr/pi-web/pull/1131)）；从标题折叠自定义消息（`574cbba`，[#1133](https://github.com/agegr/pi-web/pull/1133)）；已删除的子代理 worktree 改从它分叉出来的仓库回答（`f9a370e`，[#1137](https://github.com/agegr/pi-web/pull/1137)）；由 profile 决定子代理的启动参数（`fb6df88`，[#1138](https://github.com/agegr/pi-web/pull/1138)）；以及文件预览里的 CSV/TSV 表格（`f87afbb`，[#1150](https://github.com/agegr/pi-web/pull/1150)）。本 README 的早期版本把这些算成了 fork 的工作，现在不再这样写。
