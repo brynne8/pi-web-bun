@@ -14,6 +14,10 @@ const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 // The size limit is the file viewer's own: a test with its own number would drift
 // from the one the component reads.
 const { SOURCE_HIGHLIGHT_MAX_LINES } = await jiti.import("./FileViewer.tsx");
+const {
+  clearReadSnapshotViewChoices,
+  saveReadSnapshotViewChoice,
+} = await jiti.import("@/lib/read-snapshot-view-state");
 
 const viewer = await readFile(new URL("./ReadSnapshotViewer.tsx", import.meta.url), "utf8");
 const appShell = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
@@ -34,7 +38,9 @@ test("markdown renders as markdown, and never as a numbered source view", () => 
 });
 
 test("source keeps the file's line numbers, continuing from the read's offset", () => {
-  const numbers = (html) => [...html.matchAll(/line-number[^>]*>([^<]*)</g)].map((match) => match[1]);
+  // The gutter's own span, not the row's data-line-number attribute: what a reader
+  // sees in the gutter is what the test asks about.
+  const numbers = (html) => [...html.matchAll(/react-syntax-highlighter-line-number[^>]*>([^<]*)</g)].map((match) => match[1]);
   assert.deepEqual(numbers(render({ filePath: "/tmp/a.ts", content: "const a = 1;\nconst b = 2;" })), ["1", "2"]);
   assert.deepEqual(numbers(render({ filePath: "/tmp/a.ts", content: "const a = 1;\nconst b = 2;", offset: 40 })), ["40", "41"]);
 });
@@ -87,12 +93,69 @@ test("a slice with no record in it falls back to source instead of an empty tabl
   assert.match(html, /line-number[^>]*>12</);
 });
 
+test("a markdown slice offers Source, and its source is wrapped until told otherwise", () => {
+  const preview = render({ filePath: "/tmp/notes.md", content: "# Title\n\nsome **text**\n" });
+  // The switch is there, and Preview is the one pressed: the rendered view is still
+  // what a read of a markdown file opens to.
+  assert.match(preview, /aria-label="File view mode"/);
+  assert.match(preview, /aria-pressed="true"[^>]*>Preview</);
+  assert.match(preview, /aria-pressed="false"[^>]*>Source</);
+  // A rendered preview has no lines to wrap, so no wrap key beside it.
+  assert.doesNotMatch(preview, /aria-label="Disable word wrap"|aria-label="Enable word wrap"/);
+
+  const toolCallId = "call-md-source";
+  clearReadSnapshotViewChoices();
+  // The mode is the panel's own state, not a prop: seeding it the way a click
+  // would is the only honest way in.
+  saveReadSnapshotViewChoice(toolCallId, { displayMode: "source" });
+  const source = render({ filePath: "/tmp/notes.md", content: "# Title\n\nsome **text**\n", toolCallId });
+  assert.doesNotMatch(source, /<h1>Title<\/h1>/);
+  assert.match(source, /react-syntax-highlighter-line-number/);
+  // Prose opens wrapped: the box is the panel's width, not the longest line's.
+  assert.match(source, /class="file-source-view is-wrapped"/);
+  assert.match(source, /width:100%/);
+  assert.match(source, /white-space:pre-wrap/);
+  assert.match(source, /aria-pressed="true"[^>]*aria-label="Disable word wrap"|aria-label="Disable word wrap"/);
+});
+
+test("a source slice wraps by its kind: .txt yes, .log and code no", () => {
+  const wrapped = (html) => /class="file-source-view is-wrapped"/.test(html);
+  assert.ok(wrapped(render({ filePath: "/tmp/notes.txt", content: "a long line\n" })));
+  assert.ok(!wrapped(render({ filePath: "/tmp/app.log", content: "INFO  line\n" })));
+  assert.ok(!wrapped(render({ filePath: "/tmp/a.ts", content: "const a = 1;\n" })));
+  // A markdown slice opens rendered, so the kind rule shows up only in its source
+  // view — the test above pins that one.
+});
+
+test("the panel keeps its own Source and wrap choices per read card", () => {
+  const toolCallId = "call-kept-choice";
+  clearReadSnapshotViewChoices();
+  saveReadSnapshotViewChoice(toolCallId, { displayMode: "preview", wrapLines: false });
+  // A markdown slice kept as Preview by an earlier visit comes back as Preview, and
+  // its source honours the wrap choice that was made, against the kind's default.
+  const back = render({ filePath: "/tmp/notes.md", content: "# Title\n", toolCallId });
+  assert.match(back, /aria-pressed="true"[^>]*>Preview</);
+  saveReadSnapshotViewChoice(toolCallId, { displayMode: "source", wrapLines: false });
+  const source = render({ filePath: "/tmp/notes.md", content: "# Title\n", toolCallId });
+  assert.doesNotMatch(source, /class="file-source-view is-wrapped"/);
+  assert.match(source, /aria-pressed="false"[^>]*aria-label="Enable word wrap"|aria-label="Enable word wrap"/);
+  clearReadSnapshotViewChoices();
+
+  // The panel unmounts when another tab comes forward, so the choices live outside
+  // it (lib/read-snapshot-view-state.ts), keyed by the card that opened it.
+  assert.match(viewer, /readSnapshotViewChoice\(toolCallId\)/);
+  assert.match(viewer, /saveReadSnapshotViewChoice\(toolCallId,/);
+  assert.match(appShell, /<ReadSnapshotViewer[\s\S]*?toolCallId=\{activeReadTab\.toolCallId\}/);
+  // The file line each row is stays the file's own even in the highlighted rows.
+  assert.match(viewer, /<SourceCodeRenderer \{\.\.\.rendererProps\} wrapLines=\{wrapLines\} firstLine=\{firstLine\} \/>/);
+});
+
 test("the viewer holds the snapshot: it fetches nothing and never opens the live file", () => {
   assert.doesNotMatch(viewer, /fetch\(|XMLHttpRequest|\/api\/|EventSource|useSWR/);
-  assert.doesNotMatch(viewer, /<FileViewer/);
-  // Importing the source styling is all it takes from the file viewer, and the
-  // snapshot's own content is what renders.
-  assert.match(viewer, /import \{ FILE_CODE_STYLE, FILE_LINE_NUMBER_STYLE, SOURCE_HIGHLIGHT_MAX_LINES, fileViewerDarkTheme \} from "\.\/FileViewer"/);
+  assert.doesNotMatch(viewer, /<FileViewer[\s/]/);
+  // The shared controls and the shared source renderer on top of the styling: the
+  // snapshot's own content is what renders, in the file viewer's own gutter.
+  assert.match(viewer, /import \{\s*DisplayModeSwitch,[\s\S]*?SourceCodeRenderer,[\s\S]*?fileViewerDarkTheme,\s*\} from "\.\/FileViewer"/);
   assert.match(viewer, /startingLineNumber=\{firstLine\}/);
 });
 

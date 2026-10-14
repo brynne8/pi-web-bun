@@ -31,6 +31,7 @@ import type { GitFileDiffResponse } from "@/lib/git-types";
 import { useI18n } from "@/hooks/useI18n";
 import {
   resolveInitialFileDisplayMode,
+  resolveInitialWrapLines,
   type FileViewerDisplayMode as DisplayMode,
   type FileViewerState,
 } from "@/lib/file-viewer-state";
@@ -74,6 +75,73 @@ const DISPLAY_MODE_LABELS: Record<DisplayMode, string> = {
   preview: "Preview",
   diff: "Diff",
 };
+
+/**
+ * The header's Source / Preview / Diff switch, shared with
+ * `components/ReadSnapshotViewer.tsx`: the read-snapshot panel needs the same
+ * control to reach a Markdown slice's source, and a copy of it would drift the
+ * day either one changes size.
+ */
+export function DisplayModeSwitch({ modes, active, onSelect }: {
+  modes: DisplayMode[];
+  active: DisplayMode;
+  onSelect: (mode: DisplayMode) => void;
+}) {
+  const { t } = useI18n();
+  if (modes.length < 2) return null;
+  return (
+    <div className="file-viewer-mode-switch" aria-label={t("i18n.fileViewMode")}>
+      {modes.map((mode) => {
+        const isActive = active === mode;
+        return (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => onSelect(mode)}
+            title={mode === "diff" ? t("i18n.compareHead") : undefined}
+            aria-pressed={isActive}
+            className="file-viewer-mode-button"
+            style={{
+              background: isActive ? "var(--bg-selected)" : "transparent",
+              color: isActive ? "var(--text)" : "var(--text-muted)",
+            }}
+          >
+            {DISPLAY_MODE_LABELS[mode]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The wrap key. Same reason for sharing it as for the switch above. */
+export function WrapToggleButton({ wrapLines, onToggle }: {
+  wrapLines: boolean;
+  onToggle: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title={wrapLines ? t("i18n.disableWrap") : t("i18n.enableWrap")}
+      aria-label={wrapLines ? t("i18n.disableWrap") : t("i18n.enableWrap")}
+      aria-pressed={wrapLines}
+      className="file-viewer-icon-button"
+      style={{
+        background: wrapLines ? "var(--bg-selected)" : "transparent",
+        color: wrapLines ? "var(--text)" : "var(--text-muted)",
+      }}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M3 6h18" />
+        <path d="M3 12h15a3 3 0 1 1 0 6h-4" />
+        <path d="m16 16-2 2 2 2" />
+        <path d="M3 18h7" />
+      </svg>
+    </button>
+  );
+}
 
 // The source view's font and gutter, shared with components/ReadSnapshotViewer
 // so a read's slice and the live file read identically.
@@ -126,6 +194,8 @@ export const FILE_LINE_NUMBER_STYLE: CSSProperties = {
 
 type SourceCodeRendererProps = Parameters<NonNullable<SyntaxHighlighterProps["renderer"]>>[0] & {
   wrapLines: boolean;
+  /** The file line the first rendered row is, for a slice read from mid-file. */
+  firstLine?: number;
 };
 
 interface SelectedLineRange {
@@ -200,7 +270,7 @@ function getSelectedSourceLineRange(root: HTMLElement, selection: Selection | nu
   return { startLine, endLine };
 }
 
-function SourceCodeRenderer({ rows, stylesheet, useInlineStyles, wrapLines }: SourceCodeRendererProps) {
+export function SourceCodeRenderer({ rows, stylesheet, useInlineStyles, wrapLines, firstLine = 1 }: SourceCodeRendererProps) {
   return rows.map((row, lineIndex) => {
     const children = row.children ?? [];
     const firstChildClasses = children[0]?.properties?.className;
@@ -212,7 +282,7 @@ function SourceCodeRenderer({ rows, stylesheet, useInlineStyles, wrapLines }: So
     return (
       <span
         className="file-source-line"
-        data-line-number={lineIndex + 1}
+        data-line-number={firstLine + lineIndex}
         key={`source-line-${lineIndex}`}
         style={{ display: "flex", minWidth: "100%" }}
       >
@@ -326,7 +396,7 @@ function diffLines(patch: string): DiffLine[] {
   }));
 }
 
-function DiffView({ patch }: { patch: string }) {
+function DiffView({ patch, wrapLines }: { patch: string; wrapLines: boolean }) {
   const { t } = useI18n();
   const diff = diffLines(patch);
 
@@ -373,7 +443,7 @@ function DiffView({ patch }: { patch: string }) {
     <div
       className="file-diff-view"
       style={{
-        width: "max-content",
+        width: wrapLines ? "100%" : "max-content",
         minWidth: "100%",
         ...FILE_CODE_STYLE,
       }}
@@ -444,9 +514,11 @@ function DiffView({ patch }: { patch: string }) {
               <span
                 className="file-diff-line-content"
                 style={{
-                  flexShrink: 0,
+                  flexShrink: wrapLines ? 1 : 0,
+                  minWidth: 0,
                   padding: "0 8px 0 0",
-                  whiteSpace: "pre",
+                  whiteSpace: wrapLines ? "pre-wrap" : "pre",
+                  overflowWrap: wrapLines ? "anywhere" : "normal",
                   color: "var(--text)",
                 }}
               >
@@ -1180,7 +1252,7 @@ function TextFileViewer({
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestedInitialDisplayMode = resolveInitialFileDisplayMode(initialState, initialDisplayMode);
-  const initialWrapLines = initialState?.wrapLines ?? false;
+  const initialWrapLines = resolveInitialWrapLines(initialState, filePath);
   const initialScrollTop = initialState?.scrollTop ?? 0;
   const initialScrollLeft = initialState?.scrollLeft ?? 0;
   const [displayMode, setDisplayMode] = useState<DisplayMode>(requestedInitialDisplayMode);
@@ -1659,29 +1731,11 @@ function TextFileViewer({
         )}
 
         <div className="file-viewer-controls">
-          {displayModes.length > 1 && (
-            <div className="file-viewer-mode-switch" aria-label={t("i18n.fileViewMode")}>
-              {displayModes.map((mode) => {
-                const active = effectiveDisplayMode === mode;
-                return (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => updateDisplayMode(mode)}
-                    title={mode === "diff" ? t("i18n.compareHead") : undefined}
-                    aria-pressed={active}
-                    className="file-viewer-mode-button"
-                    style={{
-                      background: active ? "var(--bg-selected)" : "transparent",
-                      color: active ? "var(--text)" : "var(--text-muted)",
-                    }}
-                  >
-                    {DISPLAY_MODE_LABELS[mode]}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <DisplayModeSwitch
+            modes={displayModes}
+            active={effectiveDisplayMode}
+            onSelect={updateDisplayMode}
+          />
 
           <div className="file-viewer-actions">
             {(onAtMention || onMentionLines) && (
@@ -1710,28 +1764,8 @@ function TextFileViewer({
                 <MentionIcon />
               </button>
             )}
-            {effectiveDisplayMode === "source" && (
-              <>
-                <button
-                  type="button"
-                  onClick={toggleWrapLines}
-                  title={wrapLines ? t("i18n.disableWrap") : t("i18n.enableWrap")}
-                  aria-label={wrapLines ? t("i18n.disableWrap") : t("i18n.enableWrap")}
-                  aria-pressed={wrapLines}
-                  className="file-viewer-icon-button"
-                  style={{
-                    background: wrapLines ? "var(--bg-selected)" : "transparent",
-                    color: wrapLines ? "var(--text)" : "var(--text-muted)",
-                  }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M3 6h18" />
-                    <path d="M3 12h15a3 3 0 1 1 0 6h-4" />
-                    <path d="m16 16-2 2 2 2" />
-                    <path d="M3 18h7" />
-                  </svg>
-                </button>
-              </>
+            {(effectiveDisplayMode === "source" || effectiveDisplayMode === "diff") && (
+              <WrapToggleButton wrapLines={wrapLines} onToggle={toggleWrapLines} />
             )}
           </div>
 
@@ -1780,7 +1814,7 @@ function TextFileViewer({
         style={{ flex: 1, overflow: "auto", background: "var(--bg)", paddingBottom: showLoadMore ? 48 : undefined }}
       >
         {effectiveDisplayMode === "diff" && hasGitDiff ? (
-          <DiffView patch={gitDiff.patch!} />
+          <DiffView patch={gitDiff.patch!} wrapLines={wrapLines} />
         ) : isHtml && effectiveDisplayMode === "preview" && data?.truncated && !htmlFull?.text ? (
           <div style={{ padding: 24, color: "var(--text-dim)", fontSize: 12 }}>
             {htmlFull?.error ?? t("i18n.loading")}

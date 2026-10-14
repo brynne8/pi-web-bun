@@ -110,9 +110,11 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **一眼能读懂的 shell 命令。** bash 工具卡片里的命令按 shell 语法高亮，不再是一整条灰字；展开后显示命令本身和它的超时，而不是原始 JSON——于是 `grep -rl "foo" src | xargs rm` 看起来就是一条管道。在后台跑的命令另有 `(background)` 标记。原版选择让工具卡片保持不带样式（[#1135](https://github.com/agegr/pi-web/pull/1135)）。（[说明](./docs/agents/sessions.md#tool-execution-events-on-the-sse-stream)）
 
-**在对话旁边读文件的那一段。** 点开一张已完成的 `read` 卡片，右侧面板就打开这次调用真正返回的那一段：Markdown 按 Markdown 渲染，源码行号从这次读取起始的那一行接着数，CSV 和 TSV 直接成表格、用的还是文件真实行号。面板显示的是模型拿到的内容，不是文件此刻的样子——不重新请求、也不重新读盘，所以面板和记录可以互相对账。卡片保留自己的输出。原版把 read 的输出留在卡片里，并把那张分隔符表格用在文件预览中（[#1136](https://github.com/agegr/pi-web/pull/1136)、[#1150](https://github.com/agegr/pi-web/pull/1150)）。（[说明](./docs/agents/sessions.md#a-read-card-opens-its-slice-in-the-right-panel-toolcallblock-componentsreadsnapshotviewertsx)）
+**在对话旁边读文件的那一段。** 点开一张已完成的 `read` 卡片，右侧面板就打开这次调用真正返回的那一段：Markdown 按 Markdown 渲染、一键就能切回它的源码，源码行号从这次读取起始的那一行接着数，CSV 和 TSV 直接成表格、用的还是文件真实行号。面板显示的是模型拿到的内容，不是文件此刻的样子——不重新请求、也不重新读盘，所以面板和记录可以互相对账。卡片保留自己的输出。原版把 read 的输出留在卡片里，并把那张分隔符表格用在文件预览中（[#1136](https://github.com/agegr/pi-web/pull/1136)、[#1150](https://github.com/agegr/pi-web/pull/1150)）。（[说明](./docs/agents/sessions.md#a-read-card-opens-its-slice-in-the-right-panel-toolcallblock-componentsreadsnapshotviewertsx)）
 
 **再长的源码行也不会把行号带走。** 在右侧面板里把一行宽代码横向挪动时，行号那一栏钉在原地，不再跟着文字一起滑出去、让你重新找自己刚才停在哪一行。代码字号比原版小一号，源码视图、Diff 视图和读取快照面板一起跟着这一套字号走。原版是行号和文字一起滚走。
+
+**散文默认折行，代码不折。** Markdown 和纯文本文件的源码视图和 Diff 视图打开时就按面板宽度折行，长句子能一口气读到底，不必拖动横向滚动条去找后半句。源代码则默认不折行，一行一行铺开、横向滚动——和编辑器一致，因为读代码靠的是缩进和列对齐，日志也按这条走。折行按钮仍然可以随手翻转任意一种文件，这个选择会在标签页里保留。原版所有文件都默认不折行。（[说明](./docs/agents/files-and-access.md#which-lines-wrap)）
 
 **运行时按钮不挪位。** 「停止」放在输入框里，与「引导」和「后续消息」并排，输入框下方那一排在运行中和结束后只有一套摆法——你正要点的东西不会在这次运行结束的一瞬变成别的东西。上下文真的装满时，「压缩」那颗按钮就是「停止压缩」，所以你需要的操作就在手底下。原版的处理是挡住一次运行刚结束时的误点（[#1131](https://github.com/agegr/pi-web/pull/1131)）；本分支把这道守卫留着，而在桌面上，它所要防的那种按钮替换已经不存在了。（[说明](./docs/agents/sessions.md#composer-action-row-nothing-moves-under-the-pointer-at-a-run-boundary)）
 

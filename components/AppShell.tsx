@@ -2800,6 +2800,7 @@ export function AppShell() {
           {activeReadTab && (
             <ReadSnapshotViewer
               key={activeReadTab.toolCallId}
+              toolCallId={activeReadTab.toolCallId}
               filePath={activeReadTab.snapshot.filePath}
               content={activeReadTab.snapshot.content}
               offset={activeReadTab.snapshot.offset}

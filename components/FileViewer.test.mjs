@@ -48,6 +48,34 @@ test("lightweight source rows are skipped for highlighted, diff, and preview vie
   assert.equal(render(large, "source", false, false, true)[0].props.children[1].props.style.whiteSpace, "pre-wrap");
 });
 
+test("the diff view wraps when the viewer wraps", () => {
+  const diffView = source.slice(source.indexOf("function DiffView"), source.indexOf("function ImageViewer"));
+  assert.notEqual(source.indexOf("function DiffView"), -1);
+
+  // Wrapped: the box stops being the widest line's width and the row's text column
+  // gives way instead of pushing a horizontal scrollbar.
+  assert.match(diffView, /width: wrapLines \? "100%" : "max-content"/);
+  assert.match(diffView, /whiteSpace: wrapLines \? "pre-wrap" : "pre"/);
+  assert.match(diffView, /overflowWrap: wrapLines \? "anywhere" : "normal"/);
+  assert.match(diffView, /flexShrink: wrapLines \? 1 : 0/);
+  // Unwrapped stays exactly as before: one line per row, sideways scroll.
+  assert.match(diffView, /padding: "0 6px",[\s\S]{0,160}flexShrink: 0/);
+  assert.match(source, /<DiffView patch=\{gitDiff\.patch!\} wrapLines=\{wrapLines\} \/>/);
+
+  // The wrap control is offered for the diff as well as the source, never for a
+  // rendered preview (markdown, HTML, table), where there are no lines to wrap.
+  assert.match(
+    source,
+    /\{\(effectiveDisplayMode === "source" \|\| effectiveDisplayMode === "diff"\) && \(\s*<WrapToggleButton wrapLines=\{wrapLines\} onToggle=\{toggleWrapLines\} \/>/,
+  );
+  // Both header controls are the shared components, so this panel and the read
+  // snapshot's cannot drift into two different buttons.
+  assert.match(source, /<DisplayModeSwitch\n\s*modes=\{displayModes\}/);
+  assert.match(source, /export function DisplayModeSwitch/);
+  assert.match(source, /export function WrapToggleButton/);
+  assert.match(source, /export function SourceCodeRenderer/);
+});
+
 test("the source gutter stays pinned and shares the code line's height", () => {
   const codeBlock = source.slice(source.indexOf("export const FILE_CODE_STYLE"), source.indexOf("export const fileViewerDarkTheme"));
   const gutterBlock = source.slice(source.indexOf("export const FILE_LINE_NUMBER_STYLE"), source.indexOf("type SourceCodeRendererProps"));
