@@ -148,6 +148,55 @@ test("what stays is re-pointed at its nearest ancestor left, or loses a parent n
   assert.equal(subRest.length, 2, "the rest of the file is kept");
 });
 
+test("a delete that empties a folder removes the folder; a folder a file stayed in is kept", async (t) => {
+  const { dir, sessionsDir, ids } = await scratchAgentDir(t);
+  const cwd = "/work/alpha";
+  const keep = await writeSession(sessionsDir, "keep", { id: "keep-1", cwd });
+  const gone = await writeSession(sessionsDir, "gone", { id: "del-gone", cwd });
+  // A second project whose every session goes, a subagent with its root:
+  // the folder itself goes with them.
+  const betaDir = join(dir, "sessions", "--work-beta--");
+  await mkdir(betaDir, { recursive: true });
+  const b1 = await writeSession(betaDir, "b1", { id: "del-b1", cwd: "/work/beta" });
+  const b2 = await writeSession(betaDir, "b2", { id: "del-b2", cwd: "/work/beta", parentSession: b1, subagentOf: { id: "del-b1", path: b1 } });
+  ids.push("keep-1", "del-gone", "del-b1", "del-b2");
+
+  const result = await (await post({ ids: ["del-gone", "del-b1"] })).json();
+
+  assert.deepEqual(result.deleted.toSorted(), ["del-b1", "del-b2", "del-gone"]);
+  for (const path of [gone, b1, b2]) assert.equal(existsSync(path), false, path);
+  assert.equal(existsSync(betaDir), false, "the folder the delete emptied is gone");
+  assert.equal(existsSync(sessionsDir), true, "the folder that kept a session stays");
+  assert.equal(existsSync(keep), true);
+});
+
+test("a folder that gains a session while the delete runs is kept", async (t) => {
+  const { sessionsDir, ids } = await scratchAgentDir(t);
+  const cwd = "/work/alpha";
+  const a = await writeSession(sessionsDir, "a", { id: "del-a", cwd });
+  const b = await writeSession(sessionsDir, "b", { id: "del-b", cwd });
+  ids.push("del-a", "del-b");
+  // An idle wrapper whose shutdown writes a fresh session into the folder:
+  // the concurrent-create case. The delete unlinks only its own files, and
+  // the now non-empty folder must stay with the file that arrived.
+  globalThis.__piSessions.set("del-b", {
+    sessionId: "del-b",
+    isRunning: () => false,
+    isAwaitingInput: () => false,
+    shutdown: async () => {
+      globalThis.__piSessions.delete("del-b");
+      await writeSession(sessionsDir, "late", { id: "late-x", cwd });
+    },
+  });
+
+  const result = await (await post({ ids: ["del-a", "del-b"] })).json();
+
+  assert.deepEqual(result.deleted.toSorted(), ["del-a", "del-b"]);
+  for (const path of [a, b]) assert.equal(existsSync(path), false, path);
+  assert.equal(existsSync(sessionsDir), true, "a session won the folder during the delete");
+  assert.equal(existsSync(join(sessionsDir, "late.jsonl")), true);
+});
+
 test("a delete request must be a trusted JSON list of session ids, at most one part", async (t) => {
   await scratchAgentDir(t);
   assert.equal(MAX_SESSION_DELETE_IDS, PROJECT_DELETE_IDS_PER_REQUEST, "the sidebar's parts fit the route");

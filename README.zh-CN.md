@@ -132,6 +132,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **渲染文档里的页内跳转能落地。** 一份自己带导航的 Markdown——手写目录配锚点链接，或者脚注——里的目标会被清洗器改名：内容中每个 `id` 都被加上 GitHub 那套 `user-content-` 前缀（防不可信内容冒充页面自身元素），而指向它们的链接却原样留着，于是每一个页内跳转、每一条脚注都落在空处。这个分支给链接加前缀的规则与清洗器给 id 加前缀完全一致——GitHub 两边就是配套改的——`<a id="s2">` 和 `[S2](#s2)` 渲染后仍然对得上。指向应用自身元素的链接依旧够不着，那是防护在起作用，不算毛病。原版只有这条规则的一半，只改 id（[hast-util-sanitize](https://github.com/syntax-tree/hast-util-sanitize)）。（[说明](./docs/agents/sessions.md#hand-written-anchors-in-rendered-markdown-land-libmarkdownts-rehypematchclobberedids)）
 
+**删除会带走会话在别处留下的东西。** 隔离运行的 subagent 在自己的 git worktree 里工作，它的会话文件因此记在那个 worktree 路径下，自成目录。删除父会话时会通读整个 sessions 根目录去找这样的子会话，连它一起删，并把留下来的重新挂到最近一个仍然存在的祖先。被删空的东西也跟着走：它清空的目录，还有你在应用外删掉某个项目目录之后侧栏仍替它保有的位置和名称。原版寻找子会话、也寻找该改挂谁，只看被删文件所在的那些目录。（[说明](./docs/agents/sessions.md#session-sidebar-project-groups-pins-and-archive)）
+
 ### 不算 fork 差异的部分
 
 下面这些来自上游，本仓库有它们只是因为上游写了它们：让「停止」不落在「压缩」接手的格子里、以免误双击（`0a38de9`，[#1131](https://github.com/agegr/pi-web/pull/1131)）；从标题折叠自定义消息（`574cbba`，[#1133](https://github.com/agegr/pi-web/pull/1133)）；已删除的子代理 worktree 改从它分叉出来的仓库回答（`f9a370e`，[#1137](https://github.com/agegr/pi-web/pull/1137)）；由 profile 决定子代理的启动参数（`fb6df88`，[#1138](https://github.com/agegr/pi-web/pull/1138)）；以及文件预览里的 CSV/TSV 表格（`f87afbb`，[#1150](https://github.com/agegr/pi-web/pull/1150)）。本 README 的早期版本把这些算成了 fork 的工作，现在不再这样写。
