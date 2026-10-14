@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { promisify } from "util";
 import { getGitStatus, isWithinPath, toGitPath } from "./git-changes";
+import { resolveExistingPath } from "./paths";
 import { isGitPathRevertible, type GitRevertRefusal } from "./git-revert-rule";
 
 /**
@@ -58,23 +59,10 @@ function literalPathspec(gitPath: string): string {
 }
 
 /**
- * One path with every symlink in it that exists resolved, so a repository reached
- * through a link (`/tmp` on macOS is one) still names the file Git names. The
- * nearest existing entry is resolved because a deleted file has nothing of its own.
+ * One path with every symlink in it that exists resolved (lib/paths.ts), kept here
+ * under the name this module's checks read.
  */
-function resolveExisting(target: string): string {
-  const absolute = path.resolve(target);
-  let candidate = absolute;
-  for (;;) {
-    try {
-      return path.join(fs.realpathSync(candidate), path.relative(candidate, absolute));
-    } catch {
-      const parent = path.dirname(candidate);
-      if (parent === candidate) return absolute;
-      candidate = parent;
-    }
-  }
-}
+const resolveExisting = resolveExistingPath;
 
 function samePath(a: string, b: string): boolean {
   return resolveExisting(a) === resolveExisting(b);
@@ -108,10 +96,12 @@ export async function revertGitPath(cwd: string, filePath: string): Promise<GitR
     return refuse("not_git", "Not a Git repository");
   }
   const target = path.resolve(filePath);
-  // Both the plain path and the resolved one must stay inside the repository: a
-  // link inside a working tree can otherwise lead the checkout outside it.
-  if (!isWithinPath(repositoryRoot, target)
-    || !isWithinPath(resolveExisting(repositoryRoot), resolveExisting(target))) {
+  const resolvedRoot = resolveExisting(repositoryRoot);
+  const resolvedTarget = resolveExisting(target);
+  // The repository's real name and the target are what must lie one inside the other:
+  // the caller may have reached the repository through a link, and a link inside a
+  // working tree can otherwise lead the checkout outside it.
+  if (!isWithinPath(resolvedRoot, resolvedTarget)) {
     return refuse("outside_repository", `${filePath} is outside ${repositoryRoot}`);
   }
 
@@ -125,7 +115,9 @@ export async function revertGitPath(cwd: string, filePath: string): Promise<GitR
     return refuse("not_revertible", `${entry.filePath} is not a file`);
   }
 
-  const relativePath = toGitPath(path.relative(repositoryRoot, entry.filePath));
+  // The status lists its paths with the caller's own prefix (lib/git-changes.ts), so the
+  // path Git is given comes from the resolved pair, not from that prefix.
+  const relativePath = toGitPath(path.relative(resolvedRoot, resolvedTarget));
   if (!relativePath || relativePath === ".git" || relativePath.startsWith(".git/")) {
     return refuse("outside_repository", `${filePath} is inside the Git directory`);
   }

@@ -13,6 +13,7 @@ import {
   parseGitPorcelainV1,
   type GitPorcelainEntry,
 } from "./git-status";
+import { resolveExistingPath } from "./paths";
 
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 10_000;
@@ -113,11 +114,20 @@ export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
 
   const [entries, trackedLineStats] = await Promise.all([
     readStatusEntries(repositoryRoot),
-    readTrackedLineStats(repositoryRoot, cwd),
+    readTrackedLineStats(repositoryRoot, resolveExistingPath(cwd)),
   ]);
+  // Git names the repository by its real path, while the caller asked about a cwd that
+  // may reach it through a link (`/tmp` and `/var/folders/…` are links on macOS). Every
+  // path reported here is therefore rebased onto the cwd as given: the file tree lists
+  // what it was given, and a row can only carry its change if the two spell the path
+  // the same way. `repositoryRoot` stays what Git says, since it is the repository's own
+  // name and is where the git commands run.
+  const resolvedCwd = resolveExistingPath(cwd);
   const files = entries.flatMap((entry): GitFileStatus[] => {
-    const filePath = path.resolve(repositoryRoot, entry.path);
-    if (!isWithinPath(cwd, filePath)) return [];
+    const relativeToCwd = path.relative(resolvedCwd, path.resolve(repositoryRoot, entry.path));
+    if (!relativeToCwd || relativeToCwd === ".." || relativeToCwd.startsWith(`..${path.sep}`)
+      || path.isAbsolute(relativeToCwd)) return [];
+    const filePath = path.join(cwd, relativeToCwd);
     const classified = classifyGitStatus(entry);
     return [{
       filePath,
@@ -187,10 +197,13 @@ async function createTrackedFilePatch(
 
 export async function getGitFileDiff(cwd: string, filePath: string): Promise<GitFileDiffResponse> {
   const repositoryRoot = await findRepositoryRoot(cwd);
-  if (!repositoryRoot || !isWithinPath(repositoryRoot, filePath)) return { supported: false };
+  // Compared with links resolved: the file may have been named through a link the
+  // repository's own name does not carry (see getGitStatus).
+  const resolvedRoot = resolveExistingPath(repositoryRoot ?? ".");
+  const resolvedFilePath = resolveExistingPath(filePath);
+  if (!repositoryRoot || !isWithinPath(resolvedRoot, resolvedFilePath)) return { supported: false };
 
-  const resolvedFilePath = path.resolve(filePath);
-  const relativePath = toGitPath(path.relative(repositoryRoot, resolvedFilePath));
+  const relativePath = toGitPath(path.relative(resolvedRoot, resolvedFilePath));
   const entries = await readStatusEntries(repositoryRoot);
   const entry = entries.find((candidate) => candidate.path === relativePath);
   if (!entry) return { supported: false };
