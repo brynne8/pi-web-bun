@@ -181,7 +181,7 @@ export function createProjectCommandBashOperations(
           const timer = setTimeout(() => {
             handedOff = true;
             released = true;
-            const logPath = bgLogPath();
+            const logPath = bgLogPath(bgTask.sessionId);
             const stream = createWriteStream(logPath);
             bgStream = stream;
             for (const chunk of buffer.dump()) stream.write(chunk);
@@ -338,7 +338,7 @@ function startBackgroundCommand(
 ) {
   const sessionId = context?.sessionManager?.getSessionId();
   const cwd = context?.cwd ?? options.cwd;
-  const logPath = bgLogPath();
+  const logPath = bgLogPath(sessionId);
   const stream = createWriteStream(logPath);
   const controller = new AbortController();
   const startedAtMs = Date.now();

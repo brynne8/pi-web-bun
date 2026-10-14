@@ -1,5 +1,6 @@
 import { configureHttpDispatcher, readHttpIdleTimeoutMs } from "@/lib/http-dispatcher";
 import { closeAllAgentEventStreams } from "@/lib/agent-event-stream";
+import { pruneBgLogs } from "@/lib/bash-bg-tasks";
 
 export function registerNodeInstrumentation(): void {
   // The pi CLI applies settings' `httpIdleTimeoutMs` to the same undici
@@ -14,6 +15,12 @@ export function registerNodeInstrumentation(): void {
   const shutdownStreams = () => closeAllAgentEventStreams();
   process.on("SIGINT", shutdownStreams);
   process.on("SIGTERM", shutdownStreams);
+
+  // Background bash logs are swept from `bgLogPath()` too, but that only runs as a task
+  // starts: with the `bgTasksEnabled` switch off, or on a machine that never runs one, a
+  // day-old log sat there forever (337 of them, 158 MB, on one developer's machine).
+  // Once per server instance, whoever the switch is set to. Never throws.
+  pruneBgLogs();
 
   // Next evaluates a route's code on its first request, so the first
   // /api/sessions used to pay for importing the whole pi SDK, seconds on
