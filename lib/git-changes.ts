@@ -35,12 +35,12 @@ async function findRepositoryRoot(cwd: string): Promise<string | null> {
   }
 }
 
-function isWithinPath(parent: string, target: string): boolean {
+export function isWithinPath(parent: string, target: string): boolean {
   const relative = path.relative(path.resolve(parent), path.resolve(target));
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
 
-function toGitPath(filePath: string): string {
+export function toGitPath(filePath: string): string {
   return filePath.split(path.sep).join("/");
 }
 

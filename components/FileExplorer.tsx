@@ -60,6 +60,12 @@ export interface FileRowTarget {
   relativePath: string;
   name: string;
   isDir: boolean;
+  /**
+   * The file's Git status, or null when the folder is not a repository or this
+   * path has no changes. The row's menu reads it to decide whether a Revert
+   * makes sense (lib/git-revert-rule.ts); a directory row never carries one.
+   */
+  gitStatus: GitFileStatus | null;
 }
 
 interface Props {
@@ -946,11 +952,20 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     // The browser's menu offers Copy and Save As on a name the reader was trying
     // to act on; this row has its own actions instead.
     event.preventDefault();
+    const isDir = row.getAttribute("data-file-row-is-dir") === "true";
     onRowMenu(
-      { path, relativePath: getRelativeFilePath(path, cwd), name: getFileName(path), isDir: row.getAttribute("data-file-row-is-dir") === "true" },
+      {
+        path,
+        relativePath: getRelativeFilePath(path, cwd),
+        name: getFileName(path),
+        isDir,
+        // A directory's own row may stand for a submodule, whose revert is not a
+        // file checkout, so only a file row brings its status along.
+        gitStatus: isDir ? null : gitStatusByPath.get(normalizeFilePathSlashes(path)) ?? null,
+      },
       { x: event.clientX, y: event.clientY },
     );
-  }, [cwd, onRowMenu]);
+  }, [cwd, gitStatusByPath, onRowMenu]);
 
   return (
     <div style={{ minHeight: "100%" }} onContextMenu={handleRowContextMenu}>

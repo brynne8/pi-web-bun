@@ -70,6 +70,8 @@ import {
   type SessionUiStateRequest,
 } from "@/lib/session-ui-state-shared";
 import { focusIfLost, type FocusDocument } from "@/lib/stacked-dialog";
+import { GIT_REVERT_REFUSAL_KEYS, isGitPathRevertible } from "@/lib/git-revert-rule";
+import { revertGitFileChanges } from "@/lib/git-revert-request";
 import { encodeFilePathForApi } from "@/lib/file-paths";
 import { useFilesPlacement } from "@/hooks/useFilesPlacement";
 import { useI18n } from "@/hooks/useI18n";
@@ -108,6 +110,7 @@ import {
   RefreshIcon,
   RestoreIcon,
   RevealIcon,
+  RevertIcon,
   SearchIcon,
   TerminalIcon,
   TrashIcon,
@@ -854,6 +857,26 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     anchor.download = "";
     anchor.click();
   }, []);
+
+  /**
+   * A changed file's own action: its working change goes back to the last commit,
+   * staged or not (the server unstages in the same checkout, and refuses what has
+   * no commit to go back to — lib/git-revert-rule.ts). The explorer and any open
+   * tab's diff are refreshed the way the refresh button refreshes them, so the
+   * row loses its badge without a second click.
+   */
+  const revertRowChanges = useCallback(async (target: FileRowTarget) => {
+    const cwd = selectedCwd ?? selectedCwdProp;
+    if (!cwd) return;
+    const outcome = await revertGitFileChanges(cwd, target.path);
+    if (outcome.reverted) {
+      if (onExplorerRefresh) onExplorerRefresh();
+      else setExplorerKey((key) => key + 1);
+      showToast(t("files.revertDone", { name: target.name }));
+      return;
+    }
+    showToast(t(GIT_REVERT_REFUSAL_KEYS[outcome.code ?? "failed"], { error: outcome.error ?? "" }));
+  }, [onExplorerRefresh, selectedCwd, selectedCwdProp, showToast, t]);
 
   const fileManagerLabel = t(
     fileManager?.platform === "darwin"
@@ -2350,11 +2373,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   };
 
   // What a row of the files does with itself: put its path in the chat, keep a copy
-  // of it, or see it where it lives on disk. These were two buttons drawn over the
-  // row's own name on hover, which covered the part of the row a reader aims at; a
-  // right-click is where they belong, since a row's actions are not the row. A
-  // directory has nothing to download, and the menu is the row's only action, so it
-  // is also why no ⋯ button sits in the row.
+  // of it, undo its uncommitted work, or see it where it lives on disk. These were
+  // two buttons drawn over the row's own name on hover, which covered the part of
+  // the row a reader aims at; a right-click is where they belong, since a row's
+  // actions are not the row. A directory has nothing to download, and the menu is
+  // the row's only action, so it is also why no ⋯ button sits in the row.
   const fileMenuItems = (target: FileRowTarget): SidebarMenuItem[] => [
     {
       type: "item",
@@ -2371,6 +2394,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       icon: <DownloadIcon />,
       onSelect: () => { downloadFile(target.path); },
     }]),
+    // Only a file whose change Git can undo brings this item: what HEAD never
+    // held (an untracked or newly added file, a rename's new name, a conflict)
+    // has nothing to go back to, and the row says nothing rather than delete.
+    ...(!target.isDir && target.gitStatus && isGitPathRevertible(target.gitStatus) ? [{
+      type: "item" as const,
+      id: "revert",
+      label: t("files.revertChanges"),
+      title: t("files.revertChangesHint"),
+      icon: <RevertIcon />,
+      danger: true,
+      onSelect: () => { void revertRowChanges(target); },
+    }] : []),
     {
       type: "item",
       id: "reveal",

@@ -65,6 +65,10 @@ export async function checkFileRowMenu(page, filePath, name, fixtureText) {
   assert.equal(cover.title, titlePath, "the centre of the row is the file's own name");
 
   // 2. The row's menu opens at the pointer and holds exactly the three actions.
+  // Three, not four: the fixture project is a fresh directory in tmpdir and no Git
+  // repository, so no row has a change to undo and the Revert item a changed row
+  // gets (lib/git-revert-rule.ts) has nothing to appear on. Making the fixture a
+  // repository would put that item on every row and this assertion with it.
   // The file-manager item is judged by what the server itself answers, the same
   // /api/open-in-explorer reply the project's own button reads — never clicked, because
   // raising a real Finder window on whoever runs the suite is not a test.

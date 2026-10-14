@@ -210,6 +210,16 @@ export function RevealIcon(props: SidebarIconProps) {
   );
 }
 
+/** Back along its own path: put this file back to what Git last committed. */
+export function RevertIcon(props: SidebarIconProps) {
+  return (
+    <SidebarIcon {...props}>
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H10" />
+    </SidebarIcon>
+  );
+}
+
 export function TerminalIcon(props: SidebarIconProps) {
   return (
     <SidebarIcon {...props}>
