@@ -446,6 +446,8 @@ export const zhCNLocale: LocalePlugin = {
     "files.rowActions": "{name} 的操作",
     "files.revertChanges": "撤销更改",
     "files.revertChangesHint": "取消暂存该文件，并将其内容恢复到最近一次提交。",
+    "files.revertHeading": "撤销 {name} 的更改？",
+    "files.revertQuestion": "该文件未提交的改动将回到最近一次提交，已暂存的一并取消暂存。被丢弃的内容不会保留，编辑器里的撤销也找不回来。",
     "files.revertDone": "已撤销 {name}",
     "files.revertNoChanges": "该文件没有可撤销的 Git 更改。",
     "files.revertNotRevertible": "无法撤销 Git 尚未以这种形式提交过的文件：未跟踪、新添加、重命名或冲突。",

@@ -446,6 +446,8 @@ export const zhTWLocale: LocalePlugin = {
     "files.rowActions": "{name} 的操作",
     "files.revertChanges": "撤銷變更",
     "files.revertChangesHint": "取消暫存該檔案，並將其內容還原至最近一次提交。",
+    "files.revertHeading": "撤銷 {name} 的變更？",
+    "files.revertQuestion": "該檔案未提交的變更將回到最近一次提交，已暫存的一併取消暫存。被丟棄的內容不會保留，編輯器裡的復原也找不回來。",
     "files.revertDone": "已撤銷 {name}",
     "files.revertNoChanges": "該檔案沒有可撤銷的 Git 變更。",
     "files.revertNotRevertible": "無法撤銷 Git 尚未以這種形式提交過的檔案：未追蹤、新增、重新命名或衝突。",

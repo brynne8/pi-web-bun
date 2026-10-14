@@ -446,6 +446,8 @@ export const enLocale: LocalePlugin = {
     "files.rowActions": "Actions for {name}",
     "files.revertChanges": "Revert changes",
     "files.revertChangesHint": "Unstages the file and puts its contents back to the last commit.",
+    "files.revertHeading": "Revert {name}?",
+    "files.revertQuestion": "Its uncommitted changes go back to the last commit, staged ones included. Nothing is kept of what that discards, so an editor's undo will not bring them back.",
     "files.revertDone": "Reverted {name}",
     "files.revertNoChanges": "This file has no Git changes to revert.",
     "files.revertNotRevertible": "Cannot revert a file Git has never committed in this form: untracked, newly added, renamed, or in conflict.",

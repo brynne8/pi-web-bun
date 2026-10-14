@@ -1,6 +1,6 @@
 // Adapted from @Nuctori's script-style CI/E2E fixtures in PR #617 (issue #599).
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { appendFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
@@ -10,7 +10,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { launchBrowser, newTestContext, noteBrowserError } from "./browser.mjs";
 import { checkFilePanel, filePanelFixture } from "./file-panel.mjs";
-import { checkFileRowMenu } from "./file-row-menu.mjs";
+import { checkFileRowMenu, checkFileRowRevert } from "./file-row-menu.mjs";
 import { checkExtensionDialogSizing, checkExtensionDialogs, extensionSource } from "./extension-dialog.mjs";
 import { checkChatAppearance } from "./chat-appearance.mjs";
 import { checkCodeBackground } from "./code-background.mjs";
@@ -35,6 +35,25 @@ writeFileSync(previewFile, filePanelFixture);
 const nestedDir = join(project, "nested");
 mkdirSync(nestedDir, { recursive: true });
 writeFileSync(join(nestedDir, "inner.html"), "<!doctype html><html><body>nested</body></html>\n");
+// A repository of its own for the row's Revert (e2e/file-row-menu.mjs): one commit, then one
+// tracked file left modified. Deliberately not `project` — a repository there would put a
+// Revert item on every row, and the menu above counts the rows that have none.
+const gitProject = join(agentDir, "git-project");
+const trackedFile = join(gitProject, "tracked.txt");
+const committedText = "committed by the fixture\n";
+mkdirSync(gitProject, { recursive: true });
+writeFileSync(trackedFile, committedText);
+const fixtureGit = (...args) => execFileSync("git", ["-C", gitProject, ...args], { stdio: "ignore" });
+fixtureGit("init", "-q");
+for (const [key, value] of [
+  ["user.name", "e2e"],
+  ["user.email", "e2e@example.invalid"],
+  ["core.autocrlf", "false"],
+]) fixtureGit("config", "--local", key, value);
+fixtureGit("add", "--", "tracked.txt");
+fixtureGit("commit", "-qm", "seed");
+const editedText = "edited in the working tree, never committed\n";
+writeFileSync(trackedFile, editedText);
 mkdirSync(sessionDir, { recursive: true });
 const timestamp = "2026-08-23T00:00:00.000Z";
 const LONG = "e2e-long-session";
@@ -42,6 +61,7 @@ const BRANCH = "e2e-branch-session";
 const RICH = "e2e-rich-session";
 const COMPACTED = "e2e-compacted-session";
 const APPEND = "e2e-external-append-session";
+const REVERT = "e2e-git-revert-session";
 const CODE_BACKGROUND = "e2e-code-background";
 const text = (i) => `E2E message ${String(i).padStart(4, "0")}`;
 const ids = (start, end) => Array.from({ length: end - start }, (_, i) => `e${start + i}`);
@@ -50,8 +70,8 @@ function message(id, parentId, role, content) {
   return { type: "message", id, parentId, timestamp, message: { role, content } };
 }
 
-function writeSession(id, entries) {
-  const header = { type: "session", version: 3, id, timestamp, cwd: project };
+function writeSession(id, entries, cwd = project) {
+  const header = { type: "session", version: 3, id, timestamp, cwd };
   writeFileSync(join(sessionDir, `2026-08-23T00-00-00-000Z_${id}.jsonl`),
     [header, ...entries].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
 }
@@ -150,6 +170,11 @@ try {
     message("root", null, "user", "E2E wrapper root"),
     message("reply", "root", "assistant", "E2E wrapper reply"),
   ]);
+  // A session whose cwd is the repository above, so the sidebar's files are that working tree.
+  writeSession(REVERT, [
+    message("root", null, "user", "E2E revert root"),
+    message("reply", "root", "assistant", "E2E revert reply"),
+  ], gitProject);
 
   const probe = createServer();
   probe.listen(0, "127.0.0.1");
@@ -191,7 +216,7 @@ try {
     const response = await fetch(`${base}/api/sessions`, { signal: AbortSignal.timeout(5000) }).catch(() => null);
     if (response?.ok) {
       const { sessions } = await response.json();
-      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND, CODE_BACKGROUND].sort());
+      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND, CODE_BACKGROUND, REVERT].sort());
       break;
     }
     assert.ok(Date.now() < deadline, "Server readiness timed out; see server.log");
@@ -521,6 +546,9 @@ try {
       // A row's actions, on the desktop leg only: at 390px the same menu is the
       // sidebar's bottom sheet, and a phone has no right-click to open it with.
       await checkFileRowMenu(page, previewFile, "preview.html", filePanelFixture);
+      // The undo, on the repository fixture: it asks first, and Shift is the way past the question.
+      await page.goto(`${base}/?session=${REVERT}`, { waitUntil: "domcontentloaded" });
+      await checkFileRowRevert(page, trackedFile, "tracked.txt", committedText, editedText);
       await page.goto(`${base}/?session=${RICH}`, { waitUntil: "domcontentloaded" });
       await page.locator(".markdown-code-block pre").waitFor();
       await checkChatAppearance(page);

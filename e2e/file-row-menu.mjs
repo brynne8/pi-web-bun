@@ -11,12 +11,16 @@
 //
 // What the menu holds and what each item does: docs/agents/files-and-access.md → "A row's own actions".
 import assert from "node:assert/strict";
+import { readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { showSidebarFiles } from "./sidebar.mjs";
 
 const LABEL = {
   mention: "Insert path into chat",
   download: "Download file",
+  revert: "Revert changes",
+  cancel: "Cancel",
 };
 
 /** Right-clicks the middle of a row — where a reader aims, and where an action button used to be. */
@@ -32,6 +36,37 @@ async function rightClickRow(page, locator) {
 
 const itemNames = async (menu) =>
   (await menu.getByRole("menuitem").allInnerTexts()).map((text) => text.split("\n")[0].trim());
+
+/** Reads the file until it holds `expected`, because the revert is a request, not a keystroke. */
+async function readUntil(filePath, expected) {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    if (readFileSync(filePath, "utf8") === expected) return true;
+    await delay(250);
+  }
+  return false;
+}
+
+/**
+ * Opens the row's menu and waits until it holds the undo.
+ *
+ * `refreshButton` is clicked only when the caller changed the file behind the app's back,
+ * and sparingly: every click runs `git status` for the project on the same server that is
+ * answering the app's own requests, and a starved `GET /api/agent/[id]` is a browser error
+ * the suite then blames on whatever runs next.
+ */
+async function openMenuWithRevert(page, fileRow, menu, refreshButton) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    if (attempt > 0 && refreshButton) await refreshButton.click().catch(() => {});
+    await rightClickRow(page, fileRow);
+    if (await menu.isVisible().catch(() => false)) {
+      if ((await itemNames(menu)).includes(LABEL.revert)) return;
+      await page.keyboard.press("Escape");
+      await menu.waitFor({ state: "detached", timeout: 5_000 });
+    }
+    await delay(750);
+  }
+  assert.fail("the row never came back with a change to undo");
+}
 
 /**
  * @param {object} page          a page on a session whose cwd is the e2e project
@@ -130,4 +165,89 @@ export async function checkFileRowMenu(page, filePath, name, fixtureText) {
     `the menu wrote the row's path into the composer: ${JSON.stringify(typed)}`);
 
   console.log(`PASS: file row menu and its actions at ${page.viewportSize().width}px (${items.join(" / ")})`);
+}
+
+/**
+ * The same row when it *does* have a change Git can undo, in a project that is a Git
+ * repository (the fixture above is not, so nothing there can be undone).
+ *
+ * What this pins is the confirmation: the undo cannot run on the click that asks for
+ * it, because what it discards is kept nowhere — no stash, no copy. The question's
+ * focus sits on Cancel, so a stray Enter changes nothing, and Shift on the item is
+ * the one way past the question, the same way it answers a session's Delete.
+ *
+ * @param {object} page          a page on a session whose cwd is the fixture repository
+ * @param {string} filePath      the tracked file's absolute path, as the row shows it
+ * @param {string} name          the tracked file's name
+ * @param {string} committedText the file's bytes in HEAD
+ * @param {string} editedText    the file's modified bytes, what a Cancel must leave
+ */
+export async function checkFileRowRevert(page, filePath, name, committedText, editedText) {
+  const showSidebar = page.getByRole("button", { name: "Show sidebar", exact: true });
+  if (await showSidebar.isVisible()) await showSidebar.click();
+  await showSidebarFiles(page);
+  const body = page.locator("#session-sidebar-panel-files .sidebar-files-body");
+  await body.waitFor({ state: "visible" });
+  const fileRow = body.locator("[data-file-row-is-dir='false']").filter({ hasText: name }).first();
+  await fileRow.waitFor({ state: "visible", timeout: 30_000 });
+  const menu = page.getByRole("menu", { name: `Actions for ${name}` });
+  const question = page.getByText(`Revert ${name}?`);
+  const refreshButton = page.getByRole("button", { name: "Refresh file list", exact: true });
+
+  // 1. A row with a change Git can undo offers the undo. Polling because the row is
+  // only as current as the last git status the explorer asked for.
+  await openMenuWithRevert(page, fileRow, menu, null);
+  assert.ok((await itemNames(menu)).includes(LABEL.revert), "a changed row's menu holds the undo");
+
+  // 2. The click does not do it. The menu turns into its question, and the answer
+  // that changes nothing holds the focus.
+  await menu.getByRole("menuitem", { name: LABEL.revert }).first().click();
+  await question.waitFor({ state: "visible", timeout: 5_000 });
+  const focused = await page.evaluate(() => document.activeElement?.textContent?.trim() ?? "");
+  assert.equal(focused, LABEL.cancel, `the question focuses Cancel: ${JSON.stringify(focused)}`);
+
+  // 3. Cancel writes nothing and leaves the row as it was.
+  await page.getByRole("button", { name: LABEL.cancel, exact: true }).click();
+  await menu.getByRole("menuitem", { name: LABEL.mention }).first().waitFor({ state: "visible", timeout: 5_000 });
+  assert.equal(readFileSync(filePath, "utf8"), editedText, "Cancel discarded nothing");
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "detached", timeout: 5_000 });
+
+  // 4. Shift on the item is the reader saying they know: straight to it, no question.
+  await rightClickRow(page, fileRow);
+  await menu.waitFor({ state: "visible", timeout: 5_000 });
+  await page.keyboard.down("Shift");
+  await menu.getByRole("menuitem", { name: LABEL.revert }).first().click();
+  await page.keyboard.up("Shift");
+  assert.ok(await readUntil(filePath, committedText), "Shift went straight to HEAD's bytes");
+  await page.getByText(`Reverted ${name}`).waitFor({ state: "visible", timeout: 10_000 });
+
+  // 5. And the plain path: the question's own button. The file is what is waited on,
+  // since the undo is a request whose answer arrives when it arrives.
+  writeFileSync(filePath, editedText);
+  await openMenuWithRevert(page, fileRow, menu, refreshButton);
+  await menu.getByRole("menuitem", { name: LABEL.revert }).first().click();
+  await question.waitFor({ state: "visible", timeout: 5_000 });
+  await page.getByRole("button", { name: LABEL.revert, exact: true }).click();
+  assert.ok(await readUntil(filePath, committedText), "the confirmed undo wrote HEAD's bytes back");
+
+  // 6. With nothing left to undo the item is gone, so the menu cannot offer a second one.
+  // No refresh here: the undo already had the explorer re-read Git, and the listing is
+  // only a moment behind.
+  for (let attempt = 0; attempt < 8; attempt++) {
+    await rightClickRow(page, fileRow);
+    if (await menu.isVisible().catch(() => false)) {
+      const after = await itemNames(menu);
+      if (!after.includes(LABEL.revert)) {
+        await page.keyboard.press("Escape");
+        await menu.waitFor({ state: "detached", timeout: 5_000 });
+        console.log(`PASS: file row undo asks first at ${page.viewportSize().width}px (${after.join(" / ")})`);
+        return;
+      }
+      await page.keyboard.press("Escape");
+      await menu.waitFor({ state: "detached", timeout: 5_000 });
+    }
+    await delay(750);
+  }
+  assert.fail("the reverted row never fell quiet: its menu kept offering an undo");
 }

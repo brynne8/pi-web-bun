@@ -87,7 +87,7 @@ import { PiWebTitle } from "./PiWebTitle";
 import { ProjectWorktreePicker, type ProjectWorktreePickerHandle, type WorktreeRemoval } from "./ProjectWorktreePicker";
 import { SessionSearch } from "./SessionSearch";
 import { SessionTree, sessionRowTitle, type SessionTreeReveal } from "./SessionTree";
-import { SidebarMenu, type SidebarMenuAnchor, type SidebarMenuItem } from "./SidebarMenu";
+import { SidebarMenu, type SidebarMenuAnchor, type SidebarMenuItem, type SidebarMenuSelectEvent } from "./SidebarMenu";
 import { SidebarToast, type SidebarToastAction, type SidebarToastData } from "./SidebarToast";
 import {
   ArchiveIcon,
@@ -290,7 +290,7 @@ type SidebarMenuState =
   | { kind: "row"; row: SessionRow; anchor: SidebarMenuAnchor; opener: HTMLElement | null }
   | { kind: "group"; project: SidebarProject; olderCount: number; anchor: SidebarMenuAnchor; opener: HTMLElement; askDelete?: boolean }
   /** A row of the file tree or the changed list, opened at the pointer by a right-click. */
-  | { kind: "file"; target: FileRowTarget; anchor: SidebarMenuAnchor; opener: HTMLElement | null };
+  | { kind: "file"; target: FileRowTarget; anchor: SidebarMenuAnchor; opener: HTMLElement | null; askRevert?: boolean };
 
 const UNREAD_SESSIONS_STORAGE_KEY = "pi-web:unread-session-ids";
 const LAST_CUSTOM_CWD_STORAGE_KEY = "pi-web:last-custom-cwd";
@@ -861,12 +861,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   /**
    * A changed file's own action: its working change goes back to the last commit,
    * staged or not (the server unstages in the same checkout, and refuses what has
-   * no commit to go back to — lib/git-revert-rule.ts). The explorer and any open
-   * tab's diff are refreshed the way the refresh button refreshes them, so the
-   * row loses its badge without a second click.
+   * no commit to go back to — lib/git-revert-rule.ts). Nothing is kept of what it
+   * discards, so the row's menu asks first (`fileRevertBody`) and this runs only
+   * from the question's own button. The explorer and any open tab's diff are
+   * refreshed the way the refresh button refreshes them, so the row loses its
+   * badge without a second click.
    */
   const revertRowChanges = useCallback(async (target: FileRowTarget) => {
     const cwd = selectedCwd ?? selectedCwdProp;
+    setMenu(null);
     if (!cwd) return;
     const outcome = await revertGitFileChanges(cwd, target.path);
     if (outcome.reverted) {
@@ -877,6 +880,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
     showToast(t(GIT_REVERT_REFUSAL_KEYS[outcome.code ?? "failed"], { error: outcome.error ?? "" }));
   }, [onExplorerRefresh, selectedCwd, selectedCwdProp, showToast, t]);
+
+  /** The row's menu turned into, or back from, its revert question. */
+  const askFileRevert = useCallback((askRevert: boolean) => {
+    setMenu((current) => (current?.kind === "file" ? { ...current, askRevert } : current));
+  }, []);
 
   const fileManagerLabel = t(
     fileManager?.platform === "darwin"
@@ -2397,6 +2405,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     // Only a file whose change Git can undo brings this item: what HEAD never
     // held (an untracked or newly added file, a rename's new name, a conflict)
     // has nothing to go back to, and the row says nothing rather than delete.
+    // The item never reverts by itself: it turns the menu into its question.
     ...(!target.isDir && target.gitStatus && isGitPathRevertible(target.gitStatus) ? [{
       type: "item" as const,
       id: "revert",
@@ -2404,7 +2413,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       title: t("files.revertChangesHint"),
       icon: <RevertIcon />,
       danger: true,
-      onSelect: () => { void revertRowChanges(target); },
+      onSelect: ({ shiftKey, keepOpen }: SidebarMenuSelectEvent) => {
+        // Shift says the reader knows what the item does, the same way it answers
+        // a session's Delete without its confirmation.
+        if (shiftKey) { void revertRowChanges(target); return; }
+        keepOpen();
+        askFileRevert(true);
+      },
     }] : []),
     {
       type: "item",
@@ -2420,6 +2435,38 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       onSelect: () => { void revealFileInManager(target.path); },
     },
   ];
+
+  // The question behind a row's Revert changes. What it discards is not recoverable
+  // — no stash, no copy Pi Web keeps — so the item that does it is answered here,
+  // with Cancel holding the focus: the answer that changes nothing is the one a
+  // stray Enter must never give.
+  const fileRevertBody = (target: FileRowTarget): ReactNode => (
+    <div className="sidebar-menu-question">
+      <div className="sidebar-menu-header" title={target.path}>
+        {t("files.revertHeading", { name: target.name })}
+      </div>
+      <p className="sidebar-menu-question-text">{t("files.revertQuestion")}</p>
+      <div className="sidebar-menu-question-buttons">
+        <button
+          type="button"
+          className="sidebar-menu-question-confirm"
+          onClick={() => { void revertRowChanges(target); }}
+        >
+          {t("files.revertChanges")}
+        </button>
+        {!isMobile && (
+          <button
+            type="button"
+            className="sidebar-menu-question-cancel"
+            data-sidebar-menu-autofocus=""
+            onClick={() => askFileRevert(false)}
+          >
+            {t("sidebar.cancel")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
 
   let menuTitle: string | undefined;
   let menuLabel = "";
@@ -2443,6 +2490,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     menuTitle = menu.target.name;
     menuLabel = t("files.rowActions", { name: menu.target.name });
     menuItems = fileMenuItems(menu.target);
+    if (menu.askRevert) menuBody = fileRevertBody(menu.target);
+    // Room for the question's sentence about what the revert discards.
+    menuWidth = menu.askRevert ? 264 : undefined;
   }
 
   // The tree row (and the button in it) that the open menu belongs to.
