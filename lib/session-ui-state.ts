@@ -1,5 +1,5 @@
-import { mkdirSync, renameSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { lstatSync, mkdirSync, renameSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import lockfile from "proper-lockfile";
 import { writePrivateFileAtomicSync } from "./atomic-file";
@@ -7,6 +7,7 @@ import { serializeByKey } from "./key-serializer";
 import { readRegularFileText } from "./regular-file";
 import {
   applySessionUiStateRequest,
+  dropProjectUiState,
   emptySessionUiState,
   normalizeSessionUiState,
   SESSION_UI_STATE_VERSION,
@@ -19,7 +20,9 @@ import {
 // beside pi's own files. It holds what the user chose, so unlike the session
 // index it is never rebuilt: writes are serialized in-process, locked against
 // other processes, replaced atomically, and a file that cannot be parsed is
-// set aside, never overwritten.
+// set aside, never overwritten. Project-keyed state is the one thing that
+// leaves it by itself: a project whose folder is gone loses its pin, its place
+// in the order and its name with the next delete (`forgetSessionUiState()`).
 
 const MAX_BYTES = 4 * 1024 * 1024;
 // `__proto__` is never copied: assigning it would set the object's prototype instead.
@@ -257,20 +260,89 @@ export function updateSessionUiState(request: SessionUiStateRequest, path?: stri
   return editState(target, (state) => applySessionUiStateRequest(state, request, Date.now()));
 }
 
-/** Removes those session entries; no-op (no write) if none present. */
+/**
+ * The folder a project key stands for: the root its pin recorded (the path it
+ * was pinned at, what the sidebar shows for a project with no live session),
+ * else the key itself, which is `workspaceKeyOf()` — a project root or a cwd.
+ * A key that is no absolute path is no folder this process can judge.
+ */
+function projectFolderOf(state: SessionUiState, key: string): string | null {
+  const entry = Object.prototype.hasOwnProperty.call(state.projects, key) ? state.projects[key] : undefined;
+  const path = entry?.root ?? key;
+  return isAbsolute(path) ? path : null;
+}
+
+/**
+ * Whether a project's folder is gone. `lstat`, as `lib/project-trust.ts` reads
+ * a folder: only "no such file" (ENOENT, or ENOTDIR, a parent that became a
+ * file) says so. A dangling link, a FIFO or a folder this process may not read
+ * (EACCES, ELOOP, a name too long) stays: none of those says the user deleted
+ * anything, and this is the one change no undo can undo — pruning is for a
+ * folder that is really not there, and an existing one keeps its slot and name.
+ */
+function projectFolderGone(path: string): boolean {
+  try {
+    lstatSync(path);
+    return false;
+  } catch (error) {
+    const code = errorCode(error);
+    return code === "ENOENT" || code === "ENOTDIR";
+  }
+}
+
+/**
+ * The project keys `state` holds state for whose folder is gone: pinned
+ * entries, the order's keys and the names, each judged by its own
+ * `projectFolderOf()`. One `lstat` per key, and a state without project-keyed
+ * entries costs nothing — which is what lets a delete that forgets nothing
+ * still skip the lock.
+ */
+function goneProjectKeys(state: SessionUiState): string[] {
+  const keys = new Set([
+    ...Object.keys(state.projects),
+    ...(state.projectOrder ?? []),
+    ...Object.keys(state.projectNames ?? {}),
+  ]);
+  const gone: string[] = [];
+  for (const key of keys) {
+    const folder = projectFolderOf(state, key);
+    if (folder !== null && projectFolderGone(folder)) gone.push(key);
+  }
+  return gone;
+}
+
+/**
+ * Removes those session entries and, with them, everything the state holds for
+ * a project whose folder no longer exists: its pin, its place in `projectOrder`
+ * and its display name. Without that a throwaway default directory
+ * (`~/pi-cwd/YYYYMMDD`, which users delete) keeps its row in the order forever
+ * and the file never shrinks.
+ *
+ * No-op — no lock, nothing created — when nothing is forgotten: no session
+ * entry present and no project folder gone. The `lstat`s are all that costs.
+ * A file that cannot be read throws here: the locked read could not do better.
+ */
 export async function forgetSessionUiState(ids: Iterable<string>, path?: string): Promise<void> {
   const target = path ?? getSessionUiStatePath();
   const wanted = [...new Set(ids)];
   if (wanted.length === 0) return;
-  const has = (state: SessionUiState) => wanted.some((id) => Object.prototype.hasOwnProperty.call(state.sessions, id));
-  // Deleting a session must not lock or create anything when it had no pin or archive time.
-  // A file that cannot be read throws here: the locked read could not do better.
-  if (!has(loadState(target))) return;
+  const forgets = (state: SessionUiState) => ({
+    ids: wanted.some((id) => Object.prototype.hasOwnProperty.call(state.sessions, id)),
+    gone: goneProjectKeys(state),
+  });
+  const before = forgets(loadState(target));
+  if (!before.ids && before.gone.length === 0) return;
   await editState(target, (state) => {
-    if (!has(state)) return { state, changed: false };
-    const sessions = { ...state.sessions };
-    for (const id of wanted) delete sessions[id];
-    return { state: { ...state, sessions }, changed: true };
+    const now = forgets(state);
+    if (!now.ids && now.gone.length === 0) return { state, changed: false };
+    let next = state;
+    if (now.ids) {
+      const sessions = { ...state.sessions };
+      for (const id of wanted) delete sessions[id];
+      next = { ...state, sessions };
+    }
+    if (now.gone.length > 0) next = dropProjectUiState(next, now.gone).state;
+    return { state: next, changed: true };
   });
 }
 
