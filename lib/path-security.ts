@@ -1,4 +1,4 @@
-import { realpathSync } from "fs";
+import { lstatSync, realpathSync } from "fs";
 import path from "path";
 import { isWindowsAbsolutePath } from "./paths";
 
@@ -49,11 +49,23 @@ export function hasParentDirectorySegment(target: string): boolean {
 
 export function isExistingPathWithinRoots(target: string, roots: Set<string>): boolean {
   if (hasParentDirectorySegment(target)) return false;
+  const realRoots = resolveRealRoots(roots);
   let realTarget: string;
   try {
     realTarget = realpathSync(target);
   } catch {
-    return false;
+    // Bun's realpathSync reads the file, where Node's walks directories only: a file
+    // without read permission throws EACCES on Bun and names its real path on Node.
+    // The last component is then the only one left unaccounted for, and a name that
+    // is not a link cannot carry the path out of its parent — so the parent answers
+    // for it, exactly as Node's own realpath would have. A link may point anywhere,
+    // so it stays refused, as does a parent that does not resolve.
+    try {
+      if (lstatSync(target).isSymbolicLink()) return false;
+      realTarget = path.join(realpathSync(path.dirname(target)), path.basename(target));
+    } catch {
+      return false;
+    }
   }
-  return isPathWithinRoots(realTarget, resolveRealRoots(roots));
+  return isPathWithinRoots(realTarget, realRoots);
 }
