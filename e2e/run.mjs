@@ -351,26 +351,59 @@ try {
     })), { connected: true, text: text(4998) }, "Prepending history must preserve existing message nodes");
     await latestUser.dispose();
     assert.ok(olderResponses.length >= 2, "Scrolling must fetch consecutive older pages");
-    let oldest = Number(new URL(olderResponses[0].url()).searchParams.get("before")?.slice(1));
-    assert.ok(Number.isInteger(oldest), "Older page must include a numeric before cursor");
-    for (const response of olderResponses) {
-      assert.equal(response.status(), 200);
-      assert.equal(new URL(response.url()).searchParams.get("before"), `e${oldest}`);
-      const older = (await response.json()).context;
-      assert.deepEqual(older.entryIds, ids(oldest - 50, oldest));
-      assert.equal(older.messages.length, 50);
-      oldest -= 50;
-      assert.equal(older.oldestEntryId, `e${oldest}`);
-      assert.equal(older.hasMore, true);
+    const firstCursor = Number(new URL(olderResponses[0].url()).searchParams.get("before")?.slice(1));
+    assert.ok(Number.isInteger(firstCursor), "Older page must include a numeric before cursor");
+    {
+      // Each page the client fetched holds the 50 entries above the one before it.
+      // Bodies are read here and only here: a Playwright response body is spent once,
+      // so this walk cannot rerun inside the retry loop below, which assumes what it proved.
+      let walked = firstCursor;
+      for (const response of olderResponses) {
+        assert.equal(response.status(), 200);
+        assert.equal(new URL(response.url()).searchParams.get("before"), `e${walked}`);
+        const older = (await response.json()).context;
+        assert.deepEqual(older.entryIds, ids(walked - 50, walked));
+        assert.equal(older.messages.length, 50);
+        walked -= 50;
+        assert.equal(older.oldestEntryId, `e${walked}`);
+        assert.equal(older.hasMore, true);
+      }
     }
-    const rendered = await page.getByText(/^E2E message \d{4}$/).allTextContents();
+    // Pages arrive on their own after the two gestures: a page that lands renews the
+    // sentinel's observer, and the distance-from-bottom restore puts the viewport back at
+    // the top of what is loaded, so the sentinel is in view and the next page is asked for
+    // (sessions.md `A reading position that has not landed yet outranks the sentinel`,
+    // `components/ChatWindow.tsx`'s sentinel effect). Everything asserted next moves with
+    // every page — the rows rendered, the turns counted, the cursor fetched — so they are
+    // read only once no page has landed for a second, and read again if one landed while
+    // they were being read. A client that never stops paging reports itself instead of
+    // failing as a mismatch between two different moments.
+    let rendered, minimapPaged, oldestLoaded;
+    for (let attempt = 0; ; attempt++) {
+      const quietDeadline = Date.now() + 30_000;
+      let pages = olderResponses.length;
+      let quietMs = 0;
+      while (quietMs < 1000) {
+        await delay(100);
+        const landed = olderResponses.length;
+        quietMs = landed === pages ? quietMs + 100 : 0;
+        pages = landed;
+        assert.ok(Date.now() < quietDeadline, `Older pages never stopped arriving: ${pages} fetched`);
+      }
+      const pagesBefore = olderResponses.length;
+      oldestLoaded = firstCursor - 50 * pagesBefore;
+      rendered = await page.getByText(/^E2E message \d{4}$/).allTextContents();
+      minimapPaged = viewport.width > 600 ? await readMinimapTurn("minimap-turns-paged.png") : null;
+      if (olderResponses.length === pagesBefore) break;
+      assert.ok(attempt < 3, `Older pages kept arriving while they were asserted: ${olderResponses.length} fetched`);
+    }
     // The sidebar also displays the first message as the session title.
     assert.deepEqual(rendered.filter((value) => value !== text(0)),
-      Array.from({ length: 5000 - oldest }, (_, i) => text(oldest + i)), "Missing, reordered, or duplicate chat messages");
+      Array.from({ length: 5000 - oldestLoaded }, (_, i) => text(oldestLoaded + i)), "Missing, reordered, or duplicate chat messages");
     if (viewport.width > 600) {
-      assert.deepEqual(await readMinimapTurn("minimap-turns-paged.png"), {
+      assert.deepEqual(minimapPaged, {
         number: "2500",
-        earlier: `Earlier turns not loaded: ${oldest / 2}. Click to load`,
+        earlier: `Earlier turns not loaded: ${oldestLoaded / 2}. Click to load`,
       }, "Loading older pages must not renumber minimap turns");
     }
     await page.screenshot({ path: join(artifacts, `history-${viewport.width}.png`) });
