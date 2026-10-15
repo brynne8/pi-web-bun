@@ -9,7 +9,7 @@ const jiti = createJiti(import.meta.url, {
 const { BranchNavigator, buildActivePath, compressChain, hasSessionBranches, selectTopLevelBranches } = await jiti.import("./BranchNavigator.tsx");
 const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
-const { I18nProvider } = await jiti.import("@/hooks/useI18n.tsx");
+const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 const { enLocale } = await jiti.import("@/lib/i18n/messages/en.ts");
 
 const msg = (id, role, text) => ({ type: "message", id, parentId: null, timestamp: "t", message: { role, content: text } });

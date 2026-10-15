@@ -17,6 +17,7 @@ import { checkCodeBackground } from "./code-background.mjs";
 import { checkModelDiscovery, installModelDiscoveryStub } from "./model-discovery.mjs";
 import { checkFilesPlacement, showSidebarSessions } from "./sidebar.mjs";
 import { checkSessionNavigation } from "./session-navigation.mjs";
+import { checkProjectNavigation, createProjectNavigationFixtures } from "./project-navigation.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const mode = process.env.E2E_SERVER_MODE || "dev";
@@ -176,6 +177,8 @@ try {
     message("reply", "root", "assistant", "E2E revert reply"),
   ], gitProject);
 
+  const projectNavigation = createProjectNavigationFixtures({ agentDir, sessionDir, timestamp });
+
   const probe = createServer();
   probe.listen(0, "127.0.0.1");
   await once(probe, "listening");
@@ -216,7 +219,7 @@ try {
     const response = await fetch(`${base}/api/sessions`, { signal: AbortSignal.timeout(5000) }).catch(() => null);
     if (response?.ok) {
       const { sessions } = await response.json();
-      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND, CODE_BACKGROUND, REVERT].sort());
+      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND, CODE_BACKGROUND, REVERT, projectNavigation.id].sort());
       break;
     }
     assert.ok(Date.now() < deadline, "Server readiness timed out; see server.log");
@@ -634,6 +637,7 @@ try {
       assert.ok(response.ok, `DELETE session ${id} -> ${response.status}`);
     },
   });
+  await checkProjectNavigation({ browser, base, artifacts, fixture: projectNavigation, otherSessionId: BRANCH, api, post });
 } catch (error) {
   console.error(error);
   process.exitCode = 1;

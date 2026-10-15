@@ -10,7 +10,12 @@ import { createJiti } from "jiti";
 // rendered. useFilesPlacement's server snapshot is always "below", so the
 // hook is aliased to a fixture that answers "tab"; the alias takes the
 // module's absolute path without its extension ("@/…" resolves first and is
-// never matched). tryNative: false — Bun imports a .tsx file natively and
+// never matched), in the form jiti compares it with: forward slashes and an
+// upper-case drive letter on Windows (#1211).
+const placementHook = fileURLToPath(new URL("../hooks/useFilesPlacement", import.meta.url))
+  .replaceAll("\\", "/")
+  .replace(/^[a-z]:/, (drive) => drive.toUpperCase());
+// tryNative: false — Bun imports a .tsx file natively and
 // answers its imports out of Bun's own registry, so the alias would never
 // apply. Bun also runs the whole suite in one process with one module
 // registry, where SessionSidebar.test.mjs has already loaded the sidebar
@@ -33,12 +38,12 @@ const jiti = createJiti(import.meta.url, {
   tsconfigPaths: true,
   tryNative: false,
   alias: {
-    [fileURLToPath(new URL("../hooks/useFilesPlacement", import.meta.url))]: fileURLToPath(new URL("./__fixtures__/files-placement-tab.mjs", import.meta.url)),
+    [placementHook]: fileURLToPath(new URL("./__fixtures__/files-placement-tab.mjs", import.meta.url)),
   },
 });
 const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
-const { I18nProvider } = await jiti.import("@/hooks/useI18n.tsx");
+const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 const { SessionSidebar } = await jiti.import("./SessionSidebar.tsx");
 
 const h = React.createElement;

@@ -9,7 +9,7 @@ const jiti = createJiti(import.meta.url, {
 });
 const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
-const { I18nProvider } = await jiti.import("@/hooks/useI18n.tsx");
+const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 const { SessionTree, sessionRowTitle } = await jiti.import("./SessionTree.tsx");
 const { buildSessionTree, SIDEBAR_ROW_HEIGHTS } = await jiti.import("@/lib/session-tree.ts");
 const source = await readFile(new URL("./SessionTree.tsx", import.meta.url), "utf8");

@@ -27,6 +27,35 @@ function renderMarkdown(markdown, props = {}) {
   );
 }
 
+test("a document reader keeps local links in the page without an href", () => {
+  const local = renderMarkdown("[relative](references/setup.md#config) [anchor](#config) [outside](../outside.md) [absolute](/etc/test.md) [attachment](image.png)", { onOpenFile: undefined, onNavigateLink() {} });
+  assert.equal((local.match(/<a role="link" tabindex="0">/g) ?? []).length, 5);
+  assert.doesNotMatch(local, /href=|target=|\snode=/);
+  const external = renderMarkdown("[web](https://example.com) [mail](mailto:hello@example.com) [bad](javascript:alert%281%29)", { onOpenFile: undefined, onNavigateLink() {} });
+  assert.equal((external.match(/target="_blank" rel="noopener noreferrer"/g) ?? []).length, 3);
+  assert.doesNotMatch(external, /role="link"|javascript:|alert%28/);
+  // Chat keeps its links as they were.
+  assert.match(renderMarkdown("[relative](references/setup.md)", { onOpenFile: undefined }), /<a href="references\/setup.md" target="_blank"/);
+});
+
+test("a document reader keeps HTML anchor destinations and link labels", () => {
+  const html = renderMarkdown('<a id="install"></a>\n\n<a href="guide.md" title="Read setup" aria-label="Setup guide">Next</a>\n\n[Jump](guide.md "Read the setup guide")', { onOpenFile: undefined, onNavigateLink() {} });
+  assert.match(html, /<a id="user-content-install" target="_blank" rel="noopener noreferrer"><\/a>/);
+  assert.match(html, /<a title="Read setup" aria-label="Setup guide" role="link" tabindex="0">Next<\/a>/);
+  assert.match(html, /<a title="Read the setup guide" role="link" tabindex="0">Jump<\/a>/);
+});
+
+test("heading anchors are opt-in, scoped, formatted-text aware and generated before KaTeX", () => {
+  const markdown = "# Setup **guide**!\n\n## Configuration\n\n## Configuration\n\n## Configuration-1\n\n## Configuration\n\n## 中文 标题\n\n## `code` & punctuation.\n\n## Compute $x$";
+  assert.doesNotMatch(renderMarkdown(markdown), /data-heading-anchor/);
+  const html = renderMarkdown(markdown, { onNavigateLink() {} });
+  const anchors = [...html.matchAll(/data-heading-anchor="([^"]*)"/g)].map((match) => match[1]);
+  assert.deepEqual(anchors, ["setup-guide", "configuration", "configuration-1", "configuration-1-1", "configuration-2", "中文-标题", "code--punctuation", "compute-x"]);
+  assert.doesNotMatch(html, /\sid=/);
+  assert.match(html, /class="katex"/);
+  assert.equal(renderMarkdown(markdown, { onNavigateLink() {} }), html, "new renders restart the slug sequence");
+});
+
 test("renders CJK sentence emphasis without spaces after closing punctuation", () => {
   const sentence = "今天天气很好。";
   const markdown = `**${sentence}**我们去公园散步吧。`;

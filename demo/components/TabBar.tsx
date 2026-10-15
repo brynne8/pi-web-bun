@@ -34,10 +34,14 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
     <div
       role="tablist"
       style={{
+        // The tabs fill the scrollport, not a fixed 36px: once they overflow,
+        // the app's scrollbar (globals.css) takes its height out of the bar,
+        // and 36px tabs were pushed up past its top and clipped (#1225).
         display: "flex",
-        alignItems: "flex-end",
+        alignItems: "stretch",
         background: "var(--bg-panel)",
         overflowX: "auto",
+        overflowY: "hidden",
         flexShrink: 0,
         height: 36,
       }}
@@ -79,7 +83,6 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               display: "flex",
               alignItems: "center",
               gap: 6,
-              height: 36,
               paddingLeft: 12,
               paddingRight: 6,
               borderRight: "1px solid var(--border)",

@@ -8,7 +8,7 @@ const jiti = createJiti(import.meta.url, {
 });
 const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
-const { I18nProvider } = await jiti.import("@/hooks/useI18n.tsx");
+const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 const { McpAddServer } = await jiti.import("./McpAddServer.tsx");
 const { McpConfigView } = await jiti.import("./McpConfig.tsx");
 const { EMPTY_MCP_ADD_DRAFT } = await jiti.import("./mcp-add-helpers.ts");

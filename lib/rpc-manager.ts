@@ -442,6 +442,10 @@ export class AgentSessionWrapper {
         // Every tool call of the run has finished; nothing is left to replay.
         this.activeToolEvents.clear();
       }
+      // A name from setSessionName(), an extension's included: a title generated
+      // in the background lands after the run's agent_end, a command's with no
+      // run at all, and the sidebar would keep the old one (#1237).
+      if (event.type === "session_info_changed") invalidateSessionListCache();
       this.trackActiveToolEvent(event);
       if (IDLE_RESET_EVENT_TYPES.has(event.type)) this.resetIdleTimer();
       this.emit(event);

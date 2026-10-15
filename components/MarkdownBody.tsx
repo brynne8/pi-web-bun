@@ -4,7 +4,7 @@ import { createContext, memo, useContext, useMemo, type ComponentProps, type Mou
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
 import { parsePdfPageFragment, resolveLocalFileHref, shouldOpenLocalFileInApp } from "@/lib/file-links";
 import { encodeFilePathForApi } from "@/lib/file-paths";
-import { markdownAppUrlTransform, markdownRehypePlugins, markdownRemarkPlugins, markdownUrlTransform, markdownUserRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
+import { isExternalMarkdownHref, markdownAppUrlTransform, markdownDocumentRehypePlugins, markdownRehypePlugins, markdownRemarkPlugins, markdownUrlTransform, markdownUserRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
 import { splitMarkdownBlocks } from "@/lib/markdown-blocks";
 import { ImagePreview } from "./ImagePreview";
 import { MermaidBlock, CodeBlock } from "./MermaidBlock";
@@ -17,6 +17,8 @@ interface MarkdownBodyProps {
   isStreaming?: boolean;
   cwd?: string;
   onOpenFile?: (filePath: string, page?: number) => void;
+  /** A document reader's own links: relative paths and `#headings` stay in the reader. */
+  onNavigateLink?: (href: string) => void;
   /** Render every line ending as a line break, for text the user typed. */
   keepLineBreaks?: boolean;
 }
@@ -49,15 +51,16 @@ interface MarkdownBlockProps {
   markdown: string;
   remarkPlugins: typeof markdownRemarkPlugins;
   urlTransform: typeof markdownUrlTransform;
+  rehypePlugins: typeof markdownRehypePlugins;
   components: Components;
 }
 
 /** One parse; skipped while its text and renderers stay the same. */
-const MarkdownBlock = memo(function MarkdownBlock({ markdown, remarkPlugins, urlTransform, components }: MarkdownBlockProps) {
+const MarkdownBlock = memo(function MarkdownBlock({ markdown, remarkPlugins, urlTransform, rehypePlugins, components }: MarkdownBlockProps) {
   return (
     <ReactMarkdown
       remarkPlugins={remarkPlugins}
-      rehypePlugins={markdownRehypePlugins}
+      rehypePlugins={rehypePlugins}
       urlTransform={urlTransform}
       components={components}
     >
@@ -66,7 +69,7 @@ const MarkdownBlock = memo(function MarkdownBlock({ markdown, remarkPlugins, url
   );
 });
 
-export const MarkdownBody = memo(function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile, keepLineBreaks }: MarkdownBodyProps) {
+export const MarkdownBody = memo(function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile, onNavigateLink, keepLineBreaks }: MarkdownBodyProps) {
   const normalizedMarkdown = useMemo(() => normalizeDisplayMath(children), [children]);
   // A streaming reply grows by a few characters per chunk; parsing all of it
   // each time made a long reply quadratic. Its finished blocks keep their
@@ -108,6 +111,17 @@ export const MarkdownBody = memo(function MarkdownBody({ children, className, is
     a({ href, children, ...props }) {
       // `node` is react-markdown metadata, not a DOM attribute.
       delete props.node;
+      if (onNavigateLink && href && !isExternalMarkdownHref(href)) {
+        // No href: a middle-click or "Open in new tab" would load the path on the app's own URL.
+        const navigate = () => onNavigateLink(href);
+        return (
+          <MarkdownLinkContext.Provider value={true}>
+            <a {...props} role="link" tabIndex={0} onClick={navigate} onKeyDown={(event) => { if (event.key === "Enter") navigate(); }}>
+              {children}
+            </a>
+          </MarkdownLinkContext.Provider>
+        );
+      }
       const filePath = onOpenFile ? resolveLocalFileHref(href, cwd) : null;
       const openFile = onOpenFile;
       if (!filePath || !openFile) {
@@ -153,7 +167,7 @@ export const MarkdownBody = memo(function MarkdownBody({ children, className, is
         </div>
       );
     },
-  }), [cwd, isStreaming, onOpenFile]);
+  }), [cwd, isStreaming, onOpenFile, onNavigateLink]);
 
   return (
     <div className={["markdown-body", className].filter(Boolean).join(" ")}>
@@ -163,6 +177,7 @@ export const MarkdownBody = memo(function MarkdownBody({ children, className, is
           markdown={block}
           remarkPlugins={keepLineBreaks ? markdownUserRemarkPlugins : markdownRemarkPlugins}
           urlTransform={onOpenFile ? markdownUrlTransform : markdownAppUrlTransform}
+          rehypePlugins={onNavigateLink ? markdownDocumentRehypePlugins : markdownRehypePlugins}
           components={components}
         />
       ))}

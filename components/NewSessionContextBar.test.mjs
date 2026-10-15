@@ -6,7 +6,7 @@ import { createJiti } from "jiti";
 const jiti = createJiti(import.meta.url, { jsx: { runtime: "automatic" }, tsconfigPaths: true });
 const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
-const { I18nProvider } = await jiti.import("@/hooks/useI18n.tsx");
+const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 const { NewSessionContextBar } = await jiti.import("./NewSessionContextBar.tsx");
 const source = await readFile(new URL("./NewSessionContextBar.tsx", import.meta.url), "utf8");
 const chatWindowSource = await readFile(new URL("./ChatWindow.tsx", import.meta.url), "utf8");
