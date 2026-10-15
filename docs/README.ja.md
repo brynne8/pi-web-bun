@@ -1,6 +1,6 @@
 # Pi Web
 
-[English](./README.md) | [简体中文](./README.zh-CN.md) | [Русский](./README.ru.md)
+[English](../README.md) | [简体中文](./README.zh-CN.md) | [Русский](./README.ru.md)
 
 > **これは [agegr/pi-web](https://github.com/agegr/pi-web) の Bun 特化フォークです。** Node.js、`npm`、`npx` をインストールせずに [Bun](https://bun.sh) だけで動作し、コーディングエージェントをブラウザでどう読むかについて、自分たちの設計を持っています。長いコマンドはターンをふさがずにバックグラウンドへ委譲し、`read` カードは実際に読み取った範囲そのものを開き、入力欄は指の下でボタンの正体を変えず、リレーが HTTP/2 ストリームを切っても実行を失いません。今何が変わっているのか、逆に上流が後になって自分で実装した部分はどこなのかは、すべて英語版の [Differences from upstream](./README.md#differences-from-upstream) にまとめてあります。インストール手順は [Bun setup](./README.md#bun-setup) を参照してください。このページの本文は上流のドキュメントのままで、フォーク固有の節は未翻訳です。
 
@@ -108,7 +108,7 @@ npx @agegr/pi-web@latest
 - **ファイルシステムへのアクセス**：Pi Web はエージェントデータディレクトリと、セッションに記録された作業ディレクトリを読み取れる必要があります。既存の pi セッションを共有する場合は、pi と同じファイルシステム環境で Pi Web を実行してください。
 - **共有設定**：Models パネルは pi のモデル、設定、認証情報ストレージを使用するため、変更は両方のインターフェースに反映されます。
 - **ファイルアクセスの範囲**：ファイルブラウザーは、Pi Web で選択した作業ディレクトリと、既知のプロジェクトまたはセッションルートに限定されます。汎用のファイルシステムブラウザーではありません。
-- **Git worktree**：スイッチャーの表示条件、worktree の作成、削除時の動作については [Worktrees in Pi Web](./docs/worktrees.md) を参照してください。
+- **Git worktree**：スイッチャーの表示条件、worktree の作成、削除時の動作については [Worktrees in Pi Web](./worktrees.md) を参照してください。
 
 ## 開発
 
@@ -127,7 +127,9 @@ npm run lint
 
 通常の開発中は `next build` または `npm run build` を実行しないでください。`.next/` に書き込まれ、開発サーバーに影響する可能性があります。ビルドはリリース作業時にのみ実行してください。
 
-コントリビューター向けガイド：[Internationalization](./docs/i18n.md) と [Release process](./docs/release.md)。
+新機能に取りかかる前に、[Contributing](../CONTRIBUTING.md) で対象範囲とプルリクエスト前のチェック項目を確認してください。
+
+コントリビューター向けガイド：[Internationalization](./i18n.md) と [Release process](./release.md)。
 
 ## リポジトリ構成
 
@@ -142,8 +144,8 @@ docs/            ユーザーおよびコントリビューター向けの個別
 demo/            上流の静的デモ。同期のために保持。この fork からは公開しない
 ```
 
-アーキテクチャの説明と詳細なファイルマップについては [AGENTS.md](./AGENTS.md) を参照してください。
+アーキテクチャの説明と詳細なファイルマップについては [AGENTS.md](../AGENTS.md) を参照してください。
 
 ## ライセンス
 
-[MIT](./LICENSE)
+[MIT](../LICENSE)

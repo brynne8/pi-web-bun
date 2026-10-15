@@ -1,6 +1,6 @@
 # Pi Web（Bun 版）
 
-[English](./README.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
+[English](../README.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
 
 > **这是 [agegr/pi-web](https://github.com/agegr/pi-web) 的 Bun 专用分支。** 无需安装 Node.js、`npm` 或 `npx`，用 [Bun](https://bun.sh) 就能跑。我们对「一个编码 agent 在浏览器里应该怎么读」有自己的判断：长命令自己移交后台，而不是把整个回合吊在半空；`read` 卡片直接打开它真正读到的那一段；输入框不会在你手指底下换人；中继掐断 HTTP/2 流也不再赔上一次运行。哪些仍然与原版不同、哪些上游已经自己实现，见[与原版的区别](#与原版的区别)；安装方式见 [Bun 安装](#bun-安装)。其余部分沿用原版文档。
 
@@ -230,7 +230,7 @@ npx @agegr/pi-web@latest
 - **文件系统访问**：Pi Web 必须能读取智能体数据目录及会话记录中的工作目录。与现有 pi 会话共用数据时，请让 Pi Web 运行在与 pi 相同的文件系统环境中。
 - **共享配置**：模型面板使用 pi 的模型、设置和凭据存储，因此两种界面都能看到相关更改。
 - **文件访问边界**：文件浏览器仅能访问在 Pi Web 中选择过的工作目录，以及它已识别的项目或会话根目录；它不是通用的文件系统浏览器。
-- **Git worktree**：切换器何时显示、如何创建 worktree，以及删除会产生什么影响，见 [Pi Web 里的 Worktree](./docs/worktrees.zh-CN.md)。
+- **Git worktree**：切换器何时显示、如何创建 worktree，以及删除会产生什么影响，见 [Pi Web 里的 Worktree](./worktrees.zh-CN.md)。
 
 ## 开发
 
@@ -251,7 +251,9 @@ npm run lint
 
 日常开发时不要运行 `next build` 或 `npm run build`。原版的开发服务器与构建共用 `.next/`，构建可能干扰开发服务器；仅在发布流程中执行构建。本分支的开发脚本设了 `PI_WEB_DIST_DIR=.next-dev`，两者已经分开，构建不再打扰开发服务器——但构建仍属于发布流程。
 
-贡献者文档：[国际化](./docs/i18n.md)和[发布流程](./docs/release.md)。
+开始做新功能之前，请先阅读[参与贡献](./CONTRIBUTING.zh-CN.md)，了解哪些改动在范围内以及提交 PR 前的检查项。
+
+贡献者文档：[国际化](./i18n.md)和[发布流程](./release.md)。
 
 ## 仓库结构
 
@@ -266,8 +268,8 @@ docs/            面向用户和贡献者的专题文档
 demo/            上游的静态演示站，为同步上游而保留；本 fork 不发布
 ```
 
-架构说明和详细文件地图见 [AGENTS.md](./AGENTS.md)。
+架构说明和详细文件地图见 [AGENTS.md](../AGENTS.md)。
 
 ## 许可证
 
-[MIT](./LICENSE)
+[MIT](../LICENSE)

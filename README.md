@@ -1,6 +1,6 @@
 # Pi Web (Bun)
 
-[中文文档](./README.zh-CN.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
+[中文文档](./docs/README.zh-CN.md) | [日本語](./docs/README.ja.md) | [Русский](./docs/README.ru.md)
 
 > **This is a Bun-focused fork of [agegr/pi-web](https://github.com/agegr/pi-web).** It runs on [Bun](https://bun.sh) with no Node.js, `npm` or `npx` installed, and it has its own opinion about how a coding agent should read in a browser: a long command hands off instead of holding the turn open, a `read` call opens the exact slice it returned, the composer never changes what is under your finger, and a relay dropping its HTTP/2 stream no longer costs you the run. [Differences from upstream](#differences-from-upstream) says what still differs — and what upstream has since taken over; [Bun setup](#bun-setup) gets it running. Everything else below is upstream's documentation.
 
@@ -303,6 +303,8 @@ npm run lint
 ```
 
 Do not run `next build` or `npm run build` during normal development. Upstream's dev server and build share `.next/`, so a build can interfere with a running dev server; leave builds for release work. Here the dev script sets `PI_WEB_DIST_DIR=.next-dev`, which parts them, so a build no longer disturbs the dev server — but builds still belong to release work.
+
+Before starting on a feature, read [Contributing](./CONTRIBUTING.md) for what is in scope and the pull request checklist.
 
 Contributor guides: [Internationalization](./docs/i18n.md) and [Release process](./docs/release.md).
 
