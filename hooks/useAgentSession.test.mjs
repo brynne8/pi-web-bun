@@ -363,9 +363,36 @@ test("streaming submissions cannot be stranded in an idle direct queue", () => {
 
   assert.match(queueSource, /type: "prompt"/);
   assert.match(queueSource, /streamingBehavior: behavior/);
-  assert.match(queueSource, /if \(isPromptRejectedError\(e\)\) restore\(\)/);
+  assert.match(queueSource, /const rejected = isPromptRejectedError\(e\);/);
+  assert.match(queueSource, /if \(rejected\) restore\(\)/);
+  // An accepted submission reports success so a Stop-resend keeps going; a refused one reports
+  // failure, so the texts behind it stay in the composer instead of starting runs alone.
+  assert.match(queueSource, /return !rejected;/);
   assert.doesNotMatch(queueSource, /type: "steer"/);
   assert.doesNotMatch(queueSource, /type: "follow_up"/);
+});
+
+test("Stop resends what it took from pi's queue instead of leaving it unanswered", () => {
+  const stopSource = source.slice(
+    source.indexOf("  const handleAbort = useCallback"),
+    source.indexOf("  const handleFork = useCallback"),
+  );
+  assert.match(stopSource, /sendAgentCommand<AbortCommandResult \| null>\(sid, \{ type: "abort" \}\)/);
+  assert.match(stopSource, /queuedAfterStop\(result\)/);
+  assert.match(stopSource, /await resendAfterStopRef\.current\?\.\(queued\)/);
+  // The texts keep the delivery mode pi had them in; they never take the direct queue commands.
+  assert.match(source, /behavior: "steer" as const/);
+  assert.match(source, /behavior: "followUp" as const/);
+  assert.doesNotMatch(stopSource, /type: "steer"|type: "follow_up"/);
+
+  // pi's own Esc stops the run and puts the queued text in the editor; pi-web sends it on,
+  // so the wrapper's `abort` has to hand the texts back (see lib/rpc-manager.test.mjs).
+  const resendSource = source.slice(
+    source.indexOf("  const resendAfterStop = useCallback"),
+    source.indexOf("  const handleAbortCompaction"),
+  );
+  assert.match(resendSource, /sendStreamingPrompt\(text, behavior\)/);
+  assert.match(resendSource, /if \(!await sendStreamingPrompt\(text, behavior\)\) break;/);
 });
 
 test("built-in clone switches to the independent child session", () => {

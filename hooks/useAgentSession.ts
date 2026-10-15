@@ -111,8 +111,28 @@ export interface QueuedMessages {
   followUp: string[];
 }
 
+/** One message Stop took out of pi's queue, still tagged with how it was meant to arrive. */
+export interface QueuedAfterStop {
+  text: string;
+  behavior: "steer" | "followUp";
+}
+
 function normalizeQueuedMessages(q?: { steering?: string[]; followUp?: string[] } | null): QueuedMessages {
   return { steering: q?.steering ?? [], followUp: q?.followUp ?? [] };
+}
+
+/** What the wrapper's `abort` answers with: what pi's queue held at the moment of stopping. */
+type AbortCommandResult = {
+  queuedMessages?: { steering?: string[]; followUp?: string[] } | null;
+};
+
+/** Those texts in pi's own delivery order: steering leads, follow-ups wait behind it. */
+function queuedAfterStop(result: AbortCommandResult | null | undefined): QueuedAfterStop[] {
+  const queued = result?.queuedMessages;
+  return [
+    ...(queued?.steering ?? []).map((text) => ({ text, behavior: "steer" as const })),
+    ...(queued?.followUp ?? []).map((text) => ({ text, behavior: "followUp" as const })),
+  ];
 }
 
 type ExtensionUiDialogRequest = Extract<ExtensionUiRequest, { method: "select" | "confirm" | "input" | "editor" }>;
@@ -431,6 +451,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const liveFollowFrameRef = useRef<number | null>(null);
   const executeBashRef = useRef<(command: string, excludeFromContext: boolean) => Promise<void> | undefined>(undefined);
   const handleNavigateRef = useRef<((entryId: string) => Promise<boolean>) | undefined>(undefined);
+  const resendAfterStopRef = useRef<((queued: QueuedAfterStop[]) => Promise<void>) | undefined>(undefined);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const ensuringNewSessionRef = useRef<Promise<string | null> | null>(null);
   // The command list as last loaded, and the get_commands request under way, if
@@ -1888,7 +1909,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       return;
     }
     try {
-      await sendAgentCommand(sid, { type: "abort" });
+      const result = await sendAgentCommand<AbortCommandResult | null>(sid, { type: "abort" });
+      const queued = queuedAfterStop(result);
+      if (queued.length === 0) return;
+      // The queue is empty server-side and pi's `queue_update` may not reach us while SSE is
+      // down, so clear the composer's queued rows here as handleRecallQueue does.
+      setQueuedMessages({ steering: [], followUp: [] });
+      if (!sessionHookMountedRef.current || sessionIdRef.current !== sid) return;
+      // pi's Stop puts these texts in the editor for the user to resend; pi-web sends them
+      // itself, so a steer its author wrote before stopping gets its answer instead of
+      // sitting in the composer or being swallowed by the run that was stopping.
+      await resendAfterStopRef.current?.(queued);
     } catch (e) {
       console.error("Failed to abort:", e);
     }
@@ -2274,18 +2305,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     message: string,
     behavior: "steer" | "followUp",
     images?: AttachedImage[],
-  ) => {
+  ): Promise<boolean> => {
     const sid = sessionIdRef.current;
     const restore = () => restoreSubmission(message, images, composerDraftKey);
     // A pending history edit must branch when sent, never join the current run.
     if (editEntryId) {
       restore();
-      return;
+      return false;
     }
     if (!sid) {
       restore();
       addNotice({ type: "error", message: "No active session for the queued message" });
-      return;
+      return false;
     }
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
     try {
@@ -2300,13 +2331,27 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // A transport failure after dispatch is ambiguous: the server may have
       // accepted the queued prompt before the response was lost. Restoring in
       // that case would invite a duplicate turn.
-      if (isPromptRejectedError(e)) restore();
+      const rejected = isPromptRejectedError(e);
+      if (rejected) restore();
       addNotice({
         type: "error",
         message: e instanceof Error ? e.message : String(e),
       });
+      return !rejected;
     }
+    return true;
   }, [addNotice, composerDraftKey, editEntryId, restoreSubmission]);
+
+  // The messages Stop took out of pi's queue get the run their author meant: the first starts
+  // it and the rest queue onto it, exactly the paths a hand-typed message takes, in order.
+  const resendAfterStop = useCallback(async (queued: QueuedAfterStop[]) => {
+    for (const { text, behavior } of queued) {
+      // A text that never went out (a history edit waiting to branch, a refused prompt) is
+      // back in the composer; the ones behind it stay there rather than start a run alone.
+      if (!await sendStreamingPrompt(text, behavior)) break;
+    }
+  }, [sendStreamingPrompt]);
+  resendAfterStopRef.current = resendAfterStop;
 
   const handleSteer = useCallback(async (message: string, images?: AttachedImage[]) => {
     await sendStreamingPrompt(message, "steer", images);

@@ -945,11 +945,17 @@ export class AgentSessionWrapper {
         }
       }
 
-      case "abort":
+      case "abort": {
         this.forceShutdownOnIdle = true;
         // Arm the forced cleanup now: the reset above ran before this flag,
         // and the final reset only runs once the SDK run has unwound.
         this.resetIdleTimer();
+        // Empty pi's queue before anything is awaited, as pi's own Esc does. A message still
+        // queued would otherwise be delivered by the run Stop is unwinding — the loop polls
+        // steering after the aborted tool calls and appends the message before it notices the
+        // signal — which leaves a user message in the transcript with no answer and no run to
+        // answer it. Queued images are lost with it: pi keeps only the text.
+        const queuedAtStop = this.inner.clearQueue();
         // Stop must unwind extension commands that have not started the agent yet.
         this.extensionUiAbortController.abort(new DOMException("Extension UI cancelled by Stop", "AbortError"));
         // A prompt still waiting for MCP servers is withdrawn before it starts a run.
@@ -960,10 +966,13 @@ export class AgentSessionWrapper {
         }
         try {
           await this.withFinalIdleReset(() => this.inner.abort());
-          return null;
+          // pi's CLI puts these texts in the editor; pi-web hands them back so the client
+          // can send them to a run of their own (see `handleAbort`).
+          return { queuedMessages: queuedAtStop };
         } finally {
           if (!this.isRunning()) this.forceShutdownOnIdle = false;
         }
+      }
 
       case "get_state": {
         const model = this.inner.model;
