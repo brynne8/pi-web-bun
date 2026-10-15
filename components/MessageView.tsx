@@ -27,6 +27,8 @@ import { BgTaskNotificationView } from "./BgTaskNotificationView";
 import { BG_TASK_NOTIFICATION_CUSTOM_TYPE, stripBgTaskNotificationPrefix } from "@/lib/bg-task-notification";
 import { stripSubagentNotificationPrefix } from "@/lib/subagent-notification";
 import { streamRateKey, streamRateStart, streamTokensPerSecond, type StreamRateStart } from "@/lib/stream-token-rate";
+import { getTranscriptNotices } from "@/lib/transcript-notices";
+import { TRANSCRIPT_NOTICE_WARNING_COLOR, transcriptNoticeText } from "@/components/TranscriptNotices";
 import type {
   AgentMessage,
   UserMessage,
@@ -339,6 +341,7 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.prevTimestamp === next.prevTimestamp
     && prev.blockIndexOffset === next.blockIndexOffset
     && prev.isTurnPart === next.isTurnPart
+    && prev.isTurnTail === next.isTurnTail
     && prev.sessionId === next.sessionId;
 });
 
@@ -954,8 +957,10 @@ function AssistantMessageView({
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {/* Not keyed by the entry id: a message of this run gets one when the file is
+            read again, and its blocks keep their state across that read (#1184). */}
         {blockItems.map(({ block, originalIndex }) => (
-          <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} searchTarget={block === searchBlock} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
+          <BlockView key={originalIndex} block={block} searchTarget={block === searchBlock} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
         ))}
       </div>
 
@@ -1056,6 +1061,16 @@ export function ThinkingBlock({ block, duration, isStreaming, cwd, onOpenFile, s
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The block outlives a change of entry id (a message of this run gets its id
+  // when the file is read again, #1184): what was loaded for another entry goes.
+  const loadKey = `${sessionId}:${entryId}:${blockIndex}`;
+  const [loadedKey, setLoadedKey] = useState(loadKey);
+  if (loadedKey !== loadKey) {
+    setLoadedKey(loadKey);
+    setContent(null);
+    setLoading(false);
+    setError(null);
+  }
   const tRef = useRef(t);
   tRef.current = t;
   const preview = getThinkingPreview(block.thinking);
@@ -1800,6 +1815,8 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
   const summary = getMessageText(message.content);
   const time = formatTime(message.timestamp);
   const tokensBefore = (message.details as { tokensBefore?: unknown } | undefined)?.tokensBefore;
+  // pi's showCacheMissNotices (#1265): what the compaction billed, in its card.
+  const costNotice = getTranscriptNotices(message).find((notice) => notice.kind === "summary_cost" && notice.source === "compaction");
 
   return (
     <div style={{ marginBottom: 16 }}>
@@ -1858,6 +1875,11 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
               {typeof tokensBefore === "number" && Number.isFinite(tokensBefore) && (
                 <span style={{ display: "block", marginTop: 3, color: "var(--text-muted)", fontSize: "calc(13px + var(--chat-font-size-offset, 0px))", lineHeight: 1.5 }}>
                   {t("i18n.compactedFromTokens", { tokens: tokensBefore.toLocaleString() })}
+                </span>
+              )}
+              {costNotice && (
+                <span style={{ display: "block", marginTop: 2, color: TRANSCRIPT_NOTICE_WARNING_COLOR, fontSize: "calc(12px + var(--chat-font-size-offset, 0px))", lineHeight: 1.5 }}>
+                  {transcriptNoticeText(t, costNotice)}
                 </span>
               )}
             </span>

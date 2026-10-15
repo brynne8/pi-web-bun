@@ -1,14 +1,21 @@
 // Cache session-list metadata without building the SDK's unused allMessagesText.
 // Normal listings rescan only new/changed files; summary listings reuse whatever
 // the index already holds and fall back to header/stat metadata for the files
-// that changed, which a later normal listing hydrates.
-// ponytail: size/mtime fingerprints miss same-size edits with restored mtime;
-// use content hashes if detecting those edits becomes necessary.
-import fs, { closeSync, existsSync, openSync, readFileSync, readSync } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+// that changed, which a later normal listing hydrates. A file that only grew
+// since its last scan is parsed from where that scan stopped (#1259).
+// ponytail: size/mtime fingerprints miss same-size edits with restored mtime,
+// and the resume check compares only the inode, the header line and the bytes
+// before the resume offset: an in-place edit that keeps all three (same-length,
+// same inode), then an append, reads as an append, and the stale row persists
+// across later appends until a change that does not grow the file, or replaces
+// it, forces a full read. Use content hashes if detecting those edits becomes
+// necessary.
+import { createHash } from "node:crypto";
+import fs, { existsSync, readFileSync } from "node:fs";
+import { open, readdir, stat } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { basename, join } from "node:path";
-import { createInterface } from "node:readline";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { writePrivateFileAtomicSync } from "./atomic-file";
 
@@ -33,9 +40,29 @@ interface Fingerprint {
 
 const SUMMARY_HEADER_MAX_BYTES = 64 * 1024;
 
+/**
+ * Where the next scan of a file that only grew picks up. `offset` is just past
+ * the last newline-terminated line parsed; the row's own name, count and first
+ * message are the running totals (a scan that counted an unterminated last line
+ * keeps no resume point). `check` hashes the header line, [0, headerEnd), with
+ * the RESUME_SAMPLE_BYTES before `offset`: a rewrite in place fails it. `ino`
+ * catches a file replaced by a rename (sed -i, editors, git checkout, a backup
+ * restored), whatever its bytes.
+ */
+interface ResumePoint {
+	ino: number;
+	offset: number;
+	headerEnd: number;
+	check: string;
+	/** False while no user message had text: the row shows "(no messages)". */
+	hasFirstMessage: boolean;
+	lastActivityTime?: number;
+}
+
 interface IndexEntry {
 	fp: Fingerprint;
 	info: ScannedSessionInfo;
+	resume?: ResumePoint;
 }
 
 type RawEntry = Record<string, unknown>;
@@ -44,12 +71,25 @@ function isRecord(value: unknown): value is RawEntry {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+// Bump on any change to what foldEntry() counts: a resumed scan adds to totals
+// counted under the rules its prefix was scanned with.
 const INDEX_FORMAT_VERSION = 1;
+/** A trailing throttle: a run's rescans rewrite the index once per window. */
+const INDEX_PERSIST_DELAY_MS = 5_000;
+const RESUME_SAMPLE_BYTES = 512;
+const NEWLINE = Buffer.from("\n");
 
 declare global {
 	var __piWebScanIndex: Map<string, IndexEntry> | undefined;
 	var __piWebScanIndexLoaded: boolean | undefined;
-	var __piWebScanIndexSaveQueued: boolean | undefined;
+	var __piWebScanIndexSave: PendingIndexSave | undefined;
+}
+
+/** A queued index write: where it goes and what, both fixed by the last scan that changed it. */
+interface PendingIndexSave {
+	path: string;
+	entries: Array<[string, IndexEntry]>;
+	timer: NodeJS.Timeout;
 }
 
 function parseLine(line: string): RawEntry | null {
@@ -63,11 +103,12 @@ function parseLine(line: string): RawEntry | null {
 }
 
 /** Read only the first physical line needed to identify a session file. */
-function readSessionHeaderSummary(filePath: string): RawEntry | null {
-	const fd = openSync(filePath, "r");
+async function readSessionHeaderSummary(filePath: string): Promise<RawEntry | null> {
+	let handle: FileHandle | undefined;
 	try {
+		handle = await open(filePath, "r");
 		const buffer = Buffer.allocUnsafe(SUMMARY_HEADER_MAX_BYTES);
-		const bytesRead = readSync(fd, buffer, 0, buffer.length, 0);
+		const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
 		if (bytesRead <= 0) return null;
 		const source = buffer.subarray(0, bytesRead).toString("utf8");
 		for (const line of source.split("\n")) {
@@ -79,7 +120,7 @@ function readSessionHeaderSummary(filePath: string): RawEntry | null {
 	} catch {
 		return null;
 	} finally {
-		closeSync(fd);
+		await handle?.close().catch(() => undefined);
 	}
 }
 
@@ -94,12 +135,21 @@ function hasMatchingFingerprint(
 	);
 }
 
+/** Only a file larger than at its last scan may resume where that scan stopped. */
+function hasGrown(cached: IndexEntry | undefined, fingerprint: Fingerprint): cached is IndexEntry {
+	return Boolean(
+		cached?.resume
+		&& fingerprint.size > cached.fp.size
+		&& fingerprint.size >= cached.resume.offset,
+	);
+}
+
 /** Build a session row from the header alone, without parsing the transcript. */
-function deferredSessionInfo(
+async function deferredSessionInfo(
 	filePath: string,
 	fingerprint: Fingerprint,
-): ScannedSessionInfo | null {
-	const header = readSessionHeaderSummary(filePath);
+): Promise<ScannedSessionInfo | null> {
+	const header = await readSessionHeaderSummary(filePath);
 	if (
 		!header
 		|| typeof header.id !== "string"
@@ -154,93 +204,271 @@ function activityTimeOf(entry: RawEntry): number | undefined {
 	return Number.isNaN(t) ? undefined : t;
 }
 
-// Uses the SDK's buildSessionInfo() semantics for displayed metadata.
-export async function scanSessionFileInfo(
+interface SessionHeader {
+	id: string;
+	cwd: string;
+	created: Date;
+	parentSessionPath?: string;
+	/** NaN unless the header's timestamp is a string. */
+	time: number;
+	/** The header line and its newline, kept when a later scan may resume. */
+	head?: Buffer;
+}
+
+interface ScanTotals {
+	name?: string;
+	messageCount: number;
+	firstMessage: string;
+	lastActivityTime?: number;
+}
+
+function readHeader(entry: RawEntry, head: Buffer | undefined): SessionHeader {
+	return {
+		id: entry.id as string,
+		cwd: typeof entry.cwd === "string" ? entry.cwd : "",
+		created: new Date(entry.timestamp as string),
+		parentSessionPath: typeof entry.parentSession === "string" ? entry.parentSession : undefined,
+		time: typeof entry.timestamp === "string" ? new Date(entry.timestamp).getTime() : NaN,
+		// A resumed scan rebuilds the header from the row, which holds it
+		// faithfully only for a string id and timestamp.
+		head: typeof entry.id === "string" && typeof entry.timestamp === "string" ? head : undefined,
+	};
+}
+
+// Uses the SDK's buildSessionInfo() semantics for displayed metadata. A change
+// to these rules must bump INDEX_FORMAT_VERSION (resumed totals keep the old ones).
+function foldEntry(totals: ScanTotals, entry: RawEntry): void {
+	if (entry.type === "session_info") {
+		totals.name =
+			typeof entry.name === "string" && entry.name.trim()
+				? entry.name.trim()
+				: undefined;
+	}
+	if (entry.type !== "message") return;
+	totals.messageCount++;
+
+	const activityTime = activityTimeOf(entry);
+	if (typeof activityTime === "number") {
+		totals.lastActivityTime = Math.max(totals.lastActivityTime ?? 0, activityTime);
+	}
+
+	if (totals.firstMessage) return;
+	const message = entry.message as RawEntry | undefined;
+	if (
+		!message ||
+		typeof message.role !== "string" ||
+		!("content" in message)
+	)
+		return;
+	if (message.role !== "user") return;
+	totals.firstMessage = extractTextContent(message);
+}
+
+function sampleCheck(head: Buffer, tail: Buffer): string {
+	return createHash("sha1").update(head).update(tail).digest("base64");
+}
+
+/** Drop leading parts not needed for the last RESUME_SAMPLE_BYTES of `parts`. */
+function keepLastBytes(parts: Buffer[]): Buffer[] {
+	let total = 0;
+	for (const part of parts) total += part.length;
+	let first = 0;
+	while (first < parts.length - 1 && total - parts[first].length >= RESUME_SAMPLE_BYTES) {
+		total -= parts[first].length;
+		first++;
+	}
+	return first > 0 ? parts.slice(first) : parts;
+}
+
+/**
+ * One newline-free run of bytes split into lines as the scan's readline read
+ * did on Node 22: \r\n and a lone \r end a line. U+2028 and U+2029, which
+ * JSON.stringify leaves raw and Node 24's readline splits on, stay inside the
+ * line, as pi's own loader keeps them.
+ */
+function linesOf(bytes: Buffer): string[] {
+	const text = bytes.toString("utf8");
+	return text.includes("\r") ? text.split("\r") : [text];
+}
+
+interface LineScan {
+	/** Just past the last newline read. */
+	offset: number;
+	/** The RESUME_SAMPLE_BYTES before `offset` (fewer near the start). */
+	sample: Buffer;
+	/** The bytes after the last newline: a line its writer may still be appending. */
+	rest: Buffer;
+}
+
+/**
+ * Hand each newline-terminated line from `start` on to `onLine`, with the
+ * offset just past its newline. Returns null when `onLine` returns false.
+ */
+async function readLines(
 	filePath: string,
-): Promise<ScannedSessionInfo | null> {
+	start: number,
+	sample: Buffer,
+	onLine: (bytes: Buffer, end: number) => boolean,
+): Promise<LineScan | null> {
+	let offset = start;
+	let pending: Buffer[] = [];
+	// The bytes read up to `offset`, as views, trimmed to what the sample needs
+	// once per chunk (not per line: a full scan of short lines stays as fast).
+	let read = [sample];
+	for await (const chunk of fs.createReadStream(filePath, { start }) as AsyncIterable<Buffer>) {
+		let newline = chunk.indexOf(0x0a);
+		if (newline === -1) {
+			pending.push(chunk);
+			continue;
+		}
+		const carried = pending;
+		let lineStart = 0;
+		while (newline !== -1) {
+			const piece = chunk.subarray(lineStart, newline);
+			const bytes = pending.length > 0 ? Buffer.concat([...pending, piece]) : piece;
+			pending = [];
+			offset += bytes.length + 1;
+			if (!onLine(bytes, offset)) return null;
+			lineStart = newline + 1;
+			newline = chunk.indexOf(0x0a, lineStart);
+		}
+		read = keepLastBytes([...read, ...carried, chunk.subarray(0, lineStart)]);
+		if (lineStart < chunk.length) pending.push(chunk.subarray(lineStart));
+	}
+	const joined = Buffer.concat(read);
+	return {
+		offset,
+		sample: joined.subarray(Math.max(0, joined.length - RESUME_SAMPLE_BYTES)),
+		rest: Buffer.concat(pending),
+	};
+}
+
+/**
+ * The header line and the bytes before the resume offset, when they still hash
+ * to the resume point's check; null sends the caller to a full scan.
+ */
+async function readResumeSample(
+	filePath: string,
+	resume: ResumePoint,
+): Promise<{ head: Buffer; tail: Buffer } | null> {
+	const handle = await open(filePath, "r");
+	try {
+		const tailStart = Math.max(0, resume.offset - RESUME_SAMPLE_BYTES);
+		const head = Buffer.alloc(resume.headerEnd);
+		const tail = Buffer.alloc(resume.offset - tailStart);
+		const headRead = await handle.read(head, 0, head.length, 0);
+		const tailRead = await handle.read(tail, 0, tail.length, tailStart);
+		if (headRead.bytesRead !== head.length || tailRead.bytesRead !== tail.length) return null;
+		return sampleCheck(head, tail) === resume.check ? { head, tail } : null;
+	} finally {
+		await handle.close();
+	}
+}
+
+/**
+ * Scan a session file for its row, from where `previous` stopped when the
+ * file only grew since and its sampled prefix is unchanged, else from byte 0.
+ * Either way the row is the one a full read of the file gives.
+ */
+async function scanSessionFile(
+	filePath: string,
+	previous?: IndexEntry,
+): Promise<Omit<IndexEntry, "fp"> | null> {
 	try {
 		const stats = await stat(filePath);
-		let header: RawEntry | null = null;
-		let name: string | undefined;
-		let messageCount = 0;
-		let firstMessage = "";
-		let lastActivityTime: number | undefined;
-
-		const rl = createInterface({
-			input: fs.createReadStream(filePath, { encoding: "utf8" }),
-			crlfDelay: Infinity,
-		});
-
-		for await (const line of rl) {
-			const entry = parseLine(line);
-			if (!entry) continue;
-
-			if (!header) {
-				if (entry.type !== "session") return null;
-				header = entry;
-				continue;
-			}
-
-			if (entry.type === "session_info") {
-				name =
-					typeof entry.name === "string" && entry.name.trim()
-						? entry.name.trim()
-						: undefined;
-			}
-			if (entry.type !== "message") continue;
-			messageCount++;
-
-			const activityTime = activityTimeOf(entry);
-			if (typeof activityTime === "number") {
-				lastActivityTime = Math.max(lastActivityTime ?? 0, activityTime);
-			}
-
-			const message = entry.message as RawEntry | undefined;
-			if (
-				!message ||
-				typeof message.role !== "string" ||
-				!("content" in message)
-			)
-				continue;
-			if (message.role !== "user" && message.role !== "assistant") continue;
-
-			const textContent = extractTextContent(message);
-			if (!textContent) continue;
-			if (!firstMessage && message.role === "user") firstMessage = textContent;
+		const resumed = previous?.resume && previous.resume.ino === stats.ino
+			? await readResumeSample(filePath, previous.resume)
+			: null;
+		let header: SessionHeader | null = null;
+		let headerEnd = 0;
+		let start = 0;
+		let sample: Buffer = Buffer.alloc(0);
+		const totals: ScanTotals = { messageCount: 0, firstMessage: "" };
+		if (previous?.resume && resumed) {
+			const { info, resume } = previous;
+			start = resume.offset;
+			sample = resumed.tail;
+			header = {
+				id: info.id,
+				cwd: info.cwd,
+				created: new Date(info.created.getTime()),
+				parentSessionPath: info.parentSessionPath,
+				time: info.created.getTime(),
+				head: resumed.head,
+			};
+			headerEnd = resume.headerEnd;
+			totals.name = info.name;
+			totals.messageCount = info.messageCount;
+			totals.firstMessage = resume.hasFirstMessage ? info.firstMessage : "";
+			totals.lastActivityTime = resume.lastActivityTime;
 		}
 
-		if (!header) return null;
+		let restCounted = false;
+		const parseLines = (bytes: Buffer, end: number | null): boolean => {
+			for (const line of linesOf(bytes)) {
+				const entry = parseLine(line);
+				if (!entry) continue;
+				if (end === null) restCounted = true;
+				if (!header) {
+					if (entry.type !== "session") return false;
+					// Only a header on the file's first line is sampled for resuming.
+					const firstLine = end !== null && end === bytes.length + 1;
+					header = readHeader(entry, firstLine ? Buffer.concat([bytes, NEWLINE]) : undefined);
+					headerEnd = firstLine ? end : 0;
+					continue;
+				}
+				foldEntry(totals, entry);
+			}
+			return true;
+		};
 
-		const cwd = typeof header.cwd === "string" ? header.cwd : "";
-		const parentSessionPath =
-			typeof header.parentSession === "string"
-				? header.parentSession
-				: undefined;
-		const headerTime =
-			typeof header.timestamp === "string"
-				? new Date(header.timestamp).getTime()
-				: NaN;
+		const scan = await readLines(filePath, start, sample, parseLines);
+		// The unterminated rest counts for this listing, as it did when the scan
+		// read lines with readline; a resume point is kept only when it changed nothing.
+		if (!scan || (scan.rest.length > 0 && !parseLines(scan.rest, null))) return null;
+		if (!header) return null;
+		const { id, cwd, created, parentSessionPath, time, head } = header;
+
 		const modified =
-			typeof lastActivityTime === "number" && lastActivityTime > 0
-				? new Date(lastActivityTime)
-				: !Number.isNaN(headerTime)
-					? new Date(headerTime)
+			typeof totals.lastActivityTime === "number" && totals.lastActivityTime > 0
+				? new Date(totals.lastActivityTime)
+				: !Number.isNaN(time)
+					? new Date(time)
 					: stats.mtime;
 
 		return {
-			path: filePath,
-			id: header.id as string,
-			cwd,
-			name,
-			parentSessionPath,
-			created: new Date(header.timestamp as string),
-			modified,
-			messageCount,
-			firstMessage: firstMessage || "(no messages)",
+			info: {
+				path: filePath,
+				id,
+				cwd,
+				name: totals.name,
+				parentSessionPath,
+				created,
+				modified,
+				messageCount: totals.messageCount,
+				firstMessage: totals.firstMessage || "(no messages)",
+			},
+			// An inode of 0 (no stable one on this filesystem) never resumes.
+			resume: head && headerEnd > 0 && !restCounted && stats.ino > 0
+				? {
+					ino: stats.ino,
+					offset: scan.offset,
+					headerEnd,
+					check: sampleCheck(head, scan.sample),
+					hasFirstMessage: totals.firstMessage !== "",
+					...(totals.lastActivityTime !== undefined ? { lastActivityTime: totals.lastActivityTime } : {}),
+				}
+				: undefined,
 		};
 	} catch {
 		return null;
 	}
+}
+
+export async function scanSessionFileInfo(
+	filePath: string,
+): Promise<ScannedSessionInfo | null> {
+	return (await scanSessionFile(filePath))?.info ?? null;
 }
 
 async function enumerateSessionFiles(sessionsDir: string): Promise<string[]> {
@@ -288,8 +516,30 @@ function getIndex(): Map<string, IndexEntry> {
 	return globalThis.__piWebScanIndex;
 }
 
-function indexFilePath(): string {
-	return join(getAgentDir(), "pi-web-session-index.json");
+function indexFilePath(agentDir = getAgentDir()): string {
+	return join(agentDir, "pi-web-session-index.json");
+}
+
+/** A persisted resume point, or undefined when it is missing or malformed (the entry stays). */
+function readResumePoint(value: unknown): ResumePoint | undefined {
+	if (!isRecord(value)) return undefined;
+	const { ino, offset, headerEnd, check, hasFirstMessage, lastActivityTime } = value;
+	if (
+		typeof ino !== "number" || !Number.isFinite(ino) || ino <= 0 ||
+		typeof headerEnd !== "number" || !Number.isSafeInteger(headerEnd) || headerEnd <= 0 ||
+		typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < headerEnd ||
+		typeof check !== "string" ||
+		typeof hasFirstMessage !== "boolean" ||
+		(lastActivityTime !== undefined && (typeof lastActivityTime !== "number" || !Number.isFinite(lastActivityTime)))
+	) return undefined;
+	return {
+		ino,
+		offset,
+		headerEnd,
+		check,
+		hasFirstMessage,
+		...(lastActivityTime !== undefined ? { lastActivityTime } : {}),
+	};
 }
 
 function loadPersistedIndex(): void {
@@ -332,6 +582,8 @@ function loadPersistedIndex(): void {
 					created,
 					modified,
 				},
+				// Entries from before resume points get one full scan when they change.
+				resume: readResumePoint(entry.resume),
 			});
 		}
 	} catch {
@@ -339,22 +591,38 @@ function loadPersistedIndex(): void {
 	}
 }
 
-function queueIndexPersist(): void {
-	if (globalThis.__piWebScanIndexSaveQueued) return;
-	globalThis.__piWebScanIndexSaveQueued = true;
-	queueMicrotask(() => {
-		globalThis.__piWebScanIndexSaveQueued = undefined;
-		try {
-			const entries: Record<string, IndexEntry> = {};
-			for (const [pathKey, entry] of getIndex()) entries[pathKey] = entry;
-			writePrivateFileAtomicSync(
-				indexFilePath(),
-				JSON.stringify({ version: INDEX_FORMAT_VERSION, entries }),
-			);
-		} catch {
-			// persistence is best-effort; the in-memory index remains authoritative
-		}
-	});
+function persistIndex(): void {
+	const pending = globalThis.__piWebScanIndexSave;
+	if (!pending) return;
+	clearTimeout(pending.timer);
+	globalThis.__piWebScanIndexSave = undefined;
+	try {
+		writePrivateFileAtomicSync(
+			pending.path,
+			JSON.stringify({ version: INDEX_FORMAT_VERSION, entries: Object.fromEntries(pending.entries) }),
+		);
+	} catch {
+		// persistence is best-effort; the in-memory index remains authoritative
+	}
+}
+
+/**
+ * Write the index to `path` once INDEX_PERSIST_DELAY_MS has passed, with what
+ * it holds now. Later scans of the same agent dir only replace what is written;
+ * a scan of another one sends the pending write to its own dir first.
+ */
+function queueIndexPersist(path: string): void {
+	const entries = [...getIndex()];
+	const pending = globalThis.__piWebScanIndexSave;
+	if (pending?.path === path) {
+		pending.entries = entries;
+		return;
+	}
+	persistIndex();
+	const timer = setTimeout(persistIndex, INDEX_PERSIST_DELAY_MS);
+	// A pending write never holds a process open: a lost one means a rescan.
+	timer.unref?.();
+	globalThis.__piWebScanIndexSave = { path, entries, timer };
 }
 
 /**
@@ -368,7 +636,8 @@ export async function listSessionsIncremental(
 	loadPersistedIndex();
 	const deferDetails = options.deferDetails ?? false;
 
-	const sessionsDir = join(getAgentDir(), "sessions");
+	const agentDir = getAgentDir();
+	const sessionsDir = join(agentDir, "sessions");
 	const files = await enumerateSessionFiles(sessionsDir);
 	globalThis.__piSessionMembership = { files: new Set(files) };
 
@@ -394,7 +663,8 @@ export async function listSessionsIncremental(
 		}),
 	);
 
-	const changed: Array<{ filePath: string; fp: Fingerprint; resultIndex: number }> = [];
+	const deferred: Array<{ filePath: string; fp: Fingerprint; resultIndex: number }> = [];
+	const changed: Array<{ filePath: string; fp: Fingerprint; resultIndex: number; previous?: IndexEntry }> = [];
 	const results: (ScannedSessionInfo | null)[] = new Array(files.length).fill(null);
 	const mtimes: number[] = new Array(files.length).fill(Number.NEGATIVE_INFINITY);
 	for (const [resultIndex, { filePath, fp }] of fingerprints.entries()) {
@@ -415,25 +685,30 @@ export async function listSessionsIncremental(
 		if (deferDetails) {
 			// Header and stat only: a later normal listing fills in the transcript
 			// details, so a first paint does not wait on parsing every file.
-			const summary = deferredSessionInfo(filePath, fp);
-			if (summary) results[resultIndex] = summary;
-			else index.delete(filePath);
+			deferred.push({ filePath, fp, resultIndex });
 			continue;
 		}
-		changed.push({ filePath, fp, resultIndex });
+		// A running session's file grows on every append: parse only the tail.
+		changed.push({ filePath, fp, resultIndex, previous: hasGrown(cached, fp) ? cached : undefined });
 	}
 
-	await runPool(changed, async ({ filePath, fp, resultIndex }) => {
-		const info = await scanSessionFileInfo(filePath);
-		if (info) {
-			index.set(filePath, { fp, info });
-			results[resultIndex] = info;
+	await runPool(deferred, async ({ filePath, fp, resultIndex }) => {
+		const summary = await deferredSessionInfo(filePath, fp);
+		if (summary) results[resultIndex] = summary;
+		else index.delete(filePath);
+	});
+
+	await runPool(changed, async ({ filePath, fp, resultIndex, previous }) => {
+		const scanned = await scanSessionFile(filePath, previous);
+		if (scanned) {
+			index.set(filePath, { fp, ...scanned });
+			results[resultIndex] = scanned.info;
 		} else {
 			index.delete(filePath);
 		}
 	});
 
-	if (changed.length > 0 || stale.length > 0) queueIndexPersist();
+	if (changed.length > 0 || stale.length > 0) queueIndexPersist(indexFilePath(agentDir));
 
 	// Preserve catalogue order for timestamp ties, independently of cache hits
 	// and the order in which concurrent file reads complete. Since pi 0.86 the
@@ -450,11 +725,17 @@ export async function listSessionsIncremental(
 		.map(({ info }) => info);
 }
 
-/** Test seam: drop all in-memory index state. */
+/** Test seam: write a pending index save now instead of after its delay. */
+export function flushSessionScanIndexForTests(): void {
+	persistIndex();
+}
+
+/** Test seam: drop all in-memory index state and any pending index save. */
 export function resetSessionScanIndexForTests(): void {
+	clearTimeout(globalThis.__piWebScanIndexSave?.timer);
 	globalThis.__piWebScanIndex = undefined;
 	globalThis.__piWebScanIndexLoaded = undefined;
-	globalThis.__piWebScanIndexSaveQueued = undefined;
+	globalThis.__piWebScanIndexSave = undefined;
 	globalThis.__piSessionMembership = undefined;
 	globalThis.__piSessionMembershipCheck = undefined;
 }

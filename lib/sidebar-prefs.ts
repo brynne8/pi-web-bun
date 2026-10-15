@@ -1,7 +1,7 @@
 /**
  * Per-browser sidebar preferences: the active tab (sessions or files), the
- * user's explicit project group expand/collapse choices, whether the pinned
- * section is collapsed, whether the files section below the sessions is
+ * user's explicit project group expand/collapse choices, the archive view's
+ * folded projects, whether the pinned section is collapsed, whether the files section below the sessions is
  * collapsed, whether the files tab or section lists ignored files, and the
  * folders the worktree listing last found outside git.
  * Best-effort localStorage, like the other sidebar memories: privacy mode or
@@ -17,6 +17,7 @@ const GROUP_EXPANSION_STORAGE_KEY = "pi-web:sidebar-groups-v2";
  * move to v2 (loadGroupExpansion).
  */
 const LEGACY_GROUP_EXPANSION_STORAGE_KEY = "pi-web:sidebar-groups";
+const ARCHIVE_COLLAPSED_STORAGE_KEY = "pi-web:sidebar-archive-collapsed";
 const PINNED_COLLAPSED_STORAGE_KEY = "pi-web:sidebar-pins-collapsed";
 const SHOW_IGNORED_FILES_STORAGE_KEY = "pi-web:sidebar-files-show-ignored";
 const FILES_COLLAPSED_STORAGE_KEY = "pi-web:sidebar-files-collapsed";
@@ -123,6 +124,37 @@ export function saveGroupExpansion(
       ? entries.slice(entries.length - MAX_GROUP_EXPANSION_ENTRIES)
       : entries;
     storage.setItem(GROUP_EXPANSION_STORAGE_KEY, JSON.stringify(Object.fromEntries(kept)));
+  } catch {
+    // Persistence is best-effort.
+  }
+}
+
+/**
+ * The archive view's folded projects (project keys, oldest choice first). Its
+ * groups are open unless folded here: apart from the main tree's choices, so
+ * folding a project's archive never folds its live sessions.
+ */
+export function loadArchiveCollapsed(storage: StorageLike | null = getBrowserStorage()): string[] {
+  if (!storage) return [];
+  try {
+    const raw = storage.getItem(ARCHIVE_COLLAPSED_STORAGE_KEY);
+    const value: unknown = raw === null ? [] : JSON.parse(raw);
+    if (!Array.isArray(value)) return [];
+    const keys = value.filter((key): key is string => typeof key === "string" && key !== "");
+    return [...new Set(keys)].slice(-MAX_GROUP_EXPANSION_ENTRIES);
+  } catch {
+    return [];
+  }
+}
+
+/** Keeps the newest 300 keys; to mark one as recent, put it last. */
+export function saveArchiveCollapsed(
+  keys: readonly string[],
+  storage: StorageLike | null = getBrowserStorage(),
+): void {
+  if (!storage) return;
+  try {
+    storage.setItem(ARCHIVE_COLLAPSED_STORAGE_KEY, JSON.stringify([...new Set(keys)].slice(-MAX_GROUP_EXPANSION_ENTRIES)));
   } catch {
     // Persistence is best-effort.
   }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ModelsConfigReadError, readModelsConfig, writeModelsConfig } from "@/lib/models-config-store";
+import { ContextWindowError, normalizeContextWindowOverrides } from "@/lib/model-context";
 
 export const dynamic = "force-dynamic";
 
@@ -17,9 +18,12 @@ export async function GET() {
 export async function PUT(req: Request) {
   try {
     const body = await req.json() as Record<string, unknown>;
-    writeModelsConfig(body);
+    writeModelsConfig(normalizeContextWindowOverrides(body));
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error instanceof ContextWindowError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     if (error instanceof ModelsConfigReadError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }

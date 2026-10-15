@@ -317,6 +317,11 @@ export function createProjectCommandBashExtension(options: {
               ],
             }
           : {}),
+        // This stands in for pi's built-in bash, so like it, it is active only when named:
+        // by `defaultTools` (pi's default list names it), a preset or `set_tools`. Otherwise
+        // pi turns it on at every start and reload, as it does any extension tool, whatever
+        // `defaultTools` leaves out (#1235).
+        defaultActive: false,
         async execute(toolCallId, params, signal, onUpdate, context) {
           const input = params as { command: string; timeout?: number; run_in_background?: boolean; max_output_lines?: number };
           if (bg && input.run_in_background === true) {

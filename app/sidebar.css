@@ -810,37 +810,20 @@ a.session-tree-main {
   flex: none;
 }
 
-/* Archive view: one header per project above its archived sessions, a
-   project's name as the main tree's headers show it, in the text column (it
-   folds nothing, so no chevron). As tall as a group's header, but no spacer
-   row parts the projects, so the name sits at the bottom of its row, near
-   its own sessions, at any height (a phone's 44px too). */
-.session-tree-archive-group {
-  align-items: flex-end;
-  gap: 5px;
-  padding: 0 8px 3px calc(var(--session-tree-inset-left) + 20px);
-  color: var(--text-muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.session-tree-archive-group-name {
-  min-width: 0;
-  overflow: hidden;
-  font-weight: 600;
-  text-overflow: ellipsis;
-}
-
+/* Archive view: one header per project above its archived sessions, a main
+   group's header (chevron, name, ⋯ on hover) that folds its rows, with the
+   count after the name in the meta color, shown folded or not. */
 .session-tree-archive-group-count {
   flex: none;
+  margin-left: 2px;
   color: var(--text-dim);
+  font-weight: 400;
 }
 
 /* Phone layout: 44px rows, a step larger type for titles and project names,
    ⋯ and the group buttons always shown, no archive quick button. */
 .session-tree.is-mobile .session-tree-title,
-.session-tree.is-mobile .session-tree-group-toggle,
-.session-tree.is-mobile .session-tree-archive-group {
+.session-tree.is-mobile .session-tree-group-toggle {
   font-size: 13px;
 }
 
@@ -1120,6 +1103,7 @@ a.session-tree-main {
 .sidebar-search-toggle:focus-visible,
 .sidebar-tab:focus-visible,
 .sidebar-archive-back:focus-visible,
+.sidebar-archive-menu-button:focus-visible,
 .sidebar-tool-button:focus-visible,
 .sidebar-files-section-toggle:focus-visible {
   outline: 2px solid var(--accent);
@@ -1429,6 +1413,28 @@ a.session-tree-main {
 .sidebar-archive-count {
   color: var(--text-dim);
   font-weight: 400;
+}
+
+/* The archive's ⋯ at the bar's right end: fold, Restore all, Delete…. */
+.sidebar-archive-menu-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.sidebar-archive-menu-button:hover,
+.sidebar-archive-menu-button.is-active {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .sidebar-icon-back {

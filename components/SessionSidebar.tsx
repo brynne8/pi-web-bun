@@ -9,6 +9,7 @@ import { getProjectActivity, getRecentProjects } from "@/lib/project-groups";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
 import {
   adjacentProjectMove,
+  archivedFamilyIds,
   buildArchiveRows,
   buildSessionTree,
   effectiveGroupExpansion,
@@ -29,6 +30,7 @@ import {
 } from "@/lib/session-tree";
 import {
   forgetRetiredSidebarKeys,
+  loadArchiveCollapsed,
   loadFilesCollapsed,
   loadGroupExpansion,
   loadNonGitCwds,
@@ -36,6 +38,7 @@ import {
   loadShowIgnoredFiles,
   loadSidebarTab,
   rememberCwdGitStatus,
+  saveArchiveCollapsed,
   saveFilesCollapsed,
   saveGroupExpansion,
   savePinnedCollapsed,
@@ -102,6 +105,7 @@ import {
   FolderIcon,
   MentionIcon,
   MessageIcon,
+  MoreIcon,
   ForkIcon,
   OpenInNewTabIcon,
   PencilIcon,
@@ -286,12 +290,21 @@ interface ValidatedProject {
 
 type SessionRow = Extract<SidebarRow, { kind: "session" }>;
 
-/** The one popup menu of the sidebar; kept here, above the virtualized rows. `askDelete`: a group menu turned into its "Delete all sessions" question. */
+/**
+ * The one popup menu of the sidebar; kept here, above the virtualized rows.
+ * `askDelete`: a menu turned into its delete question (a group's "Delete all
+ * sessions", an archive header's "Delete all", the archive bar's two).
+ */
 type SidebarMenuState =
   | { kind: "row"; row: SessionRow; anchor: SidebarMenuAnchor; opener: HTMLElement | null }
   | { kind: "group"; project: SidebarProject; olderCount: number; anchor: SidebarMenuAnchor; opener: HTMLElement; askDelete?: boolean }
   /** A row of the file tree or the changed list, opened at the pointer by a right-click. */
-  | { kind: "file"; target: FileRowTarget; anchor: SidebarMenuAnchor; opener: HTMLElement | null; askRevert?: boolean };
+  | { kind: "file"; target: FileRowTarget; anchor: SidebarMenuAnchor; opener: HTMLElement | null; askRevert?: boolean }
+  | { kind: "archive-group"; project: SidebarProject; anchor: SidebarMenuAnchor; opener: HTMLElement; askDelete?: boolean }
+  | { kind: "archive"; anchor: SidebarMenuAnchor; opener: HTMLElement; askDelete?: ArchiveDeleteScope };
+
+/** The archive bar's deletes: every archived session, or those archived over 30 days ago. */
+type ArchiveDeleteScope = "all" | "old";
 
 const UNREAD_SESSIONS_STORAGE_KEY = "pi-web:unread-session-ids";
 const LAST_CUSTOM_CWD_STORAGE_KEY = "pi-web:last-custom-cwd";
@@ -299,6 +312,8 @@ const RUNNING_SESSIONS_POLL_MS = 2500;
 const SESSION_DETAILS_HYDRATION_DELAY_MS = 750;
 /** "Archive sessions older than 7 days" in a project's menu. */
 const ARCHIVE_OLDER_THAN_MS = 7 * 24 * 60 * 60 * 1000;
+/** The archive bar's "Delete archived over 30 days ago", by archive time. */
+const ARCHIVED_DELETE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 const TOAST_TITLE_MAX = 28;
 
 /**
@@ -569,6 +584,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [keptOpenGroups, setKeptOpenGroups] = useState<ReadonlySet<string>>(() => new Set());
   const [moreShown, setMoreShown] = useState<Readonly<Record<string, number>>>({});
   const [pinnedCollapsed, setPinnedCollapsed] = useState(false);
+  // The archive view's folded projects, per browser (lib/sidebar-prefs.ts).
+  const [archiveCollapsed, setArchiveCollapsed] = useState<readonly string[]>([]);
   const [archiveView, setArchiveViewState] = useState(false);
   // The fold and the archive view move (hooks/useSidebarMotion.ts): only
   // when the user folds or goes in or out, never on a restore, a drag, keys,
@@ -597,6 +614,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const treeRevealIdRef = useRef(0);
   const handleRevealHandled = useCallback((id: number) => {
     setTreeReveal((current) => (current?.id === id ? null : current));
+  }, []);
+  // The archive view's own: a project's "View archived" puts its header on top.
+  const [archiveReveal, setArchiveReveal] = useState<SessionTreeReveal | null>(null);
+  const handleArchiveRevealHandled = useCallback((id: number) => {
+    setArchiveReveal((current) => (current?.id === id ? null : current));
   }, []);
   const selectedSessionIdRef = useRef(selectedSessionId);
   selectedSessionIdRef.current = selectedSessionId;
@@ -716,6 +738,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     const groups = loadGroupExpansion();
     if (Object.keys(groups).length > 0) setGroupExpansion(groups);
     if (loadPinnedCollapsed()) setPinnedCollapsed(true);
+    const archiveFolds = loadArchiveCollapsed();
+    if (archiveFolds.length > 0) setArchiveCollapsed(archiveFolds);
     if (loadFilesCollapsed()) setFilesCollapsed(true);
     if (loadShowIgnoredFiles()) setShowIgnoredFiles(true);
     forgetRetiredSidebarKeys();
@@ -1462,6 +1486,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // Built while the archive view is rendered, its way out included: it
   // leaves as it was, not empty.
   const archiveMounted = archiveMotion.archiveMounted;
+  const archiveCollapsedSet = useMemo(() => new Set(archiveCollapsed), [archiveCollapsed]);
   const archiveRows = useMemo(() => (archiveMounted ? buildArchiveRows({
     sessions: allSessions,
     uiState,
@@ -1470,7 +1495,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     unreadIds: unreadSessionIds,
     selectedSessionId,
     currentProject,
-  }) : []), [archiveMounted, allSessions, uiState, runningSessionIds, awaitingInputSessionIds, unreadSessionIds, selectedSessionId, currentProject]);
+    collapsed: archiveCollapsedSet,
+  }) : []), [archiveMounted, allSessions, uiState, runningSessionIds, awaitingInputSessionIds, unreadSessionIds, selectedSessionId, currentProject, archiveCollapsedSet]);
+  // The archive's projects, top to bottom, folded or not.
+  const archiveGroups = useMemo(
+    () => archiveRows.flatMap((row) => (row.kind === "archive-group" ? [row] : [])),
+    [archiveRows],
+  );
   const projectByKey = useMemo(
     () => new Map(model.projects.map((project) => [project.key, project])),
     [model.projects],
@@ -1654,13 +1685,24 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
   }, [sidebarTab, archiveView, stacked, filesCollapsed]);
 
-  const openArchiveView = useCallback(() => {
+  // With `projectKey` (a group menu's "View archived") that project's header
+  // goes to the top of the archive, unfolded if it was; the other projects
+  // stay as they were.
+  const openArchiveView = useCallback((projectKey?: string) => {
     setMenu(null);
     setArchiveView(true);
     // Search results would cover it.
     setSessionSearchOpen(false);
     switchTab("sessions");
-  }, [setArchiveView, switchTab]);
+    if (projectKey === undefined) return;
+    if (archiveCollapsed.includes(projectKey)) {
+      const next = archiveCollapsed.filter((key) => key !== projectKey);
+      setArchiveCollapsed(next);
+      saveArchiveCollapsed(next);
+    }
+    treeRevealIdRef.current += 1;
+    setArchiveReveal({ id: treeRevealIdRef.current, at: Date.now(), rowKey: `archive:${projectKey}`, block: "start" });
+  }, [archiveCollapsed, setArchiveView, switchTab]);
 
   // Opening the archive hides the tree that held focus (the footer link, a
   // menu's opener, the toast's View) and Back removes the archive's own
@@ -1785,7 +1827,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           focusAfterCommit(() => familyRowButton(archivable[0].root.id));
         },
       },
-      { id: "view", label: t("sidebar.viewArchive"), onClick: openArchiveView },
+      { id: "view", label: t("sidebar.viewArchive"), onClick: () => openArchiveView() },
     ]);
   }, [applyUiState, focusAfterCommit, familyRowButton, openArchiveView, restoreUnread, showToast, snapshotUiState, t, unreadSessionIds]);
 
@@ -1796,22 +1838,34 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     archiveFamilies([family]);
   }, [archiveFamilies, runningSessionIds]);
 
-  const restoreFamily = useCallback((family: SessionFamily) => {
-    const ids = [family.root.id];
+  // Out of the archive: one row's Restore, or an archive menu's Restore all
+  // (in parts, as a bulk archive goes; Undo after them, in order).
+  const restoreFamilies = useCallback((families: readonly SessionFamily[]) => {
+    if (families.length === 0) return;
+    const ids = families.map((family) => family.root.id);
     const snapshot = snapshotUiState(ids);
-    void applyUiState({ action: "set", ids, archived: false });
-    showToast(t("sidebar.restoredToast", { title: shortTitle(sessionRowTitle(family.root), TOAST_TITLE_MAX) }), [
+    for (const part of chunkForSessionUiRequests(ids)) {
+      void applyUiState({ action: "set", ids: part, archived: false });
+    }
+    const message = families.length === 1
+      ? t("sidebar.restoredToast", { title: shortTitle(sessionRowTitle(families[0].root), TOAST_TITLE_MAX) })
+      : t("sidebar.restoredManyToast", { count: families.length });
+    showToast(message, [
       {
         id: "undo",
         label: t("sidebar.undo"),
         onClick: () => {
-          void applyUiState({ action: "restore", entries: snapshot });
+          for (const entries of chunkForSessionUiRequests(snapshot)) {
+            void applyUiState({ action: "restore", entries });
+          }
           // Back in the archive view if it is open; else the tab takes focus.
-          focusAfterCommit(() => familyRowButton(family.root.id));
+          focusAfterCommit(() => familyRowButton(families[0].root.id));
         },
       },
     ]);
   }, [applyUiState, familyRowButton, focusAfterCommit, showToast, snapshotUiState, t]);
+
+  const restoreFamily = useCallback((family: SessionFamily) => restoreFamilies([family]), [restoreFamilies]);
 
   const startRename = useCallback((family: SessionFamily) => {
     if (family.root.transient) return;
@@ -2065,29 +2119,28 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }));
   }, [archiveFamilies, familyByRootId, treeSelectionInput]);
 
-  // A project's "Delete all sessions…": the menu turns into its question,
-  // focus on Cancel (the sheet's on a phone), so Enter deletes nothing; Cancel
-  // goes back to the list. Delete closes the menu and sends the families the
-  // question counts at that moment, pinned and archived ones included,
-  // running ones kept (the server also keeps one that started since); toasts
-  // say how it went. One run per project at a time.
+  // A project's "Delete all sessions…" (and the archive's deletes): the menu
+  // turns into its question, focus on Cancel (the sheet's on a phone), so
+  // Enter deletes nothing; Cancel goes back to the list. Delete closes the
+  // menu and sends the families the question counts at that moment, running
+  // ones kept (the server also keeps one that started since); toasts say how
+  // it went. One run per project (or archive scope) at a time.
   const askProjectDelete = useCallback((projectKey: string, askDelete: boolean) => {
     setMenu((current) => (current?.kind === "group" && current.project.key === projectKey ? { ...current, askDelete } : current));
   }, []);
 
-  const deletingProjectsRef = useRef(new Set<string>());
-  const deleteAllProjectSessions = useCallback(async (project: SidebarProject) => {
+  const deletingRunsRef = useRef(new Set<string>());
+  const deleteFamilyIds = useCallback(async (runKey: string, ids: readonly string[], focusTarget: () => HTMLElement | null) => {
     setMenu(null);
-    const { ids } = familiesToDelete(treeSelectionInput, project.key);
-    if (ids.length === 0 || deletingProjectsRef.current.has(project.key)) return;
-    deletingProjectsRef.current.add(project.key);
+    if (ids.length === 0 || deletingRunsRef.current.has(runKey)) return;
+    deletingRunsRef.current.add(runKey);
     showToast(t("sidebar.deletingSessions"));
     try {
       const outcome = await deleteProjectSessions(ids, fetch);
       for (const id of outcome.deleted) onSessionDeleted?.(id);
-      // The group goes with its last session unless it is current or pinned:
-      // focus that fell to the page with it goes to the tab.
-      void loadSessions().then(() => focusAfterCommit(() => groupHeaderButton(project.key)));
+      // A group goes with its last session (in the tree, unless it is
+      // current or pinned): focus that fell to the page with it moves on.
+      void loadSessions().then(() => focusAfterCommit(focusTarget));
       if (outcome.error !== null) {
         showToast(t("sidebar.deleteFailed", { error: outcome.error }));
         return;
@@ -2097,9 +2150,80 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       if (outcome.running.length > 0) parts.push(t("sidebar.keptRunningToast", { count: outcome.running.length }));
       showToast(parts.join(" · "));
     } finally {
-      deletingProjectsRef.current.delete(project.key);
+      deletingRunsRef.current.delete(runKey);
     }
-  }, [focusAfterCommit, groupHeaderButton, loadSessions, onSessionDeleted, showToast, t, treeSelectionInput]);
+  }, [focusAfterCommit, loadSessions, onSessionDeleted, showToast, t]);
+
+  const deleteAllProjectSessions = useCallback((project: SidebarProject) => {
+    const { ids } = familiesToDelete(treeSelectionInput, project.key);
+    void deleteFamilyIds(`project:${project.key}`, ids, () => groupHeaderButton(project.key));
+  }, [deleteFamilyIds, groupHeaderButton, treeSelectionInput]);
+
+  // The archive's own menus: a project header's ⋯ (Restore all, Delete
+  // all…) and the bar's (fold every project, Restore all, the two deletes).
+  // Their counts are live; Restore and Delete take what is archived when
+  // chosen. An archived family never runs, so nothing is kept back.
+  // A project's archive header (its toggle), else the archive's Back, else the selected tab.
+  const archiveHeaderButton = useCallback((projectKey: string | null): HTMLElement | null => {
+    const key = projectKey === null ? null : CSS.escape(`archive:${projectKey}`);
+    const button = key === null ? null : sessionsPanelRef.current?.querySelector<HTMLElement>(`[data-row-key="${key}"] .session-tree-group-toggle`);
+    if (button && button.getClientRects().length > 0) return button;
+    const back = archiveBackRef.current;
+    return back && back.getClientRects().length > 0 ? back : selectedTabButton();
+  }, [selectedTabButton]);
+
+  const familiesOf = useCallback((ids: readonly string[]) => ids.flatMap((id) => {
+    const family = familyByRootId.get(id);
+    return family ? [family] : [];
+  }), [familyByRootId]);
+
+  const handleArchiveGroupMenu = useCallback((project: SidebarProject, opener: HTMLElement) => {
+    setMenu({ kind: "archive-group", project, anchor: buttonAnchor(opener, "end"), opener });
+  }, []);
+
+  const openArchiveMenu = useCallback((opener: HTMLElement) => {
+    setMenu((current) => (current?.kind === "archive" ? null : { kind: "archive", anchor: buttonAnchor(opener, "end"), opener }));
+  }, []);
+
+  const askArchiveDelete = useCallback((askDelete: ArchiveDeleteScope | undefined) => {
+    setMenu((current) => {
+      if (current?.kind === "archive") return { ...current, askDelete };
+      if (current?.kind === "archive-group") return { ...current, askDelete: askDelete !== undefined };
+      return current;
+    });
+  }, []);
+
+  const archiveDeleteIds = useCallback((scope: ArchiveDeleteScope | { projectKey: string }) => archivedFamilyIds(
+    treeSelectionInput,
+    scope === "all" ? {} : scope === "old" ? { archivedBefore: Date.now() - ARCHIVED_DELETE_AFTER_MS } : scope,
+  ), [treeSelectionInput]);
+
+  const deleteArchived = useCallback((scope: ArchiveDeleteScope | { projectKey: string }) => {
+    const ids = archiveDeleteIds(scope);
+    const runKey = typeof scope === "string" ? `archive:${scope}` : `archive-project:${scope.projectKey}`;
+    void deleteFamilyIds(runKey, ids, () => (typeof scope === "string" ? archiveHeaderButton(null) : archiveHeaderButton(scope.projectKey)));
+  }, [archiveDeleteIds, archiveHeaderButton, deleteFamilyIds]);
+
+  // Folding the archive's projects: one header, or (Alt+click, the bar's
+  // menu) every one of them. Saved per browser, the newest choice last.
+  const saveArchiveFolds = useCallback((next: readonly string[]) => {
+    setArchiveCollapsed(next);
+    saveArchiveCollapsed(next);
+  }, []);
+  const setAllArchiveGroupsExpanded = useCallback((expanded: boolean) => {
+    const keys = archiveGroups.map((row) => row.project.key);
+    const others = archiveCollapsed.filter((key) => !keys.includes(key));
+    saveArchiveFolds(expanded ? others : [...others, ...keys]);
+  }, [archiveCollapsed, archiveGroups, saveArchiveFolds]);
+  const handleToggleArchiveGroup = useCallback((projectKey: string, all: boolean) => {
+    const expanded = archiveCollapsed.includes(projectKey);
+    if (all) {
+      setAllArchiveGroupsExpanded(expanded);
+      return;
+    }
+    const others = archiveCollapsed.filter((key) => key !== projectKey);
+    saveArchiveFolds(expanded ? others : [...others, projectKey]);
+  }, [archiveCollapsed, saveArchiveFolds, setAllArchiveGroupsExpanded]);
 
   // A group's "+": a new session at once. The current project starts in the
   // sidebar's worktree, another one in its root (the main checkout); the bar
@@ -2128,8 +2252,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // another window): its menu goes with it.
   const visibleRows = archiveView ? archiveRows : model.rows;
   useEffect(() => {
-    if (menu?.kind !== "row") return;
-    if (!visibleRows.some((row) => row.key === menu.row.key)) setMenu(null);
+    if (menu?.kind === "row" && !visibleRows.some((row) => row.key === menu.row.key)) setMenu(null);
+    if (menu?.kind === "archive-group" && !visibleRows.some((row) => row.key === `archive:${menu.project.key}`)) setMenu(null);
   }, [menu, visibleRows]);
 
   // Rows are rebuilt on every refresh; the menu acts on the current one.
@@ -2268,6 +2392,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       icon: <RestoreIcon />,
       onSelect: () => { void applyUiState({ action: "rename-project", projectKey: project.key, name: null }); },
     }));
+    // Three groups, by what they act on: the project itself, its place in the
+    // list, its sessions (Delete all last, in red).
     return [
       {
         type: "item",
@@ -2277,6 +2403,22 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         onSelect: () => { void applyUiState({ action: "pin-project", projectKey: project.key, root: project.root, pinned: !project.pinned }); },
       },
       ...nameItems,
+      {
+        type: "item",
+        id: "open-in-files",
+        label: t("sidebar.openInFilesTab"),
+        icon: <FolderIcon />,
+        onSelect: () => openProjectInFiles(project),
+      },
+      {
+        type: "item",
+        id: "open-new-tab",
+        label: t("sidebar.openInNewTab"),
+        icon: <OpenInNewTabIcon />,
+        shortcut: "T",
+        onSelect: () => openProjectInNewTab(project),
+      },
+      { type: "separator", id: "separator-layout" },
       {
         type: "item",
         id: "move-up",
@@ -2294,30 +2436,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         onSelect: () => { if (down) moveProject(project.key, down.anchorKey, down.position); },
       },
       {
-        type: "item",
-        id: "archive-older",
-        label: t("sidebar.archiveOlderThanWeek", { count: olderCount }),
-        icon: <ArchiveIcon />,
-        disabled: olderCount === 0,
-        onSelect: () => archiveOlderSessions(project),
-      },
-      {
-        type: "item",
-        id: "open-in-files",
-        label: t("sidebar.openInFilesTab"),
-        icon: <FolderIcon />,
-        onSelect: () => openProjectInFiles(project),
-      },
-      {
-        type: "item",
-        id: "open-new-tab",
-        label: t("sidebar.openInNewTab"),
-        icon: <OpenInNewTabIcon />,
-        shortcut: "T",
-        onSelect: () => openProjectInNewTab(project),
-      },
-      { type: "separator", id: "separator-groups" },
-      {
         // This project open, every other one closed.
         type: "item",
         id: "collapse-others",
@@ -2334,16 +2452,23 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         disabled: model.projects.every((other) => isGroupExpanded(other, shownGroupExpansion)),
         onSelect: () => setAllGroupsExpanded(() => true),
       },
-      { type: "separator", id: "separator" },
+      { type: "separator", id: "separator-sessions" },
+      {
+        type: "item",
+        id: "archive-older",
+        label: t("sidebar.archiveOlderThanWeek", { count: olderCount }),
+        icon: <ArchiveIcon />,
+        disabled: olderCount === 0,
+        onSelect: () => archiveOlderSessions(project),
+      },
       {
         type: "item",
         id: "view-archived",
         label: t("sidebar.viewArchived", { count: archivedCount }),
         icon: <ArchiveIcon />,
         disabled: archivedCount === 0,
-        onSelect: openArchiveView,
+        onSelect: () => openArchiveView(project.key),
       },
-      { type: "separator", id: "separator-delete" },
       {
         type: "item",
         id: "delete-all",
@@ -2359,36 +2484,45 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     ];
   };
 
-  // The question behind "Delete all sessions…"; its counts are live.
+  // A menu's delete question (a project's "Delete all sessions…", the
+  // archive's deletes); its counts are live.
+  const deleteQuestionBody = ({ heading, headingTitle, notes, count, onConfirm, onCancel }: {
+    heading: string;
+    headingTitle?: string;
+    notes: string[];
+    count: number;
+    onConfirm: () => void;
+    onCancel: () => void;
+  }): ReactNode => (
+    <div className="sidebar-menu-question">
+      <div className="sidebar-menu-header" title={headingTitle}>{heading}</div>
+      {notes.map((note) => <p key={note} className="sidebar-menu-question-text">{note}</p>)}
+      <div className="sidebar-menu-question-buttons">
+        <button type="button" className="sidebar-menu-question-confirm" disabled={count === 0} onClick={onConfirm}>
+          {t("sidebar.deleteCount", { count })}
+        </button>
+        {!isMobile && (
+          <button type="button" className="sidebar-menu-question-cancel" data-sidebar-menu-autofocus="" onClick={onCancel}>
+            {t("sidebar.cancel")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
   const projectDeleteBody = (project: SidebarProject): ReactNode => {
     const { ids, running } = familiesToDelete(treeSelectionInput, project.key);
-    return (
-      <div className="sidebar-menu-question">
-        <div className="sidebar-menu-header" title={project.root}>{t("sidebar.deleteProjectSessionsHeading", { name: project.name })}</div>
-        <p className="sidebar-menu-question-text">{t("sidebar.deleteProjectSessionsMessage")}</p>
-        {running > 0 && <p className="sidebar-menu-question-text">{t("sidebar.deleteProjectSessionsRunning", { count: running })}</p>}
-        <div className="sidebar-menu-question-buttons">
-          <button
-            type="button"
-            className="sidebar-menu-question-confirm"
-            disabled={ids.length === 0}
-            onClick={() => { void deleteAllProjectSessions(project); }}
-          >
-            {t("sidebar.deleteCount", { count: ids.length })}
-          </button>
-          {!isMobile && (
-            <button
-              type="button"
-              className="sidebar-menu-question-cancel"
-              data-sidebar-menu-autofocus=""
-              onClick={() => askProjectDelete(project.key, false)}
-            >
-              {t("sidebar.cancel")}
-            </button>
-          )}
-        </div>
-      </div>
-    );
+    return deleteQuestionBody({
+      heading: t("sidebar.deleteProjectSessionsHeading", { name: project.name }),
+      headingTitle: project.root,
+      notes: [
+        t("sidebar.deleteProjectSessionsMessage"),
+        ...(running > 0 ? [t("sidebar.deleteProjectSessionsRunning", { count: running })] : []),
+      ],
+      count: ids.length,
+      onConfirm: () => deleteAllProjectSessions(project),
+      onCancel: () => askProjectDelete(project.key, false),
+    });
   };
 
   // What a row of the files does with itself: put its path in the chat, keep a copy
@@ -2478,6 +2612,100 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       </div>
     </div>
   );
+  const archiveGroupMenuItems = (project: SidebarProject): SidebarMenuItem[] => {
+    const ids = archiveDeleteIds({ projectKey: project.key });
+    return [
+      {
+        type: "item",
+        id: "restore-all",
+        label: t("sidebar.restoreAllArchived", { count: ids.length }),
+        icon: <RestoreIcon />,
+        disabled: ids.length === 0,
+        onSelect: () => restoreFamilies(familiesOf(ids)),
+      },
+      { type: "separator", id: "separator-delete" },
+      {
+        type: "item",
+        id: "delete-all",
+        label: t("sidebar.deleteAllArchived", { count: ids.length }),
+        icon: <TrashIcon />,
+        danger: true,
+        disabled: ids.length === 0,
+        onSelect: ({ keepOpen }) => {
+          keepOpen();
+          askArchiveDelete("all");
+        },
+      },
+    ];
+  };
+
+  const archiveMenuItems = (): SidebarMenuItem[] => {
+    const all = archiveDeleteIds("all");
+    const old = archiveDeleteIds("old");
+    const folded = archiveGroups.filter((row) => !row.expanded).length;
+    return [
+      {
+        type: "item",
+        id: "collapse-all",
+        label: t("sidebar.collapseAllGroups"),
+        icon: <ChevronIcon />,
+        disabled: folded === archiveGroups.length,
+        onSelect: () => setAllArchiveGroupsExpanded(false),
+      },
+      {
+        type: "item",
+        id: "expand-all",
+        label: t("sidebar.expandAllGroups"),
+        icon: <ChevronIcon className="sidebar-icon-down" />,
+        disabled: folded === 0,
+        onSelect: () => setAllArchiveGroupsExpanded(true),
+      },
+      { type: "separator", id: "separator-sessions" },
+      {
+        type: "item",
+        id: "restore-all",
+        label: t("sidebar.restoreAllArchived", { count: all.length }),
+        icon: <RestoreIcon />,
+        disabled: all.length === 0,
+        onSelect: () => restoreFamilies(familiesOf(all)),
+      },
+      {
+        type: "item",
+        id: "delete-old",
+        label: t("sidebar.deleteOldArchived", { count: old.length }),
+        icon: <TrashIcon />,
+        danger: true,
+        disabled: old.length === 0,
+        onSelect: ({ keepOpen }) => {
+          keepOpen();
+          askArchiveDelete("old");
+        },
+      },
+      {
+        type: "item",
+        id: "delete-all",
+        label: t("sidebar.deleteAllArchived", { count: all.length }),
+        icon: <TrashIcon />,
+        danger: true,
+        disabled: all.length === 0,
+        onSelect: ({ keepOpen }) => {
+          keepOpen();
+          askArchiveDelete("all");
+        },
+      },
+    ];
+  };
+
+  const archiveDeleteBody = (scope: ArchiveDeleteScope | { projectKey: string }, project: SidebarProject | null): ReactNode => deleteQuestionBody({
+    heading: project
+      ? t("sidebar.deleteArchivedInProjectHeading", { name: project.name })
+      : t(scope === "old" ? "sidebar.deleteOldArchivedHeading" : "sidebar.deleteAllArchivedHeading"),
+    headingTitle: project?.root,
+    notes: [t("sidebar.deleteArchivedMessage")],
+    count: archiveDeleteIds(scope).length,
+    onConfirm: () => deleteArchived(scope),
+    onCancel: () => askArchiveDelete(undefined),
+  });
 
   let menuTitle: string | undefined;
   let menuLabel = "";
@@ -2504,12 +2732,26 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     if (menu.askRevert) menuBody = fileRevertBody(menu.target);
     // Room for the question's sentence about what the revert discards.
     menuWidth = menu.askRevert ? 264 : undefined;
+  } else if (menu?.kind === "archive-group") {
+    const project = archiveGroups.find((row) => row.project.key === menu.project.key)?.project ?? menu.project;
+    menuTitle = project.name;
+    menuLabel = t("sidebar.archivedProjectActions", { name: project.name });
+    menuItems = archiveGroupMenuItems(project);
+    if (menu.askDelete) menuBody = archiveDeleteBody({ projectKey: project.key }, project);
+    menuWidth = 248;
+  } else if (menu?.kind === "archive") {
+    menuTitle = t("sidebar.archived");
+    menuLabel = t("sidebar.archiveActions");
+    menuItems = archiveMenuItems();
+    if (menu.askDelete) menuBody = archiveDeleteBody(menu.askDelete, null);
+    menuWidth = 280;
   }
 
   // The tree row (and the button in it) that the open menu belongs to.
   const activeMenuRowKey = menu?.kind === "row"
     ? menu.row.key
-    : menu?.kind === "group" ? `group:${menu.project.key}` : null;
+    : menu?.kind === "group" ? `group:${menu.project.key}`
+    : menu?.kind === "archive-group" ? `archive:${menu.project.key}` : null;
 
   const treeLayout = isMobile ? "mobile" : "desktop";
   // Until pins and archive have loaded, archived rows would flash in.
@@ -2544,8 +2786,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     },
     onGroupNew: handleGroupNew,
     onGroupMenu: handleGroupMenu,
+    onToggleArchiveGroup: handleToggleArchiveGroup,
+    onArchiveGroupMenu: handleArchiveGroupMenu,
     onOpenOtherProject: handleOpenOtherProject,
-    onOpenArchive: openArchiveView,
+    onOpenArchive: () => openArchiveView(),
     // The archive view has no group rows: only the main tree's can be dragged.
     onMoveGroup: moveProject,
   } as const;
@@ -2863,8 +3107,26 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     <span>{t("sidebar.archived")}</span>
                     <span className="sidebar-archive-count">· {archivedCount}</span>
                   </button>
+                  <button
+                    type="button"
+                    className={`sidebar-archive-menu-button${menu?.kind === "archive" ? " is-active" : ""}`}
+                    title={t("sidebar.archiveActions")}
+                    aria-label={t("sidebar.archiveActions")}
+                    aria-haspopup="menu"
+                    aria-expanded={menu?.kind === "archive"}
+                    disabled={archiveGroups.length === 0}
+                    onClick={(event) => openArchiveMenu(event.currentTarget)}
+                  >
+                    <MoreIcon size={13} />
+                  </button>
                 </div>
-                <SessionTree {...treeProps} rows={archiveRows} emptyLabel={t("sidebar.noArchived")} />
+                <SessionTree
+                  {...treeProps}
+                  rows={archiveRows}
+                  emptyLabel={t("sidebar.noArchived")}
+                  reveal={archiveReveal}
+                  onRevealHandled={handleArchiveRevealHandled}
+                />
               </div>
             )}
           </div>

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createJiti } from "jiti";
+import ts from "typescript";
 
 const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
@@ -180,6 +181,22 @@ test("shows deferred thinking previews without loading the full content", () => 
   });
   assert.match(html, />Historical first line<\/span>/);
   assert.match(html, /aria-expanded="false"/);
+});
+
+test("keys an assistant message's blocks by their place, not the entry id (#1184)", () => {
+  // A message of the running turn gets its entry id when the file is read again.
+  // A block keyed by it remounted then: open thinking closed, a tool output's
+  // scroll went back to the top. ThinkingBlock drops what it loaded for another id.
+  const source = ts.createSourceFile("MessageView.tsx", readFileSync(new URL("./MessageView.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const keys = [];
+  (function visit(node) {
+    if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && node.tagName.getText(source) === "BlockView") {
+      const key = node.attributes.properties.find((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(source) === "key");
+      keys.push(key?.initializer?.expression?.getText(source));
+    }
+    ts.forEachChild(node, visit);
+  })(source);
+  assert.deepEqual(keys, ["originalIndex"]);
 });
 
 test("marks only the matched text block in the part of the turn that carries it", () => {

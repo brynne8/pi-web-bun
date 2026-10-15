@@ -3,14 +3,15 @@
 import { useState } from "react";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
+import { formatTurnDuration } from "@/lib/turn-duration";
 import { formatTime, formatUsage } from "./MessageView";
 import { TurnWrittenFiles } from "./TurnWrittenFiles";
 import type { WrittenFile } from "@/lib/turn-written-files";
 import type { AssistantMessage } from "@/lib/types";
 
 /**
- * The turn's footer, once at its end: what the last response cost, what the turn
- * changed on disk, and a Copy of everything it wrote.
+ * The turn's footer, once at its end: what the last response cost, how long the
+ * turn took, what the turn changed on disk, and a Copy of everything it wrote.
  *
  * This is deliberately not a message's footer. A turn renders as segments, so
  * whichever part happens to hold the last sentence is not where the turn ends —
@@ -19,10 +20,12 @@ import type { AssistantMessage } from "@/lib/types";
  * was worse still: every part showed its own copy, since pi-web saves one
  * assistant entry per tool call.
  */
-export function TurnFooter({ usage, timestamp, text, writtenFiles = [], onOpenFile }: {
+export function TurnFooter({ usage, timestamp, durationMs, text, writtenFiles = [], onOpenFile }: {
   usage?: AssistantMessage["usage"];
   /** When the turn's last response began, which is the time a message used to show. */
   timestamp?: number;
+  /** How long the turn took, from its anchor to its last response's end (#1222). */
+  durationMs?: number;
   /** Everything the turn wrote, which is what Copy hands over. */
   text?: string;
   writtenFiles?: WrittenFile[];
@@ -32,9 +35,10 @@ export function TurnFooter({ usage, timestamp, text, writtenFiles = [], onOpenFi
   const [copied, setCopied] = useState(false);
   const [hovered, setHovered] = useState(false);
   const usageText = usage ? formatUsage(usage) : "";
+  const durationText = durationMs !== undefined ? t("chat.turnDuration", { time: formatTurnDuration(durationMs) }) : "";
   const timeText = formatTime(timestamp);
   // A time on its own is no footer: a turn with nothing else about it shows nothing.
-  if (!usageText && !text && writtenFiles.length === 0) return null;
+  if (!usageText && !durationText && !text && writtenFiles.length === 0) return null;
 
   const copy = () => {
     copyText(text ?? "").then(() => {
@@ -58,6 +62,9 @@ export function TurnFooter({ usage, timestamp, text, writtenFiles = [], onOpenFi
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
         {usageText && (
           <div style={{ fontSize: 11, color: "var(--text-dim)" }}>{usageText}</div>
+        )}
+        {durationText && (
+          <div style={{ fontSize: 11, color: "var(--text-dim)" }}>{durationText}</div>
         )}
         {text && (
           <button

@@ -15,6 +15,7 @@ import {
   type SubagentProfile,
   type SubagentRunInfo,
 } from "./subagents";
+import { worktreeHasUncommittedFiles } from "./worktree";
 
 // The guard and its screen-side strip live in the client-safe module, so the chat view can take
 // it off without importing the extension that writes it. Re-exported here because this is where
@@ -126,18 +127,38 @@ export function subagentToolDetails(run: SubagentRunInfo): SubagentToolDetails {
   };
 }
 
+/**
+ * Where an isolated run's worktree is, as its result was recorded: the model reads only `content`,
+ * never `details` (#1202). Git keeps the branch, with any commits, when it removes the checkout,
+ * and refuses to remove one that still has changes. Only this run's own refusal gives a reason, and
+ * never in git's words, which end in "use --force to delete it". A result recorded without
+ * `worktreeExists` (before #1202) says nothing.
+ */
+function worktreeOutcomeText(run: SubagentRunInfo): string | undefined {
+  if (!run.worktreePath || !run.worktreeBranch || run.worktreeExists === undefined) return undefined;
+  if (!run.worktreeExists) return `Its worktree was removed; branch ${run.worktreeBranch} keeps any commits it made.`;
+  return run.worktreeCleanupError && worktreeHasUncommittedFiles(run.worktreeCleanupError)
+    ? `Its worktree was kept at ${run.worktreePath} (branch ${run.worktreeBranch}) because it still has uncommitted or untracked files.`
+    : `Its worktree is still at ${run.worktreePath} (branch ${run.worktreeBranch}).`;
+}
+
 export function subagentFinalText(run: SubagentRunInfo): string {
   if (run.status === "starting" || run.status === "running") {
     return `Subagent ${run.sessionId} is ${run.status}.`;
   }
   // Keep the session ID in the text: the model only sees `content`, never `details`, and needs it for `resume` / `get_subagent_result`.
+  // The worktree line follows the status, before the subagent's own words.
+  const worktree = worktreeOutcomeText(run);
+  const withWorktree = (status: string) => worktree ? `${status}\n\n${worktree}` : status;
   if (run.status === "completed") {
     const result = run.result?.trim();
-    return result ? `Subagent ${run.sessionId} completed.\n\n${result}` : `Subagent ${run.sessionId} completed without text output.`;
+    return result
+      ? `${withWorktree(`Subagent ${run.sessionId} completed.`)}\n\n${result}`
+      : withWorktree(`Subagent ${run.sessionId} completed without text output.`);
   }
-  if (run.status === "aborted") return `Subagent ${run.sessionId} was stopped.`;
+  if (run.status === "aborted") return withWorktree(`Subagent ${run.sessionId} was stopped.`);
   if (run.status === "interrupted") return `Subagent ${run.sessionId} was interrupted before completion.`;
-  const failure = `Subagent ${run.sessionId} failed: ${run.error ?? "Unknown error"}`;
+  const failure = withWorktree(`Subagent ${run.sessionId} failed: ${run.error ?? "Unknown error"}`);
   const partial = run.result?.trim();
   return partial ? `${failure}\n\nPartial output:\n\n${partial}` : failure;
 }

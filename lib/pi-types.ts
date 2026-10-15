@@ -18,6 +18,8 @@ export interface ContextUsage {
 export interface ModelLike {
   id: string;
   provider: string;
+  /** Dollars per million tokens. */
+  cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
 }
 
 export interface ToolInfo {

@@ -154,9 +154,24 @@ try {
       await run("printf '\\nSESSION:%s:%s\\n' \"$PR695_TOKEN\" \"$$\"");
       await waitOutput(`SESSION:alive:${pid}`);
 
+      // The terminal's own theme swaps xterm's palette in place and survives a reload.
+      const terminalBackground = () => page.locator(".terminal-panel:visible .xterm-viewport").evaluate((el) => getComputedStyle(el).backgroundColor);
+      const appTheme = await page.evaluate(() => document.documentElement.dataset.theme);
+      await page.getByRole("button", { name: "Switch terminal to light theme", exact: true }).click();
+      await page.locator('.terminal-panel:visible[data-terminal-theme="light"]').waitFor();
+      assert.equal(await terminalBackground(), "rgb(251, 251, 252)");
+      assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), appTheme);
+      await run("printf '\\nTHEME:%s:%s\\n' \"$PR695_TOKEN\" \"$$\"");
+      await waitOutput(`THEME:alive:${pid}`);
+
       await page.reload();
       await ready();
       await expectFontWeight(600);
+      await page.locator('.terminal-panel:visible[data-terminal-theme="light"]').waitFor();
+      assert.equal(await terminalBackground(), "rgb(251, 251, 252)");
+      await page.getByRole("button", { name: "Switch terminal to dark theme", exact: true }).click();
+      assert.equal(await terminalBackground(), "rgb(17, 19, 24)");
+      assert.equal(await page.evaluate(() => localStorage.getItem("pi-web:terminal-theme")), "dark");
       await run("printf '\\nREFRESH:%s:%s\\n' \"$PR695_TOKEN\" \"$$\"");
       await waitOutput(`REFRESH:alive:${pid}`);
       assert.equal(created.size, 1, "refresh must reconnect, not create");

@@ -1,7 +1,7 @@
 "use client";
 import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
 import Image from "next/image";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, ExtensionUiRequest, SessionInfo, SessionTreeNode, TextContent, ToolResultMessage } from "@/lib/types";
 import { normalizeCustomPanelLines } from "@/lib/ansi";
@@ -12,6 +12,7 @@ import { getAssistantErrorMessage, hasAssistantAnswer, isAssistantTruncated, isH
 import { extractTurnWrittenFiles } from "@/lib/turn-written-files";
 import { splitTurnSegments, turnHasAnswer } from "@/lib/turn-segments";
 import { getTurnPart, recordsUsage, type TurnPartCache } from "@/lib/turn-views";
+import { formatTurnDuration, getTurnDurationMs } from "@/lib/turn-duration";
 import { TurnFooter } from "./TurnFooter";
 import { buildQuotedSelection } from "@/lib/quoted-selection";
 import { dropMentionText, splitDroppedItems, uploadFiles, type DroppedItem } from "@/lib/file-upload-client";
@@ -34,6 +35,8 @@ import type { AppUpdateResponse } from "@/lib/api-types";
 import type { ToolEntry } from "@/lib/tool-presets";
 import type { SettingsSection } from "@/lib/settings-navigation";
 import type { ReadSnapshot } from "@/lib/read-snapshot";
+import { getTranscriptNotices, summarizeCacheMisses, type CacheMissSummary } from "@/lib/transcript-notices";
+import { cacheMissSummaryText, TRANSCRIPT_NOTICE_WARNING_COLOR, TranscriptNoticeLines } from "@/components/TranscriptNotices";
 import { findChatScrollAnchor, type ChatScrollPosition } from "@/lib/chat-scroll-position";
 import {
   captureScrollDistance,
@@ -179,7 +182,7 @@ function getUserInputText(message: AgentMessage): string | null {
   return text.length > 0 ? text : null;
 }
 
-function ProcessDetailsGroup({ messageCount, toolCallCount, reveal = false, children, t }: { messageCount: number; toolCallCount: number; reveal?: boolean; children: ReactNode; t: (key: string, params?: Record<string, string | number>) => string }) {
+function ProcessDetailsGroup({ messageCount, toolCallCount, durationMs, cacheMisses, reveal = false, children, t }: { messageCount: number; toolCallCount: number; durationMs?: number; cacheMisses?: CacheMissSummary; reveal?: boolean; children: ReactNode; t: (key: string, params?: Record<string, string | number>) => string }) {
   // Always collapsed: what is inside a group is how the turn got there, and what it
   // wrote and how it failed both render outside it. A group the user opened by hand
   // keeps its state across the turn's updates, since nothing re-keys it.
@@ -187,20 +190,26 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, reveal = false, chil
   useLayoutEffect(() => {
     if (reveal) setExpanded(true);
   }, [reveal]);
-  const parts = [t("chat.processDetails"), `${messageCount} ${t(messageCount === 1 ? "chat.message" : "chat.messages")}`];
+  // The chevron already says this folds; the words stay in the accessible name.
+  const parts = [`${messageCount} ${t(messageCount === 1 ? "chat.message" : "chat.messages")}`];
   if (toolCallCount > 0) parts.push(`${toolCallCount} ${t(toolCallCount === 1 ? "chat.toolCall" : "chat.toolCalls")}`);
+  if (durationMs !== undefined) parts.push(t("chat.turnDuration", { time: formatTurnDuration(durationMs) }));
+  // Folded, the cache misses inside are added up here (#1265); open, each shows under its step.
+  const cacheMissText = cacheMisses && !(expanded || reveal) ? cacheMissSummaryText(t, cacheMisses) : undefined;
 
   return (
     <div style={{ marginBottom: 16 }}>
       <button
         type="button"
         aria-expanded={expanded || reveal}
+        aria-label={[t("chat.processDetails"), ...parts, ...(cacheMissText ? [cacheMissText] : [])].join(" · ")}
         onClick={() => setExpanded((v) => !v)}
         style={{
           display: "flex",
           alignItems: "center",
           gap: 8,
           width: "auto",
+          maxWidth: "100%",
           minHeight: 24,
           padding: "2px 0",
           border: "none",
@@ -217,6 +226,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, reveal = false, chil
         </svg>
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {parts.join(" · ")}
+          {cacheMissText && <span style={{ color: TRANSCRIPT_NOTICE_WARNING_COLOR }}>{` · ${cacheMissText}`}</span>}
         </span>
       </button>
       {(expanded || reveal) && (
@@ -258,7 +268,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const [restoreAnchorReady, setRestoreAnchorReady] = useState(false);
 
   const {
-    loading, error, messages, activeToolResults, entryIds, historyCursor, hasEarlierMessages, earlierTurnCount, streamingStore,
+    loading, error, messages, activeToolResults, entryIds, messageKeys, historyCursor, hasEarlierMessages, earlierTurnCount, streamingStore,
     agentRunning, bashRunning, pendingBash, modelNames, modelList, modelError, modelScopeWarnings, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
     retryInfo, contextUsage, forkingEntryId,
     isCompacting, compactError, compactResult, displayModel: displayModelValue, modelSwitching, sessionStats,
@@ -1108,13 +1118,17 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 if (idx === lastUserIdx) { (lastUserMsgRef as { current: HTMLDivElement | null }).current = el; }
               };
 
-              const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; blockIndexOffset?: number; isTurnPart?: boolean; isTurnTail?: boolean } = {}): ReactNode => {
+              const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; blockIndexOffset?: number; isTurnPart?: boolean; isTurnTail?: boolean; withNotices?: boolean } = {}): ReactNode => {
                 const msg = options.messageOverride ?? messages[idx];
                 if (isHiddenCustomMessage(msg)) return null;
+                // pi's showCacheMissNotices (#1265): read from the stored message, not a turn view's copy.
+                const notices = options.withNotices === false ? [] : getTranscriptNotices(messages[idx]);
                 const isVisible = isMessageGroupAnchor(msg) || msg.role === "assistant";
                 const currentRefIdx = visibleRefIndexByMessage.get(idx);
                 const keyPrefix = options.keyPrefix ?? "message";
-                const messageKey = entryIds[idx] ?? idx;
+                // Not the entry id alone: a message sent or streamed in this run
+                // gets its id only when the file is read again (#1184).
+                const messageKey = messageKeys[idx];
                 let showTimestamp = false;
                 if (msg.role === "assistant") {
                   showTimestamp = true;
@@ -1153,10 +1167,13 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                     isTurnTail={options.isTurnTail}
                   />
                 );
-                if (!isVisible || currentRefIdx === undefined) return view;
+                const noticeLines = notices.length > 0 ? <TranscriptNoticeLines key={`${keyPrefix}-notices-${messageKey}`} notices={notices} /> : null;
+                // One shape with or without notices, so lines arriving on a reload do not remount the view.
+                if (!isVisible || currentRefIdx === undefined) return <Fragment key={`${keyPrefix}-${messageKey}`}>{view}{noticeLines}</Fragment>;
                 return (
                   <div key={`${keyPrefix}-${messageKey}`} data-entry-id={entryIds[idx]} ref={options.attachRef === false ? undefined : attachVisibleRef(idx, currentRefIdx)}>
                     {view}
+                    {noticeLines}
                   </div>
                 );
               };
@@ -1205,6 +1222,9 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 // none of it still folds its workings: only a truncation with no answer
                 // anywhere asks to be handled here (the Compact button below).
                 const answered = turnHasAnswer(segments);
+                // The turn's own length, from its anchor to its last response's end
+                // (#1222): the footer's row, next to what the turn cost.
+                const turnDurationMs = hasAnchor && entryIds[userIdx] ? getTurnDurationMs(messages, userIdx, endIdx) : undefined;
 
                 // Each tool call is stored as its own assistant entry, so no single
                 // part carries what the turn wrote or what it cost: gather the turn's
@@ -1267,6 +1287,12 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                   }
 
                   if (segment.kind === "process") {
+                    // The stretch's own length and what its folded steps' cache
+                    // misses came to (#1222, #1265), both read off the segment's
+                    // messages alone.
+                    const firstIdx = segment.parts[0].index;
+                    const lastIdx = segment.parts[segment.parts.length - 1].index;
+                    const segmentMessages = messages.slice(firstIdx, lastIdx + 1);
                     rendered.push({
                       node: (
                       <div
@@ -1276,6 +1302,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                         <ProcessDetailsGroup
                           messageCount={segment.messageCount}
                           toolCallCount={segment.toolCallCount}
+                          durationMs={getTurnDurationMs(messages, firstIdx, lastIdx + 1)}
+                          cacheMisses={summarizeCacheMisses(segmentMessages)}
                           reveal={revealSegment}
                           t={t}
                         >
@@ -1335,6 +1363,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                         key={`turn-footer-${entryIds[groupStartIdx] ?? groupStartIdx}`}
                         usage={turnUsage}
                         timestamp={turnTimestamp}
+                        durationMs={turnDurationMs}
                         text={turnCopyText}
                         writtenFiles={turnWrittenFiles}
                         onOpenFile={onOpenFile}

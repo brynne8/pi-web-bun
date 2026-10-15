@@ -361,7 +361,8 @@ test("show more, empty groups, footer links and archive groups", () => {
       { kind: "group-more", key: "more:/work/big", projectKey: "/work/big", hidden: 24, canShowLess: true },
       { kind: "group-empty", key: "empty:/work/app", project },
       { kind: "spacer", key: "footer-spacer" },
-      { kind: "archive-group", key: "archive:/work/app", project, count: 2 },
+      { kind: "archive-group", key: "archive:/work/app", project, count: 2, expanded: true },
+      { kind: "archive-group", key: "archive:/work/old", project: { ...project, key: "/work/old", root: "/work/old", name: "old" }, count: 5, expanded: false },
       { kind: "footer-open", key: "footer-open" },
       { kind: "footer-archived", key: "footer-archived", count: 4 },
     ],
@@ -376,8 +377,14 @@ test("show more, empty groups, footer links and archive groups", () => {
   );
   assert.match(rowMarkup(html, "empty:/work/app"), /style="top:78px;height:28px" data-row-key="empty:\/work\/app">No sessions yet<\/div>/);
   assert.doesNotMatch(html, /footer-spacer/);
-  // The archive's project header folds nothing: no chevron, no folder, its name in the text column.
-  assert.match(rowMarkup(html, "archive:/work/app"), /title="\/work\/app"><span class="session-tree-archive-group-name">app<\/span><span class="session-tree-archive-group-count">· 2<\/span><\/div>/);
+  // The archive's project header is a group header that folds its rows: the
+  // chevron, the name, the count; ⋯ for its archived sessions, no "+".
+  const archiveHeader = rowMarkup(html, "archive:/work/app");
+  assert.match(archiveHeader, /class="session-tree-row session-tree-group session-tree-archive-group is-current"/);
+  assert.match(archiveHeader, /<button type="button" class="session-tree-group-toggle" aria-expanded="true" title="\/work\/app"><svg[^>]*class="session-tree-chevron is-open"[\s\S]*?<span class="session-tree-group-name">app<\/span><span class="session-tree-archive-group-count">· 2<\/span><\/button>/);
+  assert.match(archiveHeader, /aria-label="Archived sessions of app"[^>]*aria-haspopup="menu" aria-expanded="false"/);
+  assert.doesNotMatch(archiveHeader, /New session/);
+  assert.match(rowMarkup(html, "archive:/work/old"), /aria-expanded="false" title="\/work\/old"><svg[^>]*class="session-tree-chevron"/);
   assert.match(rowMarkup(html, "footer-open"), /<button type="button" class="session-tree-footer-button"><svg[^>]*>[\s\S]*?<\/svg><span class="session-tree-footer-label">Open another project…<\/span><\/button>/);
   assert.match(rowMarkup(html, "footer-archived"), /<span class="session-tree-footer-label">Archived · 4<\/span><svg[^>]*class="session-tree-footer-chevron"/);
 });
@@ -523,7 +530,6 @@ test("headers lead with their chevron, and every row's text starts in one column
   assert.deepEqual([...source.matchAll(/<(?:FolderPlus|Archive)Icon size=\{(\d+)\} \/>\s*<span className="session-tree-footer-label">/g)].map((match) => Number(match[1])), [12, 12]);
   // These rows span the whole width, so their padding adds the rows' inset.
   assert.match(css, /\.session-tree-group-empty,\s*\.session-tree-more \{\s*padding-left: calc\(var\(--session-tree-inset-left\) \+ 20px\);/);
-  assert.match(cssRule(".session-tree-archive-group"), /padding: 0 8px 3px calc\(var\(--session-tree-inset-left\) \+ 20px\);/);
   // The pinned section's chevron in the same column (its row spans the
   // whole width, a group's sits at the inset).
   assert.match(cssRule(".session-tree-pinned-toggle"), /padding: 0 8px 0 calc\(var\(--session-tree-inset-left\) \+ 5px\);/);

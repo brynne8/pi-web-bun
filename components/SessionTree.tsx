@@ -80,6 +80,8 @@ export interface SessionTreeReveal {
   at: number;
   /** Any row's key: a session row, a group header. */
   rowKey: string;
+  /** "start": the row goes to the top (a group header with its rows below it); else centred when out of view. */
+  block?: "start";
   /**
    * Also focus the row's first control once it is on the page: when focus has
    * fallen to <body>, or when this says the element that has it may give it
@@ -126,6 +128,10 @@ export interface SessionTreeProps {
   /** A group's "+": a new session in that project at once. */
   onGroupNew(project: SidebarProject): void;
   onGroupMenu(project: SidebarProject, opener: HTMLElement): void;
+  /** An archive header's toggle; `all` (Alt+click): every archive group follows this one. */
+  onToggleArchiveGroup?(projectKey: string, all: boolean): void;
+  /** An archive header's ⋯: Restore all, Delete…. */
+  onArchiveGroupMenu?(project: SidebarProject, opener: HTMLElement): void;
   onOpenOtherProject(opener: HTMLElement): void;
   onOpenArchive(): void;
   /** Scroll a row into view (and maybe focus it); see SessionTreeReveal. */
@@ -349,7 +355,7 @@ export function SessionTree(props: SessionTreeProps): ReactNode {
       const element = scrollRef.current;
       // A tree in a hidden tab has no box to scroll: it gets its saved position back when shown.
       if (element && element.getClientRects().length > 0) {
-        const next = revealScrollTop(offsets, index, element.scrollTop, element.clientHeight);
+        const next = revealScrollTop(offsets, index, element.scrollTop, element.clientHeight, pendingReveal.block);
         if (next !== null) element.scrollTop = next;
         setScrollTop(element.scrollTop);
       }
@@ -435,6 +441,9 @@ export function SessionTree(props: SessionTreeProps): ReactNode {
                     handlers={handlersRef}
                   />
                 );
+              }
+              if (row.kind === "archive-group") {
+                return <ArchiveGroupRowView key={row.key} row={row} top={top} height={height} menuOpen={menuOpen} handlers={handlersRef} />;
               }
               if (row.kind === "group") {
                 const renaming = row.project.key === renamingProjectKey;
@@ -962,7 +971,7 @@ const PlainRowView = memo(function PlainRowView({
   handlers,
   onMoreAction,
 }: {
-  row: Exclude<SidebarRow, { kind: "session" | "group" | "spacer" }>;
+  row: Exclude<SidebarRow, { kind: "session" | "group" | "archive-group" | "spacer" }>;
   top: number;
   height: number;
   handlers: Handlers;
@@ -1060,12 +1069,63 @@ const PlainRowView = memo(function PlainRowView({
           </button>
         </div>
       );
-    case "archive-group":
-      return (
-        <div className="session-tree-row session-tree-archive-group" style={style} data-row-key={row.key} title={row.project.root}>
-          <span className="session-tree-archive-group-name">{row.project.name}</span>
-          <span className="session-tree-archive-group-count">· {row.count}</span>
-        </div>
-      );
   }
+});
+
+/**
+ * An archive view's project header: a main group's header (chevron, name;
+ * the current project in `--text`) with its count, and ⋯ for the project's
+ * archived sessions. No "+", no pin, no drag: the archive keeps no order.
+ */
+const ArchiveGroupRowView = memo(function ArchiveGroupRowView({
+  row,
+  top,
+  height,
+  menuOpen,
+  handlers,
+}: {
+  row: Extract<SidebarRow, { kind: "archive-group" }>;
+  top: number;
+  height: number;
+  menuOpen: boolean;
+  handlers: Handlers;
+}) {
+  const { t } = useI18n();
+  const { project, expanded } = row;
+  const className = [
+    "session-tree-row session-tree-group session-tree-archive-group",
+    project.current ? "is-current" : "",
+    menuOpen ? "is-active" : "",
+  ].filter(Boolean).join(" ");
+  return (
+    <div className={className} style={rowStyle(top, height)} data-row-key={row.key}>
+      <button
+        type="button"
+        className="session-tree-group-toggle"
+        aria-expanded={expanded}
+        title={project.root}
+        onClick={(event) => handlers.current.onToggleArchiveGroup?.(project.key, event.altKey)}
+      >
+        <ChevronIcon size={12} strokeWidth={3} className={`session-tree-chevron${expanded ? " is-open" : ""}`} />
+        <span className="session-tree-group-name">{project.name}</span>
+        <span className="session-tree-archive-group-count">· {row.count}</span>
+      </button>
+      <span className="session-tree-group-actions">
+        <button
+          type="button"
+          className={`session-tree-group-action${menuOpen ? " is-active" : ""}`}
+          aria-label={t("sidebar.archivedProjectActions", { name: project.name })}
+          title={t("sidebar.archivedProjectActions", { name: project.name })}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={(event) => {
+            event.stopPropagation();
+            handlers.current.onArchiveGroupMenu?.(project, event.currentTarget);
+          }}
+        >
+          <MoreIcon size={13} />
+        </button>
+      </span>
+    </div>
+  );
 });

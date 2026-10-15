@@ -161,9 +161,13 @@ export const MarkdownBody = memo(function MarkdownBody({ children, className, is
       return <ol start={start} style={{ ...style, ["--ol-marker-digits" as string]: Math.max(digits, 2) }} {...props} />;
     },
     table({ children }) {
+      // The frame draws the border; the scroller inside it fades its scrolled
+      // edges, which on the bordered box would fade the border too.
       return (
-        <div className="markdown-table-wrap">
-          <table>{children}</table>
+        <div className="markdown-table-frame">
+          <div className="markdown-table-wrap">
+            <table>{children}</table>
+          </div>
         </div>
       );
     },

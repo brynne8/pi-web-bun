@@ -4,7 +4,6 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
 import { THEME_OPTIONS } from "@/lib/theme";
-import { ThemeIcon } from "./ThemeIcon";
 import {
   CHAT_CONTENT_WIDTH_DEFAULT,
   CHAT_CONTENT_WIDTH_MAX,
@@ -85,6 +84,9 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
   const [shellSaving, setShellSaving] = useState(false);
   const [shellError, setShellError] = useState<string | null>(null);
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
+  const [cacheMissNotices, setCacheMissNotices] = useState<boolean | null>(null);
+  const [cacheMissNoticesSaving, setCacheMissNoticesSaving] = useState(false);
+  const [cacheMissNoticesError, setCacheMissNoticesError] = useState<string | null>(null);
   const [pushRegistering, setPushRegistering] = useState(false);
   const [pushStatus, setPushStatus] = useState<{ kind: "ok" | "error"; message: string } | null>(null);
   const [webAuthEnabled, setWebAuthEnabled] = useState(false);
@@ -126,6 +128,41 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
       });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/cache-miss-notices")
+      .then(async (response) => {
+        const data = await response.json() as { enabled?: boolean; error?: string };
+        if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+        if (!cancelled) setCacheMissNotices(data.enabled === true);
+      })
+      .catch((cause) => {
+        if (!cancelled) setCacheMissNoticesError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // pi's showCacheMissNotices (#1265); the open chat is read again to show or drop them.
+  const toggleCacheMissNotices = async (enabled: boolean) => {
+    setCacheMissNoticesSaving(true);
+    setCacheMissNoticesError(null);
+    try {
+      const response = await fetch("/api/cache-miss-notices", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      const data = await response.json() as { enabled?: boolean; error?: string };
+      if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+      setCacheMissNotices(data.enabled === true);
+      if (sessionId) onSessionReloaded();
+    } catch (cause) {
+      setCacheMissNoticesError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setCacheMissNoticesSaving(false);
+    }
+  };
 
   const togglePowerShell = async (enabled: boolean) => {
     setShellSaving(true);
@@ -206,6 +243,8 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
               <label
                 key={option.id}
                 className="settings-theme-option"
+                data-system={option.id === "auto" || undefined}
+                data-wide={option.id === "contrast-light" || option.id === "contrast-dark" || option.id === "zenburn" || undefined}
               >
                 <input
                   type="radio"
@@ -215,8 +254,22 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
                   onChange={() => setThemePreference(option.id)}
                   className="sr-only"
                 />
-                <ThemeIcon preference={option.id} />
-                <span className="settings-theme-option-label">{t(option.label)}</span>
+                {/* A data-theme span paints with that theme's own variables. System is a switch, not a
+                    palette: a neutral tile with a light and a dark chip beside its name. */}
+                {option.id === "auto" ? (
+                  <span className="settings-theme-swatch settings-theme-system" aria-hidden="true">
+                    <span data-theme="light" className="settings-theme-chip" />
+                    <span data-theme="dark" className="settings-theme-chip" />
+                    <span className="settings-theme-system-name">{t(option.label)}</span>
+                  </span>
+                ) : (
+                  <span className="settings-theme-swatch" aria-hidden="true">
+                    <span data-theme={option.id} className="settings-theme-fill">
+                      <span className="settings-theme-name">{t(option.label)}</span>
+                    </span>
+                  </span>
+                )}
+                <span className="sr-only">{t(option.label)}</span>
               </label>
             );
           })}
@@ -336,7 +389,19 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
               </label>
             </div>
           </div>
+          <div className="settings-chat-option settings-chat-switch-option">
+            <span>{t("settings.cacheMissNotices")}</span>
+            <ConfigSwitch
+              checked={cacheMissNotices === true}
+              loading={(cacheMissNotices === null && !cacheMissNoticesError) || cacheMissNoticesSaving}
+              label={t("settings.cacheMissNotices")}
+              describedBy="settings-cache-miss-notices-description"
+              onChange={(enabled) => void toggleCacheMissNotices(enabled)}
+            />
+          </div>
         </div>
+        <p id="settings-cache-miss-notices-description" className="settings-general-description">{t("settings.cacheMissNoticesDescription")}</p>
+        {cacheMissNoticesError && <p role="alert" className="settings-general-error">{cacheMissNoticesError}</p>}
       </section>
 
       <section className="settings-general-section">

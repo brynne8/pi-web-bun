@@ -20,6 +20,7 @@ import { readSubagentRun, readSubagentSessionResources } from "@/lib/subagents";
 import { readSessionToolSelection } from "@/lib/session-tool-selection";
 import { jsonResponse } from "@/lib/json-response";
 import { deleteSessions } from "@/lib/session-delete";
+import { attachTranscriptNotices, readSessionTranscriptNotices } from "@/lib/transcript-notices-server";
 
 export async function GET(
   req: Request,
@@ -64,12 +65,19 @@ export async function GET(
     const deferToolResultImages = searchParams.has("deferMedia");
     const rawTail = Number(searchParams.get("tail"));
     const tail = Number.isFinite(rawTail) && rawTail > 0 ? Math.min(rawTail, 1000) : 50;
-    const context = buildSessionContext(entries as never, leafId, {
+    // pi's showCacheMissNotices (#1265): cache, cost and provider notices on the messages they follow.
+    const transcriptNotices = readSessionTranscriptNotices({
+      entries: entries as unknown as SessionEntry[],
+      cwd: sm.getHeader()?.cwd ?? "",
+      leafId: leafId,
+      models: liveRpc?.inner.modelRuntime,
+    });
+    const context = attachTranscriptNotices(buildSessionContext(entries as never, leafId, {
       deferThinking,
       deferToolResultImages,
       tail,
       sessionId: id, // local: lazy URLs for historical tool-result images
-    });
+    }), transcriptNotices);
     perf?.span("context");
     const totalActiveMs = computeSessionTotalActiveMs(entries);
     // Cumulative usage over ALL entries, including history compacted away —
@@ -83,7 +91,8 @@ export async function GET(
     const latestEntry = entries[entries.length - 1] as { id?: string } | undefined;
     const snapshotRevision = computeSessionRevision({
       filePath,
-      sourceId: liveRpc ? `runtime:${String(liveRpc.inner.sessionId)}` : "disk",
+      // The notices switch changes the messages without touching the file.
+      sourceId: `${liveRpc ? `runtime:${String(liveRpc.inner.sessionId)}` : "disk"}${transcriptNotices ? "+notices" : ""}`,
       entryCount: entries.length,
       latestEntryId: typeof latestEntry?.id === "string" ? latestEntry.id : null,
       leafId: leafId ?? null,

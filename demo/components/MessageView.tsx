@@ -8,7 +8,7 @@ import { ThinkingIcon } from "./ThinkingIcon";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
-import { getAssistantErrorMessage, getThinkingPreview, hasAssistantAnswer, isAssistantTruncated, isEmptyThinkingBlock } from "@/lib/message-display";
+import { getAssistantErrorMessage, getThinkingPreview, hasAssistantAnswer, isAssistantTruncated, isEmptyThinkingBlock, splitThinkingPieces } from "@/lib/message-display";
 import { parseUnifiedPatch, type SplitDiffCell, type SplitDiffFile } from "@/lib/patch";
 import { applyPatchPreviewToFiles, applyPatchResultHasFailures, extractApplyPatchPaths, getApplyPatchInputText, parseApplyPatchInput } from "@/lib/apply-patch";
 import { isApplyPatchToolName, isEditToolName } from "@/lib/tool-names";
@@ -958,6 +958,19 @@ function TextBlock({ block, isStreaming, cwd, onOpenFile }: { block: TextContent
   return <SafeMarkdownBody isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>{block.text}</SafeMarkdownBody>;
 }
 
+// A model looping in its thinking can write megabytes. As one text node, every
+// streamed chunk laid all of it out again (the prompt anchor reads layout after
+// each commit). As pieces, only the last one changes. Thinking that fits one
+// piece stays one text node.
+function ThinkingText({ text }: { text: string }) {
+  const pieces = useMemo(() => splitThinkingPieces(text), [text]);
+  if (pieces.length === 1) return text;
+  // No memo: React already skips a div whose text is unchanged, and a memo
+  // bailout keeps the old props, each a slice pinning the whole thinking of
+  // its chunk (995 MB retained streaming 2M Chinese characters).
+  return pieces.map((piece, index) => <div key={index}>{piece.text}</div>);
+}
+
 export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
   block: ThinkingContent;
   duration?: number;
@@ -1063,7 +1076,7 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex 
             overflowWrap: "anywhere",
           }}
         >
-           {loading ? t("i18n.loadingThinking") : error ?? (block.deferred ? content : block.thinking)}
+           {loading ? t("i18n.loadingThinking") : error ?? <ThinkingText text={(block.deferred ? content : block.thinking) ?? ""} />}
         </div>
       )}
       {duration !== undefined && (

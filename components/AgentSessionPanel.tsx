@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import type { SessionUsageSummary } from "@/lib/session-stats";
+import { formatActiveDuration, formatCompactCount, formatCostShort } from "@/lib/session-stats-format";
 import type { SessionInfo, SubagentSessionStatus } from "@/lib/types";
 
 interface Props {
@@ -10,6 +12,100 @@ interface Props {
   selectedSessionId: string;
   runningSessionIds: ReadonlySet<string>;
   onSelectSession: (session: SessionInfo) => void;
+  /** Subagents with a viewer tab in the open right panel. */
+  openSubagentTabIds: ReadonlySet<string>;
+  /** Opens a subagent's read-only viewer tab in the right panel (the `Agent` card's button), or closes it when open. */
+  onToggleSubagentTab: (sessionId: string, label: string) => void;
+}
+
+const STATS_POLL_MS = 3000;
+
+/**
+ * Usage of every agent in the family, as the toolbar's stats popover counts
+ * it. Read on open and whenever a run starts or ends; polled while one runs,
+ * on a visible page, one request at a time.
+ */
+function useAgentUsage(ids: readonly string[], runningKey: string): Record<string, SessionUsageSummary> {
+  const [usage, setUsage] = useState<Record<string, SessionUsageSummary>>({});
+  const idsKey = ids.join(",");
+  useEffect(() => {
+    const requested = idsKey ? idsKey.split(",") : [];
+    if (requested.length === 0) return;
+    const controller = new AbortController();
+    let inFlight = false;
+    const load = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const res = await fetch("/api/sessions/stats", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: requested }),
+          signal: controller.signal,
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const data = await res.json() as { stats?: Record<string, SessionUsageSummary> };
+        if (!controller.signal.aborted && data.stats) setUsage(data.stats);
+      } catch {
+        /* best-effort: rows keep their last numbers */
+      } finally {
+        inFlight = false;
+      }
+    };
+    void load();
+    if (!runningKey) return () => controller.abort();
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, STATS_POLL_MS);
+    return () => {
+      clearInterval(timer);
+      controller.abort();
+    };
+  }, [idsKey, runningKey]);
+  return usage;
+}
+
+function usageTooltip(usage: SessionUsageSummary, t: (key: string) => string, locale: string): string {
+  const { tokens } = usage;
+  return [
+    `${t("session.totalActive")}: ${formatActiveDuration(usage.totalActiveMs)}`,
+    `${t("session.input")}: ${tokens.input.toLocaleString(locale)}`,
+    `${t("session.output")}: ${tokens.output.toLocaleString(locale)}`,
+    ...(tokens.cacheRead > 0 ? [`${t("session.cacheRead")}: ${tokens.cacheRead.toLocaleString(locale)}`] : []),
+    ...(tokens.cacheWrite > 0 ? [`${t("session.cacheWrite")}: ${tokens.cacheWrite.toLocaleString(locale)}`] : []),
+    `${t("session.total")}: ${tokens.total.toLocaleString(locale)}`,
+    ...(usage.cost > 0 ? [`${t("session.cost")}: $${usage.cost.toFixed(4)}`] : []),
+    `${t("session.toolCalls")}: ${usage.toolCalls.toLocaleString(locale)}`,
+  ].join("\n");
+}
+
+function UsageLine({ usage, style }: { usage: SessionUsageSummary; style?: React.CSSProperties }) {
+  const { locale, t } = useI18n();
+  const cost = formatCostShort(usage.cost);
+  return (
+    <span
+      title={usageTooltip(usage, t, locale)}
+      style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, color: "var(--text-dim)", fontSize: 11, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", ...style }}
+    >
+      {usage.totalActiveMs > 0 && (
+        <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+          </svg>
+          {formatActiveDuration(usage.totalActiveMs)}
+        </span>
+      )}
+      {usage.tokens.total > 0 && (
+        <span>{t("agentSwitcher.tokens", { count: formatCompactCount(usage.tokens.total) })}</span>
+      )}
+      {cost && <span style={{ color: "var(--text-muted)" }}>{cost}</span>}
+    </span>
+  );
+}
+
+function hasUsage(usage: SessionUsageSummary | undefined): usage is SessionUsageSummary {
+  return Boolean(usage && (usage.tokens.total > 0 || usage.totalActiveMs > 0));
 }
 
 function sessionTitle(session: SessionInfo): string {
@@ -72,13 +168,19 @@ function AgentRow({
   main,
   selected,
   running,
+  usage,
   onSelect,
+  tabShown,
+  onToggleTab,
 }: {
   session: SessionInfo;
   main?: boolean;
   selected: boolean;
   running: boolean;
+  usage?: SessionUsageSummary;
   onSelect: () => void;
+  tabShown?: boolean;
+  onToggleTab?: () => void;
 }) {
   const { locale, t } = useI18n();
   const relation = session.relation?.kind === "subagent" ? session.relation : null;
@@ -89,68 +191,94 @@ function AgentRow({
     : `${relation?.profile ?? t("agentSwitcher.subagent")} · ${formatRelativeTime(session.modified, locale)}`;
 
   return (
-    <button
-      type="button"
-      role="option"
-      aria-selected={selected}
-      onClick={onSelect}
+    <div
       style={{
-        width: "100%",
-        minHeight: 56,
-        display: "grid",
-        gridTemplateColumns: "28px minmax(0, 1fr) auto",
-        alignItems: "center",
-        gap: 9,
-        padding: "7px 12px",
-        border: "none",
+        display: "flex",
         borderBottom: "1px solid var(--border)",
         borderLeft: selected ? "2px solid var(--accent)" : "2px solid transparent",
         background: selected ? "var(--bg-selected)" : "transparent",
-        color: "var(--text)",
-        cursor: "pointer",
-        textAlign: "left",
-      }}
-      onMouseEnter={(event) => {
-        if (!selected) event.currentTarget.style.background = "var(--bg-hover)";
-      }}
-      onMouseLeave={(event) => {
-        if (!selected) event.currentTarget.style.background = "transparent";
       }}
     >
-      <span style={{ width: 28, height: 28, display: "grid", placeItems: "center", color: main ? "var(--text-muted)" : "var(--accent)" }}>
-        {main ? (
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" />
-          </svg>
-        ) : (
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <rect x="5" y="7" width="14" height="11" rx="2" /><path d="M9 11h.01M15 11h.01M9 15h6M12 7V4M10 4h4" />
-          </svg>
-        )}
-      </span>
-      <span style={{ minWidth: 0 }}>
-        <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: selected ? 600 : 500 }} title={primary}>
-          {primary}
+      <button
+        type="button"
+        role="option"
+        aria-selected={selected}
+        onClick={onSelect}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          minHeight: 56,
+          display: "grid",
+          gridTemplateColumns: "28px minmax(0, 1fr) auto",
+          alignItems: "center",
+          gap: 9,
+          padding: "7px 12px",
+          border: "none",
+          background: "transparent",
+          color: "var(--text)",
+          cursor: "pointer",
+          textAlign: "left",
+        }}
+        onMouseEnter={(event) => {
+          if (!selected) event.currentTarget.style.background = "var(--bg-hover)";
+        }}
+        onMouseLeave={(event) => {
+          if (!selected) event.currentTarget.style.background = "transparent";
+        }}
+      >
+        <span style={{ width: 28, height: 28, display: "grid", placeItems: "center", color: main ? "var(--text-muted)" : "var(--accent)" }}>
+          {main ? (
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" />
+            </svg>
+          ) : (
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="5" y="7" width="14" height="11" rx="2" /><path d="M9 11h.01M15 11h.01M9 15h6M12 7V4M10 4h4" />
+            </svg>
+          )}
         </span>
-        <span style={{ display: "block", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-dim)", fontSize: 11 }} title={secondary}>
-          {secondary}
+        <span style={{ minWidth: 0 }}>
+          <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: selected ? 600 : 500 }} title={primary}>
+            {primary}
+          </span>
+          <span style={{ display: "block", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-dim)", fontSize: 11 }} title={secondary}>
+            {secondary}
+          </span>
+          {hasUsage(usage) && <UsageLine usage={usage} style={{ marginTop: 3 }} />}
         </span>
-      </span>
-      <span style={{ display: "flex", alignItems: "center", gap: 6, color: main && !running ? "var(--text-dim)" : statusColor(status), fontSize: 11, whiteSpace: "nowrap" }}>
-        {main && !running ? (
-          selected ? t("agentSwitcher.current") : null
-        ) : (
-          <>
-            <StatusIcon status={status} />
-            <span>{t(`agentSwitcher.status.${status}`)}</span>
-          </>
-        )}
-      </span>
-    </button>
+        <span style={{ display: "flex", alignItems: "center", gap: 6, color: main && !running ? "var(--text-dim)" : statusColor(status), fontSize: 11, whiteSpace: "nowrap" }}>
+          {main && !running ? (
+            selected ? t("agentSwitcher.current") : null
+          ) : (
+            <>
+              <StatusIcon status={status} />
+              <span>{t(`agentSwitcher.status.${status}`)}</span>
+            </>
+          )}
+        </span>
+      </button>
+      {onToggleTab && (
+        <button
+          type="button"
+          onClick={onToggleTab}
+          title={t(tabShown ? "subagent.closeTab" : "subagent.openTab")}
+          aria-label={t(tabShown ? "subagent.closeTab" : "subagent.openTab")}
+          aria-pressed={tabShown}
+          style={{ width: 36, display: "grid", placeItems: "center", border: "none", borderLeft: "1px solid var(--border)", background: "none", color: tabShown ? "var(--accent)" : "var(--text-muted)", cursor: "pointer", flexShrink: 0 }}
+          onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; if (!tabShown) event.currentTarget.style.color = "var(--text)"; }}
+          onMouseLeave={(event) => { event.currentTarget.style.background = "none"; if (!tabShown) event.currentTarget.style.color = "var(--text-muted)"; }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" />
+            {tabShown && <path d="M15 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4z" fill="currentColor" />}
+          </svg>
+        </button>
+      )}
+    </div>
   );
 }
 
-export function AgentSessionPanel({ rootSession, subagents, selectedSessionId, runningSessionIds, onSelectSession }: Props) {
+export function AgentSessionPanel({ rootSession, subagents, selectedSessionId, runningSessionIds, onSelectSession, openSubagentTabIds, onToggleSubagentTab }: Props) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const sortedSubagents = useMemo(() => [...subagents].sort((a, b) => {
@@ -168,6 +296,30 @@ export function AgentSessionPanel({ rootSession, subagents, selectedSessionId, r
       })
     : sortedSubagents;
   const runningCount = subagents.filter((session) => runningSessionIds.has(session.id)).length;
+  const familyIds = useMemo(() => [rootSession.id, ...subagents.map((session) => session.id)], [rootSession.id, subagents]);
+  const runningKey = familyIds.filter((id) => runningSessionIds.has(id)).join(",");
+  const usage = useAgentUsage(familyIds, runningKey);
+  const familyUsage = useMemo(() => {
+    const listed = familyIds.map((id) => usage[id]).filter(hasUsage);
+    if (listed.length === 0) return null;
+    const total: SessionUsageSummary = {
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      cost: 0,
+      toolCalls: 0,
+      totalActiveMs: 0,
+    };
+    for (const item of listed) {
+      total.tokens.input += item.tokens.input;
+      total.tokens.output += item.tokens.output;
+      total.tokens.cacheRead += item.tokens.cacheRead;
+      total.tokens.cacheWrite += item.tokens.cacheWrite;
+      total.tokens.total += item.tokens.total;
+      total.cost += item.cost;
+      total.toolCalls += item.toolCalls;
+      total.totalActiveMs += item.totalActiveMs;
+    }
+    return total;
+  }, [familyIds, usage]);
 
   return (
     <div
@@ -189,11 +341,19 @@ export function AgentSessionPanel({ rootSession, subagents, selectedSessionId, r
           <span style={{ color: "var(--text-dim)", fontSize: 11 }}>
             {t("agentSwitcher.count", { count: subagents.length })}
           </span>
-          {runningCount > 0 && (
-            <span style={{ marginLeft: "auto", color: "var(--accent)", fontSize: 11 }}>
-              {t("agentSwitcher.runningCount", { count: runningCount })}
-            </span>
-          )}
+          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            {familyUsage && (
+              <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, overflow: "hidden" }}>
+                <span style={{ color: "var(--text-dim)", fontSize: 11, whiteSpace: "nowrap" }} title={t("agentSwitcher.totalUsageHint")}>{t("agentSwitcher.totalUsage")}</span>
+                <UsageLine usage={familyUsage} />
+              </span>
+            )}
+            {runningCount > 0 && (
+              <span style={{ color: "var(--accent)", fontSize: 11, whiteSpace: "nowrap" }}>
+                {t("agentSwitcher.runningCount", { count: runningCount })}
+              </span>
+            )}
+          </span>
         </div>
         {subagents.length > 8 && (
           <div style={{ padding: 8, borderBottom: "1px solid var(--border)" }}>
@@ -217,6 +377,7 @@ export function AgentSessionPanel({ rootSession, subagents, selectedSessionId, r
             main
             selected={rootSession.id === selectedSessionId}
             running={runningSessionIds.has(rootSession.id)}
+            usage={usage[rootSession.id]}
             onSelect={() => onSelectSession(rootSession)}
           />
           {visibleSubagents.map((session) => (
@@ -225,7 +386,13 @@ export function AgentSessionPanel({ rootSession, subagents, selectedSessionId, r
               session={session}
               selected={session.id === selectedSessionId}
               running={runningSessionIds.has(session.id)}
+              usage={usage[session.id]}
               onSelect={() => onSelectSession(session)}
+              tabShown={openSubagentTabIds.has(session.id)}
+              onToggleTab={() => {
+                const relation = session.relation?.kind === "subagent" ? session.relation : null;
+                onToggleSubagentTab(session.id, relation?.description || relation?.profile || sessionTitle(session));
+              }}
             />
           ))}
           {visibleSubagents.length === 0 && (
