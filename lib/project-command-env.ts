@@ -44,6 +44,8 @@ type ProjectCommandBashOperationsOptions = {
   shellPath?: string;
   /** When set, foreground commands without an explicit timeout hand off to background after this long. */
   autoBackgroundMs?: number;
+  /** When set, a foreground command that prints more lines than this hands off to background instead. */
+  maxOutputLines?: number;
   bgTask?: {
     sessionId: string;
     notify: BgTaskOptions["notify"];
@@ -100,6 +102,7 @@ export function createProjectCommandBashOperations(
     localOperations = createLocalBashOperations({ shellPath: options.shellPath }),
     platform = process.platform,
     autoBackgroundMs,
+    maxOutputLines,
     bgTask,
   } = options;
 
@@ -120,12 +123,15 @@ export function createProjectCommandBashOperations(
       if (bgController && bgTask) trackBgTask(bgTask.sessionId, bgController);
       const execSignal = bgController ? bgController.signal : signal;
       let handedOff = false;
-      // With auto-background armed, capture everything the model has not seen
-      // yet so the handoff log keeps it. An explicit timeout does not disable
-      // the handoff; it stays the process's own hard limit.
-      const autoBgArmed = autoBackgroundMs !== undefined && bgTask !== undefined;
+      // With a handoff armed, capture everything the model has not seen yet so the
+      // handoff log keeps it. An explicit timeout does not disable the handoff; it
+      // stays the process's own hard limit.
+      const autoBgArmed = (autoBackgroundMs !== undefined || maxOutputLines !== undefined) && bgTask !== undefined;
       const buffer = autoBgArmed ? new PreHandoffBuffer() : undefined;
       let bgStream: ReturnType<typeof createWriteStream> | undefined;
+      // Set once the command's own promise is wired, so the output path can hand off.
+      let handOffOnOutput: (() => void) | undefined;
+      let outputLines = 0;
       const startedAtMs = Date.now();
       // Pi rejects any other timeout before it starts the command, so the
       // sanitized value goes downstream too: a model that means "unlimited" by
@@ -145,6 +151,10 @@ export function createProjectCommandBashOperations(
           if (!released) onData(data);
           if (bgStream) bgStream.write(data);
           else buffer?.push(data);
+          if (maxOutputLines !== undefined && !handedOff) {
+            outputLines += data.toString("utf8").split("\n").length - 1;
+            if (outputLines > maxOutputLines) handOffOnOutput?.();
+          }
         },
       });
       if (!execSignal && timeoutMs === undefined && !autoBgArmed) return execution;
@@ -178,7 +188,8 @@ export function createProjectCommandBashOperations(
           releaseAfter(timeoutMs + abortSettleGraceMs, new Error(`timeout:${timeout}`));
         }
         if (autoBgArmed && buffer && bgTask) {
-          const timer = setTimeout(() => {
+          const handOff = (reason: "time" | "lines") => {
+            if (handedOff) return;
             handedOff = true;
             released = true;
             const logPath = bgLogPath(bgTask.sessionId);
@@ -194,10 +205,17 @@ export function createProjectCommandBashOperations(
               },
             );
             release();
-            reject(new Error(`bg-task-backgrounded:${logPath}`));
-          }, autoBackgroundMs);
-          (timer as { unref?: () => void }).unref?.();
-          timers.push(timer);
+            reject(new Error(`bg-task-backgrounded:${reason}:${logPath}`));
+          };
+          handOffOnOutput = () => handOff("lines");
+          // Output that arrived before this block wired the trigger up has already
+          // crossed the limit; checking here is what keeps that window from losing it.
+          if (maxOutputLines !== undefined && outputLines > maxOutputLines) handOffOnOutput();
+          if (autoBackgroundMs !== undefined) {
+            const timer = setTimeout(() => handOff("time"), autoBackgroundMs);
+            (timer as { unref?: () => void }).unref?.();
+            timers.push(timer);
+          }
         }
         if (bgController && bgTask) {
           // Auto-bg completion reports through bg.onEnd; a handoff already
@@ -284,22 +302,23 @@ export function createProjectCommandBashExtension(options: {
         ...(bg
           ? {
               parameters: Type.Object({
-                command: Type.String({ description: "Shell command to execute" }),
+                command: Type.String({ description: "Shell command to execute. Never pipe it through `| tail`; never redirect with `>` or `>>`." }),
                 timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
                 run_in_background: Type.Optional(Type.Boolean({ description: "Run this command in the background immediately; you will be notified when it completes." })),
+                max_output_lines: Type.Optional(Type.Number({ description: "Line count before the command goes to the background. Always set it unless you already know the output is short." })),
               }),
-              description: `${displayDefinition.description} Supports background execution: pass run_in_background=true for long-running commands, or let foreground commands auto-background after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000} seconds; you are notified when a background command finishes.`,
+              description: `${displayDefinition.description} Supports background execution: pass run_in_background=true for long-running commands, or let foreground commands auto-background after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000} seconds; you are notified when a background command finishes. Never pipe a command through | tail or redirect its output with > or >>. Bound the command instead.`,
               promptGuidelines: [
                 ...(displayDefinition.promptGuidelines ?? []),
-                "When you can already expect a command to run for a long time (dev server, watcher, long build, large download), do NOT force a timeout: set run_in_background=true.",
+                "NEVER pipe a command through `| tail` or redirect its output with `>` or `>>`. Both end the output early, so nothing is saved to a file. Run the command plain.",
+                "To see less, bound the command: `git log --oneline -20`, `gh run list -L 15`, `find . -maxdepth 2`, or pass `max_output_lines` when it has no such flag.",
+                "When you can already expect a command to run for a long time (dev server, watcher, long build, large download), DO NOT force a timeout: set run_in_background=true.",
                 "A foreground command auto-backgrounds after 120 seconds; treat that as a handoff, not a failure.",
-                "Do not add redirection to a command (2>&1, | tail, > out.log): stdout and stderr are already combined, and a backgrounded command's report already carries the end of its log — a pipe throws that output away before the log sees it.",
-                "A background command's result arrives on its own when it finishes — do not poll, sleep, or re-read its log. Do other work that does not need it if you have any; if you have none, stop — no output, no commands — until it arrives. Stopping does not cancel the task.",
               ],
             }
           : {}),
         async execute(toolCallId, params, signal, onUpdate, context) {
-          const input = params as { command: string; timeout?: number; run_in_background?: boolean };
+          const input = params as { command: string; timeout?: number; run_in_background?: boolean; max_output_lines?: number };
           if (bg && input.run_in_background === true) {
             return startBackgroundCommand(options, input, context);
           }
@@ -308,6 +327,7 @@ export function createProjectCommandBashExtension(options: {
             operations: createProjectCommandBashOperations({
               shellPath: options.settings.getShellPath(),
               autoBackgroundMs: bg ? FOREGROUND_AUTO_BACKGROUND_MS : undefined,
+              maxOutputLines: input.max_output_lines,
               bgTask: bg && context?.sessionManager
                 ? { sessionId: context.sessionManager.getSessionId(), notify: bg.notify }
                 : undefined,
@@ -317,9 +337,12 @@ export function createProjectCommandBashExtension(options: {
             return await executionDefinition.execute(toolCallId, params, signal, onUpdate, context);
           } catch (error) {
             if (error instanceof Error && error.message.startsWith("bg-task-backgrounded:")) {
-              const logPath = error.message.slice("bg-task-backgrounded:".length);
+              const [, reason, logPath] = error.message.split(":");
+              const why = reason === "lines"
+                ? `after printing more than ${input.max_output_lines} lines`
+                : `after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000}s`;
               return {
-                content: [{ type: "text" as const, text: `Command auto-backgrounded after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000}s.\nLog file: ${logPath}\nThe result arrives on its own when the command finishes — do not poll, sleep, check the log, or run any other command for it. Do other work that does not need it if you have any; if you have none, stop — no output, no commands — until it arrives. Stopping does not cancel the task.` }],
+                content: [{ type: "text" as const, text: `Command auto-backgrounded ${why}.\nLog file: ${logPath}\nThe result arrives on its own when the command finishes — do not poll, sleep, check the log, or run any other command for it. Do other work that does not need it if you have any; if you have none, stop — no output, no commands — until it arrives. Stopping does not cancel the task.` }],
                 details: undefined,
               };
             }
