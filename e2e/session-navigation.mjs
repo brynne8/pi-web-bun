@@ -252,11 +252,11 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
       assert.equal(await link(page, copyId).getAttribute("href"), `?session=${copyId}`);
       console.log("PASS: after a keyboard Fork, focus lands on the copy row's link");
     } finally {
-      // A fresh document first: a stream the copy kept open (its grace window)
-      // would ask for the deleted copy's state and log a 404, which is how any
-      // tab reacts to a session deleted under it, not part of this check.
-      await page.goto(`${base}/?session=${a.id}`, { waitUntil: "domcontentloaded" });
-      await expectShows(page, a.id);
+      // Closing the tab, not navigating it somewhere first: the copy's page holds
+      // its stream open, and a page that is gone asks the server for nothing, so
+      // the delete below cannot log a 404. A document navigation here would race
+      // the app's own navigation to the copy.
+      await page.close();
       await deleteSession(copyId);
     }
     assert.deepEqual(await sessionIds(), initialIds, "the fork's copy is gone");
