@@ -37,20 +37,30 @@ export async function newTestContext(browser, options = {}) {
 const IGNORED_BROWSER_ERRORS = [
   /Service Worker is disabled because the context is sandboxed/, // serviceWorkers: "block" above
   /ResizeObserver loop completed with undelivered notifications/,
-  /^Failed to load context: TypeError: Load failed$/, // a fetch a navigation cancelled
+  // A read this page fired that the next document's navigation cancelled, named by whichever
+  // hook wanted it: hooks/useAgentSession.ts's context, tools, agent state and slash-command
+  // reads, and components/AppShell.tsx's panel loads. loadContext keeps quiet when its own
+  // signal says so; the others have no signal to consult and log the rejection either way, so
+  // one event arrives under several names. Keeping the quiet side of a load out of the app
+  // needs a signal on that path, and nothing here can watch a teardown it never sees, so the
+  // sentence is the pin and the label is not.
+  /^Failed to load [^:]+: TypeError: Load failed$/,
   // The viewport meta carries `interactive-widget=resizes-content` on purpose (app/layout.tsx:
   // the Chromium-only virtual-keyboard key an Android reader needs). WebKit on the Linux CI
   // image reads the meta and prints this at error level, once per parse; the macOS WebKit
   // build reads the same tag and says nothing at any level, so no local run ever sees it.
   // Nothing is broken either way, so the pattern stays pinned to this one key and sentence.
   /^Viewport argument key "interactive-widget" not recognized and ignored\.$/,
-  // The running-state poll is a relative fetch with its own AbortController
-  // (components/SessionSidebar.tsx) and the client builds no absolute URL anywhere, so the only
-  // document WebKit can deny it to is one whose origin has already gone: a poll still in flight
-  // while the page navigates. The line above is the same event in Chromium's words.
-  // Pinned to this endpoint and this sentence, because a real cross-origin call to some other
-  // route is a bug worth failing on.
-  /\/api\/agent\/running due to access control checks\.$/,
+  // The app's reads are relative fetches, several with an AbortController of their own
+  // (components/SessionSidebar.tsx's running-state poll; hooks/useAgentSession.ts's context,
+  // tools, per-session state and lease reads), and the client builds no absolute URL anywhere,
+  // so the only document WebKit can deny one to is a page whose own origin has already gone: a
+  // read still in flight while the page navigates. Pinned to this harness's own origin
+  // (`127.0.0.1`, e2e/run.mjs), to the app's `/api` route family and to this sentence — a call
+  // to another host, or any other message, is a bug worth failing on. The family is the whole
+  // prefix on purpose: the per-session state read reached this the way the agent routes did,
+  // and naming the agent routes alone let it through.
+  /\b127\.0\.0\.1:\d+\/api\/\S+ due to access control checks\.$/,
 ];
 
 /** Whether a pageerror or console-error text is this harness's own noise, not the app's. */

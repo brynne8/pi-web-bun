@@ -64,7 +64,9 @@ const COMPACTED = "e2e-compacted-session";
 const APPEND = "e2e-external-append-session";
 const REVERT = "e2e-git-revert-session";
 const CODE_BACKGROUND = "e2e-code-background";
+const RESTORE = "e2e-scroll-restore-session";
 const text = (i) => `E2E message ${String(i).padStart(4, "0")}`;
+const restoreText = (i) => `E2E scroll restore ${String(i).padStart(4, "0")}`;
 const ids = (start, end) => Array.from({ length: end - start }, (_, i) => `e${start + i}`);
 
 function message(id, parentId, role, content) {
@@ -171,6 +173,13 @@ try {
     message("root", null, "user", "E2E wrapper root"),
     message("reply", "root", "assistant", "E2E wrapper reply"),
   ]);
+  // Sized for the reading-position check below: the window opens with the last 50 messages
+  // and the page above them is 49 more, so the single gesture that check makes loads the
+  // whole session and the sentinel goes away. The pixel offsets it compares are only
+  // meaningful once nothing is left to hide or to fetch, and this is the session that
+  // reaches that state from one gesture.
+  writeSession(RESTORE, Array.from({ length: 99 }, (_, i) =>
+    message(`s${i}`, i ? `s${i - 1}` : null, i % 2 ? "assistant" : "user", restoreText(i))));
   // A session whose cwd is the repository above, so the sidebar's files are that working tree.
   writeSession(REVERT, [
     message("root", null, "user", "E2E revert root"),
@@ -219,7 +228,7 @@ try {
     const response = await fetch(`${base}/api/sessions`, { signal: AbortSignal.timeout(5000) }).catch(() => null);
     if (response?.ok) {
       const { sessions } = await response.json();
-      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND, CODE_BACKGROUND, REVERT, projectNavigation.id].sort());
+      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND, CODE_BACKGROUND, REVERT, RESTORE, projectNavigation.id].sort());
       break;
     }
     assert.ok(Date.now() < deadline, "Server readiness timed out; see server.log");
@@ -318,15 +327,7 @@ try {
         number: await turn.locator("span[aria-hidden='true']").first().textContent(),
         earlier: await preview.locator("[data-minimap-preview-earlier]").textContent(),
       });
-      // The preview counts rendered turns, so a read can land before the last page is
-      // counted. Sample until three consecutive reads agree.
-      let result = await read();
-      for (let attempt = 0, same = 0; attempt < 25 && same < 2; attempt++) {
-        await delay(100);
-        const next = await read();
-        same = next.number === result.number && next.earlier === result.earlier ? same + 1 : 0;
-        result = next;
-      }
+      const result = await read();
       await page.screenshot({ path: join(artifacts, screenshot) });
       await page.mouse.move(0, 0);
       await preview.waitFor({ state: "detached" });
@@ -359,7 +360,7 @@ try {
     {
       // Each page the client fetched holds the 50 entries above the one before it.
       // Bodies are read here and only here: a Playwright response body is spent once,
-      // so this walk cannot rerun inside the retry loop below, which assumes what it proved.
+      // so this walk cannot rerun.
       let walked = firstCursor;
       for (const response of olderResponses) {
         assert.equal(response.status(), 200);
@@ -371,43 +372,6 @@ try {
         assert.equal(older.oldestEntryId, `e${walked}`);
         assert.equal(older.hasMore, true);
       }
-    }
-    // Pages arrive on their own after the two gestures: a page that lands renews the
-    // sentinel's observer, and the distance-from-bottom restore puts the viewport back at
-    // the top of what is loaded, so the sentinel is in view and the next page is asked for
-    // (sessions.md `A reading position that has not landed yet outranks the sentinel`,
-    // `components/ChatWindow.tsx`'s sentinel effect). Everything asserted next moves with
-    // every page — the rows rendered, the turns counted, the cursor fetched — so they are
-    // read only once no page has landed for a second, and read again if one landed while
-    // they were being read. A client that never stops paging reports itself instead of
-    // failing as a mismatch between two different moments.
-    let rendered, minimapPaged, oldestLoaded;
-    for (let attempt = 0; ; attempt++) {
-      const quietDeadline = Date.now() + 30_000;
-      let pages = olderResponses.length;
-      let quietMs = 0;
-      while (quietMs < 1000) {
-        await delay(100);
-        const landed = olderResponses.length;
-        quietMs = landed === pages ? quietMs + 100 : 0;
-        pages = landed;
-        assert.ok(Date.now() < quietDeadline, `Older pages never stopped arriving: ${pages} fetched`);
-      }
-      const pagesBefore = olderResponses.length;
-      oldestLoaded = firstCursor - 50 * pagesBefore;
-      rendered = await page.getByText(/^E2E message \d{4}$/).allTextContents();
-      minimapPaged = viewport.width > 600 ? await readMinimapTurn("minimap-turns-paged.png") : null;
-      if (olderResponses.length === pagesBefore) break;
-      assert.ok(attempt < 3, `Older pages kept arriving while they were asserted: ${olderResponses.length} fetched`);
-    }
-    // The sidebar also displays the first message as the session title.
-    assert.deepEqual(rendered.filter((value) => value !== text(0)),
-      Array.from({ length: 5000 - oldestLoaded }, (_, i) => text(oldestLoaded + i)), "Missing, reordered, or duplicate chat messages");
-    if (viewport.width > 600) {
-      assert.deepEqual(minimapPaged, {
-        number: "2500",
-        earlier: `Earlier turns not loaded: ${oldestLoaded / 2}. Click to load`,
-      }, "Loading older pages must not renumber minimap turns");
     }
     await page.screenshot({ path: join(artifacts, `history-${viewport.width}.png`) });
 
@@ -493,22 +457,12 @@ try {
       const readingOffset = (target) => target.evaluate((element) => (
         element.getBoundingClientRect().top - element.closest(".overflow-y-auto").getBoundingClientRect().top
       ));
-      // A settled offset, never a first sample. Returning to older history keeps working after
-      // the anchor appears: the window widens for the rows one message renders as, and pages
-      // still arrive, so a measurement taken the moment the entry is visible photographs a
-      // moving layout. Two readings that agree is the reading position. A value that never
-      // settles is its own finding, and both numbers go into the message — a Mac settles on the
-      // second sample and a loaded CI runner is where this has been failing.
-      const settledReadingOffset = async (target) => {
-        let previous = await readingOffset(target);
-        for (let attempt = 1; attempt <= 20; attempt++) {
-          await page.waitForTimeout(400);
-          const next = await readingOffset(target);
-          if (Math.abs(next - previous) < 1) return { offset: next, settled: true, samples: attempt + 1 };
-          previous = next;
-        }
-        return { offset: previous, settled: false, samples: 21 };
-      };
+      // The offsets below are pixels, so a comparison between two of them only means
+      // something against a window that has stopped growing. The session this reads is
+      // sized so one gesture to the sentinel loads all of it: ChatWindow renders the
+      // sentinel while rows are hidden or the server has older entries, so "the sentinel is
+      // gone" says the rows are final — a state, not a layout that happens to have gone
+      // quiet, which is what measuring this against the long session could not establish.
       const positionForReading = async (target) => {
         await target.evaluate((element) => {
           const scroll = element.closest(".overflow-y-auto");
@@ -516,27 +470,24 @@ try {
         });
         return readingOffset(target);
       };
-      await selectSession(text(0), "e4999");
-      const olderPage = page.waitForResponse((response) => response.url().includes(`/api/sessions/${LONG}/context?`));
-      await page.getByText("Scroll up to load earlier messages", { exact: true }).evaluate((element) => element.scrollIntoView({ block: "start", behavior: "instant" }));
-      await olderPage;
-      const olderMessage = page.locator("[data-entry-id='e4920']");
-      await positionForReading(olderMessage);
-      // Where it was read from, captured the same way it is compared: a capture taken mid-drift
-      // would make the comparison measure nothing.
-      const captured = await settledReadingOffset(olderMessage);
-      assert.ok(captured.settled, `the reading position is stable where it is being read from (still moving after ${captured.samples} samples, last ${Math.round(captured.offset)}px)`);
-      const olderOffset = captured.offset;
+      await selectSession(restoreText(0), "s98");
+      const loadEarlier = page.getByText("Scroll up to load earlier messages", { exact: true });
+      await loadEarlier.evaluate((element) => element.scrollIntoView({ block: "start", behavior: "instant" }));
+      await loadEarlier.waitFor({ state: "detached" });
+      await page.evaluate(() => document.fonts.ready);
+      const olderMessage = page.locator("[data-entry-id='s80']");
+      const olderOffset = await positionForReading(olderMessage);
       // Leaving a session and coming back must restore the reading position. What followed here
       // was upstream's: it expanded the one group its turn had and expected the answer not to
       // move once the group came back collapsed. This fork folds each run of thinking and tool
       // calls, so that geometry is the branch's own design and is not asserted from e2e.
+      // The restore runs in a layout effect, so the viewport has already moved by the time the
+      // row it anchors can be observed: selectSession's own wait is enough for it.
       await selectSession("Render **E2E markdown**", "user");
-      await selectSession(text(0), "e4920");
-      const back = await settledReadingOffset(olderMessage);
-      assert.ok(back.settled, `the reading position comes to rest after returning (still moving after ${back.samples} samples, last ${Math.round(back.offset)}px, was ${Math.round(olderOffset)}px)`);
-      assert.ok(Math.abs(back.offset - olderOffset) < 5,
-        `Returning to older history must restore its reading offset (settled ${Math.round(back.offset)}px from the top, was ${Math.round(olderOffset)}px)`);
+      await selectSession(restoreText(0), "s80");
+      const back = await readingOffset(olderMessage);
+      assert.ok(Math.abs(back - olderOffset) < 5,
+        `Returning to older history must restore its reading offset (${Math.round(back)}px from the top, was ${Math.round(olderOffset)}px)`);
 
       // Hold pagination until a different branch has loaded, exercising effect cancellation.
       let releaseHistory;

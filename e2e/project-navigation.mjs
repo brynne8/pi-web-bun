@@ -6,6 +6,7 @@ import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { showSidebarFiles, showSidebarSessions } from "./sidebar.mjs";
 import { filePanelFixture } from "./file-panel.mjs";
+import { noteBrowserError } from "./browser.mjs";
 
 /** Seed before the server starts: a real linked worktree and an empty project. */
 export function createProjectNavigationFixtures({ agentDir, sessionDir, timestamp }) {
@@ -56,7 +57,7 @@ export async function checkProjectNavigation({ browser, base, artifacts, fixture
       const forbidden = [];
       const forbiddenCommands = new Set(["prompt", "steer", "follow_up", "fork", "fork_branch", "clone", "new_session", "abort", "abort_bash"]);
       context.on("page", (page) => {
-        page.on("pageerror", (error) => errors.push(error.message));
+        page.on("pageerror", (error) => noteBrowserError(errors, error.message));
         page.on("response", (response) => {
           if (response.url().startsWith(base) && response.status() >= 500) errors.push(`${response.status()} ${response.url()}`);
         });
