@@ -28,9 +28,13 @@ export function registerAbortHandler(handler: (() => void) | null): void {
 export function handleGlobalEscape(event: KeyboardEvent): boolean {
   if (event.key !== "Escape" || event.defaultPrevented || !globalAbortHandler) return false;
 
-  const tag = (event.target as HTMLElement | null)?.tagName;
-  // Let textarea/input handle Esc internally (ChatInput menus / stop).
-  if (tag === "TEXTAREA" || tag === "INPUT") return false;
+  const target = event.target as HTMLElement | null;
+  const tag = target?.tagName;
+  // Let textarea/input handle Esc internally (ChatInput menus / stop). The composer is the
+  // exception: it marks every Esc it acts on, so one that reaches here is a key its handler never
+  // saw — a frame after Enter, while its props still said idle. An IME's Esc stays in the field.
+  const isComposer = tag === "TEXTAREA" && target?.classList?.contains("chat-input-textarea") === true;
+  if ((tag === "TEXTAREA" || tag === "INPUT") && (!isComposer || event.isComposing)) return false;
 
   event.preventDefault();
   globalAbortHandler();
@@ -58,8 +62,9 @@ interface UseGlobalKeyboardShortcutsOptions {
  * Note: Esc inside <textarea> or <input> is deliberately NOT handled here.
  * ChatInput manages its own Esc logic (closing slash / @ file menus, stopping
  * the agent when no menu is open) because it needs intimate knowledge of menu
- * state that is local to that component. Nor is an Esc something nearer
- * already handled (see `handleGlobalEscape()`).
+ * state that is local to that component — except the composer's own Esc, which
+ * still stops the run when ChatInput did not take it. Nor is an Esc something
+ * nearer already handled (see `handleGlobalEscape()`).
  */
 export function useGlobalKeyboardShortcuts(
   options: UseGlobalKeyboardShortcutsOptions,

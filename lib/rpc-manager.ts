@@ -665,10 +665,12 @@ export class AgentSessionWrapper {
   private async navigateTreeKeepingToolSelection(
     targetId: string,
     options: { summarize?: boolean },
-  ): Promise<{ cancelled: boolean }> {
+  ): Promise<{ cancelled: boolean; editorText?: string }> {
     const activeBefore = this.inner.getActiveToolNames();
     const result = await this.inner.navigateTree(targetId, options);
-    if (result.cancelled || this.chatOnly) return { cancelled: result.cancelled };
+    // pi hands a navigated user message's text back for the editor. Stop's retract puts it in
+    // the composer; a navigation the client asked for already has the text in hand.
+    if (result.cancelled || this.chatOnly) return { cancelled: result.cancelled, editorText: result.editorText };
 
     const entries = this.inner.sessionManager.getEntries() as unknown as SessionEntry[];
     if (!readSubagentSessionResources(entries)) {
@@ -678,7 +680,60 @@ export class AgentSessionWrapper {
         [...activeAfter, ...activeBefore.filter((name) => SESSION_TOOL_NAMES.has(name))],
       );
     }
-    return { cancelled: false };
+    return { cancelled: false, editorText: result.editorText };
+  }
+
+  /** The session's current leaf, or `undefined` when this wrapper cannot read it. */
+  private currentLeafId(): string | null | undefined {
+    try {
+      return this.inner.sessionManager.getLeafId();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Stop's retract. A run stopped before it said anything leaves its own prompt in the
+   * transcript with an empty aborted reply under it and no run left to answer it. Navigating to
+   * that prompt is pi's own way back: the leaf moves to the prompt's parent, so the prompt and
+   * its empty reply leave both the transcript and the model's context, and pi hands the text
+   * back the way its TUI puts it in the editor.
+   *
+   * Only the pair this Stop unwinds is retracted: the leaf must be an aborted reply with no
+   * words in it, hanging off the leaf that was current when Stop arrived. `leafAtStop` is
+   * `undefined` when that could not be read, and `null` for a session with no entries yet, whose
+   * prompt is then the file's root. Refusing is always the safe answer, so nothing here may
+   * fail the Stop that called it.
+   */
+  private async retractUnansweredPrompt(
+    leafAtStop: string | null | undefined,
+  ): Promise<{ entryId: string; text: string } | null> {
+    if (leafAtStop === undefined || this.inner.isBashRunning) return null;
+    const manager = this.inner.sessionManager;
+    const leaf = manager.getLeafEntry() as unknown as SessionEntry | undefined;
+    if (!leaf || leaf.type !== "message" || leaf.parentId === null) return null;
+    const reply = leaf.message;
+    if (reply.role !== "assistant" || reply.stopReason !== "aborted") return null;
+    // Nothing in the reply is the only case that counts as no answer. One thinking block, one
+    // word, one started tool — the run said something, and Stop's own job is to stop it and keep
+    // what it said. A warm model streams reasoning within a second, so this retract usually does
+    // not fire; an interrupted answer staying on the transcript is the point.
+    const blocks: unknown[] = Array.isArray(reply.content)
+      ? reply.content as unknown[]
+      : (typeof reply.content === "string" && reply.content !== "" ? [reply.content] : []);
+    if (blocks.length > 0) return null;
+
+    const prompt = manager.getEntry(leaf.parentId) as unknown as SessionMessageEntry | undefined;
+    if (!prompt || prompt.type !== "message" || prompt.message.role !== "user") return null;
+    // A session that had no entries at Stop appends its prompt as the file's root; every other
+    // session's prompt is the very entry the leaf was sitting on.
+    if (leafAtStop === null ? prompt.parentId !== null : prompt.id !== leafAtStop) return null;
+    // Something else already continues this prompt, so taking it back would strand that.
+    if (manager.getChildren(prompt.id).length !== 1) return null;
+
+    const result = await this.navigateTreeKeepingToolSelection(prompt.id, {});
+    if (result.cancelled) return null;
+    return { entryId: prompt.id, text: result.editorText ?? "" };
   }
 
   private emit(event: AgentEvent): void {
@@ -979,6 +1034,8 @@ export class AgentSessionWrapper {
         // Arm the forced cleanup now: the reset above ran before this flag,
         // and the final reset only runs once the SDK run has unwound.
         this.resetIdleTimer();
+        // What the leaf was before the run unwound: the prompt Stop may take back starts here.
+        const leafAtStop = this.currentLeafId();
         // Empty pi's queue before anything is awaited, as pi's own Esc does. A message still
         // queued would otherwise be delivered by the run Stop is unwinding — the loop polls
         // steering after the aborted tool calls and appends the message before it notices the
@@ -997,7 +1054,18 @@ export class AgentSessionWrapper {
           await this.withFinalIdleReset(() => this.inner.abort());
           // pi's CLI puts these texts in the editor; pi-web hands them back so the client
           // can send them to a run of their own (see `handleAbort`).
-          return { queuedMessages: queuedAtStop };
+          if (queuedAtStop.steering.length > 0 || queuedAtStop.followUp.length > 0) {
+            return { queuedMessages: queuedAtStop };
+          }
+          // Nothing was queued, so Stop's target is the prompt of the run just stopped: an
+          // unanswered one comes back to the composer with its branch (pi's CLI leaves it in the
+          // transcript). A queued message keeps its prompt where it is, since its author meant a
+          // further run and that prompt was answered as far as it was going to be.
+          const retractedPrompt = await this.retractUnansweredPrompt(leafAtStop).catch(() => null);
+          return {
+            queuedMessages: queuedAtStop,
+            ...(retractedPrompt ? { retractedPrompt } : {}),
+          };
         } finally {
           if (!this.isRunning()) this.forceShutdownOnIdle = false;
         }
@@ -1167,7 +1235,7 @@ export class AgentSessionWrapper {
         if (this.inner.isBashRunning) {
           throw new Error("Cannot navigate while a shell command is running");
         }
-        return this.navigateTreeKeepingToolSelection(command.targetId as string, {});
+        return { cancelled: (await this.navigateTreeKeepingToolSelection(command.targetId as string, {})).cancelled };
       }
 
       case "set_thinking_level": {
@@ -2042,8 +2110,11 @@ export class AgentSessionWrapper {
       },
       newSession: async () => ({ cancelled: true }),
       fork: async () => ({ cancelled: true }),
-      navigateTree: (targetId, options) =>
-        this.navigateTreeKeepingToolSelection(targetId, { summarize: options?.summarize }),
+      // pi's own extension action answers `{ cancelled }` and puts the navigated user message's
+      // text in its editor itself, so nothing here passes `editorText` out to an extension.
+      navigateTree: async (targetId, options) => ({
+        cancelled: (await this.navigateTreeKeepingToolSelection(targetId, { summarize: options?.summarize })).cancelled,
+      }),
       switchSession: async () => ({ cancelled: true }),
       reload: async () => {
         // As pi's TUI: a command runs inside its own prompt, so the pending

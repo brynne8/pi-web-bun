@@ -123,9 +123,11 @@ function normalizeQueuedMessages(q?: { steering?: string[]; followUp?: string[] 
   return { steering: q?.steering ?? [], followUp: q?.followUp ?? [] };
 }
 
-/** What the wrapper's `abort` answers with: what pi's queue held at the moment of stopping. */
+/** What the wrapper's `abort` answers with: what pi's queue held at the moment of stopping,
+ * and the prompt it took back out of the transcript when the stopped run never answered it. */
 type AbortCommandResult = {
   queuedMessages?: { steering?: string[]; followUp?: string[] } | null;
+  retractedPrompt?: { entryId?: string; text?: string } | null;
 };
 
 /** Those texts in pi's own delivery order: steering leads, follow-ups wait behind it. */
@@ -456,6 +458,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const executeBashRef = useRef<(command: string, excludeFromContext: boolean) => Promise<void> | undefined>(undefined);
   const handleNavigateRef = useRef<((entryId: string) => Promise<boolean>) | undefined>(undefined);
   const resendAfterStopRef = useRef<((queued: QueuedAfterStop[]) => Promise<void>) | undefined>(undefined);
+  // A Stop pressed before this run has an id and its prompt is posted waits here and fires then.
+  const pendingStopRef = useRef(false);
+  const promptPostedRef = useRef(false);
+  const handleAbortRef = useRef<(() => Promise<void>) | undefined>(undefined);
+  // The last submitted text and images. Stop's retract re-enters the prompt from the session
+  // file, which keeps only the text, so the images of the submission it matches come from here.
+  const lastSubmissionRef = useRef<{ text: string; images?: AttachedImage[] } | undefined>(undefined);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const ensuringNewSessionRef = useRef<Promise<string | null> | null>(null);
   // The command list as last loaded, and the get_commands request under way, if
@@ -1220,6 +1229,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const settleUiStage = useCallback(() => {
     const wasRunning = agentRunningRef.current;
     agentRunningRef.current = false;
+    pendingStopRef.current = false;
     setAgentRunning(false);
     setAgentPhase(null);
     setRetryInfo(null);
@@ -1776,6 +1786,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const promptRunId = promptRunIdRef.current + 1;
     cancelEventStreamGrace();
     rpcPromptPendingRef.current = true;
+    pendingStopRef.current = false;
+    promptPostedRef.current = false;
 
     const imageBlocks = images?.map((img) => ({ type: "image" as const, source: { type: "base64" as const, media_type: img.mimeType, data: img.data } }));
     const userMsg: AgentMessage = {
@@ -1787,6 +1799,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     };
     setMessages((prev) => [...prev, userMsg]);
     optimisticUserMessageKeyRef.current = userMessageKey(userMsg);
+    // Stop's retract puts this submission back in the composer. Images live only in the browser,
+    // so the ones it can re-attach are the ones submitted with this text.
+    lastSubmissionRef.current = { text: message, images };
     promptRunIdRef.current = promptRunId;
     agentRunningRef.current = true;
     setAgentRunning(true);
@@ -1827,6 +1842,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           message,
           ...(piImages?.length ? { images: piImages } : {}),
         });
+        promptPostedRef.current = true;
         promoteNewSession(1, message);
       } else if (session) {
         sentSessionId = session.id;
@@ -1837,8 +1853,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           message,
           ...(piImages?.length ? { images: piImages } : {}),
         });
+        promptPostedRef.current = true;
       } else {
         throw new Error("No active session for the prompt");
+      }
+      // A Stop pressed before the prompt was posted belongs to this run; ask pi now.
+      if (pendingStopRef.current) {
+        pendingStopRef.current = false;
+        await handleAbortRef.current?.();
       }
       if (isSlashCommandPrompt && sentSessionId) {
         void waitForPromptSettlement(sentSessionId, promptRunId);
@@ -1908,7 +1930,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const handleAbort = useCallback(async () => {
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid) {
+      // A fresh session's id comes with /api/agent/new; nothing can be stopped without it.
+      if (agentRunningRef.current) pendingStopRef.current = true;
+      return;
+    }
+    if (agentRunningRef.current && !promptPostedRef.current && !bashRunningRef.current) {
+      // An abort delivered ahead of its prompt reaches a session with no run and stops nothing.
+      pendingStopRef.current = true;
+      return;
+    }
     if (bashRunningRef.current) {
       try {
         await sendAgentCommand(sid, { type: "abort_bash" });
@@ -1920,19 +1951,43 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     try {
       const result = await sendAgentCommand<AbortCommandResult | null>(sid, { type: "abort" });
       const queued = queuedAfterStop(result);
-      if (queued.length === 0) return;
-      // The queue is empty server-side and pi's `queue_update` may not reach us while SSE is
-      // down, so clear the composer's queued rows here as handleRecallQueue does.
-      setQueuedMessages({ steering: [], followUp: [] });
-      if (!sessionHookMountedRef.current || sessionIdRef.current !== sid) return;
-      // pi's Stop puts these texts in the editor for the user to resend; pi-web sends them
-      // itself, so a steer its author wrote before stopping gets its answer instead of
-      // sitting in the composer or being swallowed by the run that was stopping.
-      await resendAfterStopRef.current?.(queued);
+      if (queued.length > 0) {
+        // The queue is empty server-side and pi's `queue_update` may not reach us while SSE is
+        // down, so clear the composer's queued rows here as handleRecallQueue does.
+        setQueuedMessages({ steering: [], followUp: [] });
+        if (!sessionHookMountedRef.current || sessionIdRef.current !== sid) return;
+        // pi's Stop puts these texts in the editor for the user to resend; pi-web sends them
+        // itself, so a steer its author wrote before stopping gets its answer instead of
+        // sitting in the composer or being swallowed by the run that was stopping.
+        await resendAfterStopRef.current?.(queued);
+        return;
+      }
+      // Nothing was queued, so Stop's own target is the prompt of the run just stopped. pi's
+      // navigate_tree moved the leaf back over that prompt, so it and the empty reply under it
+      // are out of the transcript and out of the model's context; pi's CLI hands the text to the
+      // editor and pi-web puts it in the composer, then reads the session at the moved leaf.
+      const retracted = result?.retractedPrompt;
+      if (!retracted || !sessionHookMountedRef.current || sessionIdRef.current !== sid) return;
+      const submitted = lastSubmissionRef.current;
+      const images = submitted && submitted.text.trim() === (retracted.text ?? "").trim()
+        ? submitted.images?.map(({ data, mimeType }) => ({ data, mimeType }))
+        : undefined;
+      // The same read a branch switch asks for: `?force=1` is for a disk the pi CLI moved, and
+      // this leaf moved inside the live wrapper, which answers the read itself.
+      await loadSession(sid);
+      // The words go to the composer on screen, so let it answer with its own draft key: a
+      // fresh session's promotion rekeys the stored draft (`promoteNewSession`), and a key
+      // captured in this closure is the old one from that moment on.
+      const text = retracted.text ?? "";
+      if (!text.trim() && !images?.length) return;
+      const input = opts.chatInputRef?.current;
+      if (input) input.restoreSubmission(text, images);
+      else restoreDraftSubmission(sessionIdRef.current ?? sid, text, images);
     } catch (e) {
       console.error("Failed to abort:", e);
     }
-  }, []);
+  }, [loadSession, opts.chatInputRef]);
+  handleAbortRef.current = handleAbort;
 
   const handleFork = useCallback(async (entryId: string) => {
     if (bashRunningRef.current) return;
