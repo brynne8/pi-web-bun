@@ -1,5 +1,8 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { TextContent } from "./types";
 import { recordPendingNotification, type PendingNotification } from "./pending-notifications";
 
@@ -33,6 +36,22 @@ export const SETTLED_REPORTS_CUSTOM_TYPE = "pi-web:settled-reports";
 export const SETTLED_REPORTS_DETAILS_KIND = "pi-web-settled-reports";
 
 /**
+ * How a busy parent is retried: 500 ms doubling to a 30 s cap, plus up to 200 ms of jitter so a
+ * burst of reports does not retry in lockstep. One initial attempt plus seven retries, after which
+ * the batch is dead-lettered — never dropped without a trace.
+ */
+const DELIVERY_RETRY_BASE_MS = 500;
+const DELIVERY_RETRY_MAX_MS = 30_000;
+const DELIVERY_RETRY_JITTER_MS = 200;
+const DELIVERY_MAX_ATTEMPTS = 8;
+
+/**
+ * The dead-letter box: one JSON record per batch nothing could deliver, named after the batch's
+ * `notificationId` so a record can be read and removed without touching its neighbours.
+ */
+const SETTLED_REPORT_DEAD_LETTER_DIR = join(tmpdir(), "pi-web-dead-letters");
+
+/**
  * A batch waiting for, or riding, its one place in the parent's queue.
  *
  * `blocks` and `reports` are handed to pi **by reference** when the note is queued, so a report
@@ -50,6 +69,8 @@ type SettledReportNote = {
   reports: SettledReport[];
   queued: boolean;
   consumed: boolean;
+  /** Drops the consume listener when the batch never reaches pi's queue. */
+  stopWatching: () => void;
 };
 
 /** The part of a live parent session a batch needs. */
@@ -69,6 +90,8 @@ export interface SettledReportSinkDependencies {
   getSession(sessionId: string): SettledReportParent | undefined;
   reopenSession(sessionId: string, sessionFile: string): Promise<SettledReportParent>;
   resolveSessionPath(sessionId: string): Promise<string | null>;
+  /** Wait between delivery retries; a test supplies a no-op so it does not sleep the schedule. */
+  sleep?(ms: number): Promise<void>;
 }
 
 export interface SettledReportSink {
@@ -79,6 +102,7 @@ export interface SettledReportSink {
 export function createSettledReportSink(deps: SettledReportSinkDependencies): SettledReportSink {
   /** One note per parent session: the batch currently queued, or the one being built. */
   const notes = new Map<string, SettledReportNote>();
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   async function resolveParent(sessionId: string): Promise<SettledReportParent | undefined> {
     const live = deps.getSession(sessionId);
@@ -90,8 +114,8 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
   }
 
   /** Freeze the note's arrays the moment pi appends its message. */
-  function watchForConsume(parent: SettledReportParent, sessionId: string, note: SettledReportNote): void {
-    if (!parent.inner.subscribe) return;
+  function watchForConsume(parent: SettledReportParent, sessionId: string, note: SettledReportNote): () => void {
+    if (!parent.inner.subscribe) return () => {};
     const unsubscribe = parent.inner.subscribe((event: AgentSessionEvent) => {
       if (event.type !== "message_end") return;
       const message = event.message as { customType?: string; details?: { notificationId?: unknown } } | undefined;
@@ -100,6 +124,73 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
       note.consumed = true;
       unsubscribe();
     });
+    return unsubscribe;
+  }
+
+  /** Queue the batch, appended in place, as one follow-up: only the first attempt may start a turn. */
+  async function sendNote(parent: SettledReportParent, note: SettledReportNote, retry: boolean): Promise<void> {
+    await parent.inner.sendCustomMessage({
+      customType: SETTLED_REPORTS_CUSTOM_TYPE,
+      content: note.blocks,
+      display: true,
+      details: {
+        kind: SETTLED_REPORTS_DETAILS_KIND,
+        notificationId: note.notificationId,
+        reports: note.reports,
+      },
+    }, { deliverAs: "followUp", triggerTurn: !retry });
+  }
+
+  /** A run started between the state check and the send; the parent is streaming, not broken. */
+  function isBusy(error: unknown): boolean {
+    return /already processing/i.test(error instanceof Error ? error.message : String(error));
+  }
+
+  function retryDelayMs(attempt: number): number {
+    const backoff = DELIVERY_RETRY_BASE_MS * 2 ** (attempt - 1);
+    return Math.min(DELIVERY_RETRY_MAX_MS, backoff + Math.random() * DELIVERY_RETRY_JITTER_MS);
+  }
+
+  /**
+   * Record a batch that exhausted its retries, so an undelivered report is never lost without a
+   * trace. One file per batch, so a record is readable and removable on its own.
+   */
+  function writeDeadLetter(sessionId: string, note: SettledReportNote, attempts: number, error: unknown): void {
+    try {
+      mkdirSync(SETTLED_REPORT_DEAD_LETTER_DIR, { recursive: true });
+      const record = {
+        sessionId,
+        notificationId: note.notificationId,
+        failedAtMs: Date.now(),
+        attempts,
+        error: error instanceof Error ? error.message : String(error),
+        reports: note.reports,
+      };
+      writeFileSync(join(SETTLED_REPORT_DEAD_LETTER_DIR, `${note.notificationId}.json`), `${JSON.stringify(record, null, 2)}\n`);
+    } catch {
+      // A record we cannot write must not take the caller down: the caller still logs the failure.
+    }
+  }
+
+  /**
+   * Deliver the batch, retrying a busy parent on the backoff schedule. Any other failure, and a
+   * busy parent that never clears, is dead-lettered; the error is rethrown so the caller logs it.
+   */
+  async function deliverBatch(parent: SettledReportParent, sessionId: string, note: SettledReportNote): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= DELIVERY_MAX_ATTEMPTS; attempt++) {
+      try {
+        await sendNote(parent, note, attempt > 1);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!isBusy(error) || attempt === DELIVERY_MAX_ATTEMPTS) {
+          writeDeadLetter(sessionId, note, attempt, error);
+          throw error;
+        }
+        await sleep(retryDelayMs(attempt));
+      }
+    }
   }
 
   return {
@@ -108,9 +199,9 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
       if (!parent) return;
       let note = notes.get(sessionId);
       if (!note || note.consumed) {
-        note = { notificationId: randomUUID().slice(0, 8), blocks: [], reports: [], queued: false, consumed: false };
+        note = { notificationId: randomUUID().slice(0, 8), blocks: [], reports: [], queued: false, consumed: false, stopWatching: () => {} };
         notes.set(sessionId, note);
-        watchForConsume(parent, sessionId, note);
+        note.stopWatching = watchForConsume(parent, sessionId, note);
       }
 
       // The report joins the batch before anything is queued, so the message pi takes holds its
@@ -135,33 +226,14 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
       if (note.queued) return;
       note.queued = true;
       try {
-        await parent.inner.sendCustomMessage({
-          customType: SETTLED_REPORTS_CUSTOM_TYPE,
-          content: note.blocks,
-          display: true,
-          details: {
-            kind: SETTLED_REPORTS_DETAILS_KIND,
-            notificationId: note.notificationId,
-            reports: note.reports,
-          },
-        }, { deliverAs: "followUp", triggerTurn: true });
+        await deliverBatch(parent, sessionId, note);
       } catch (error) {
-        const text = error instanceof Error ? error.message : String(error);
-        // A run started between the state check and the send, so pi refused the prompt. It is
-        // streaming now, and a queued report does not need to trigger a turn of its own.
-        if (!/already processing/i.test(text)) throw error;
-        await parent.inner.sendCustomMessage({
-          customType: SETTLED_REPORTS_CUSTOM_TYPE,
-          content: note.blocks,
-          display: true,
-          details: {
-            kind: SETTLED_REPORTS_DETAILS_KIND,
-            notificationId: note.notificationId,
-            reports: note.reports,
-          },
-        }, { deliverAs: "followUp", triggerTurn: false });
+        // The batch never reached pi's queue, so a later report must open a fresh note rather
+        // than append to a message that will never be sent.
+        note.stopWatching();
+        notes.delete(sessionId);
+        throw error;
       }
-
     },
   };
 }
