@@ -19,6 +19,7 @@ import type { SessionEntry } from "@/lib/types";
 import { readSubagentRun, readSubagentSessionResources } from "@/lib/subagents";
 import { readSessionToolSelection } from "@/lib/session-tool-selection";
 import { jsonResponse } from "@/lib/json-response";
+import { appendSessionNameSource } from "@/lib/session-name-source";
 import { deleteSessions } from "@/lib/session-delete";
 import { attachTranscriptNotices, readSessionTranscriptNotices } from "@/lib/transcript-notices-server";
 
@@ -191,7 +192,9 @@ export async function PATCH(
 
     // PATCH writes via appendSessionInfo — open fresh, bypassing the cache.
     const sm = openSessionManager(filePath, { mutable: true });
-    sm.appendSessionInfo(name.trim());
+    const trimmed = name.trim();
+    sm.appendSessionInfo(trimmed);
+    appendSessionNameSource(sm, trimmed, "user");
     invalidateSessionManagerCache(filePath);
     invalidateSessionListCache();
     return NextResponse.json({ ok: true });

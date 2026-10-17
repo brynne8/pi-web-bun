@@ -215,6 +215,7 @@ export const zhCNLocale: LocalePlugin = {
     "history.label": "完整历史",
     "title.generating": "正在生成...",
     "title.updated": "标题已更新",
+    "title.keptUser": "保留你起的名称",
     "title.failed": "生成失败",
     "title.generate": "生成标题",
     "title.unsaved": "会话保存后才能生成标题",

@@ -83,6 +83,7 @@ type AutoNameStatus =
   | { kind: "idle" }
   | { kind: "naming" }
   | { kind: "success" }
+  | { kind: "kept" }
   | { kind: "error"; message: string };
 
 const TOP_BAR_ICON_BUTTON_SIZE = 36;
@@ -1077,7 +1078,7 @@ export function AppShell() {
       const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/auto-name`, {
         method: "POST",
       });
-      const body = (await response.json().catch(() => ({}))) as { title?: string; error?: string };
+      const body = (await response.json().catch(() => ({}))) as { title?: string; error?: string; declined?: string };
       if (!response.ok || !body.title) {
         throw new Error(body.error || `HTTP ${response.status}`);
       }
@@ -1087,7 +1088,7 @@ export function AppShell() {
       if (activeSessionIdRef.current !== sessionId) return;
       setSelectedSession((current) => current?.id === sessionId ? { ...current, name: title } : current);
       setSessionStats((current) => current?.sessionId === sessionId ? { ...current, sessionName: title } : current);
-      setAutoNameStatus({ kind: "success" });
+      setAutoNameStatus(body.declined ? { kind: "kept" } : { kind: "success" });
       autoNameTimerRef.current = setTimeout(() => setAutoNameStatus({ kind: "idle" }), 1800);
     } catch (error) {
       if (activeSessionIdRef.current !== sessionId) return;
@@ -1657,14 +1658,17 @@ export function AppShell() {
           );
           const disabled = !selectedSession || selectedSession.transient || !hasMessages || autoNameStatus.kind === "naming";
           const isSuccess = autoNameStatus.kind === "success";
+          const isKept = autoNameStatus.kind === "kept";
           const isError = autoNameStatus.kind === "error";
           const label = autoNameStatus.kind === "naming"
             ? translate("title.generating")
             : isSuccess
               ? translate("title.updated")
-              : isError
-                ? translate("title.failed")
-                : translate("title.generate");
+              : isKept
+                ? translate("title.keptUser")
+                : isError
+                  ? translate("title.failed")
+                  : translate("title.generate");
           const title = !selectedSession || selectedSession.transient
             ? translate("title.unsaved")
             : !hasMessages

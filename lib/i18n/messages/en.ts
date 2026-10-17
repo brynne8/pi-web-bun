@@ -215,6 +215,7 @@ export const enLocale: LocalePlugin = {
     "history.label": "Full history",
     "title.generating": "Generating...",
     "title.updated": "Title updated",
+    "title.keptUser": "Kept your name",
     "title.failed": "Generation failed",
     "title.generate": "Generate title",
     "title.unsaved": "Title generation is available after the session is saved",

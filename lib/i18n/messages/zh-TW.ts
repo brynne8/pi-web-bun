@@ -215,6 +215,7 @@ export const zhTWLocale: LocalePlugin = {
     "history.label": "完整紀錄",
     "title.generating": "正在產生...",
     "title.updated": "標題已更新",
+    "title.keptUser": "保留你取的名稱",
     "title.failed": "產生失敗",
     "title.generate": "產生標題",
     "title.unsaved": "工作階段儲存後才能產生標題",
