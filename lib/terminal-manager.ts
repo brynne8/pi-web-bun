@@ -29,6 +29,43 @@ declare global {
 const MAX_BACKLOG = 128 * 1024;
 export const TERMINAL_RECONNECT_MS = 120_000;
 
+// A burst such as `yes` hands the terminal tens of thousands of small chunks a
+// second, and each one used to reach the SSE stream as its own frame. Output is
+// merged and released once it reaches MAX_OUTPUT_FRAME, or at the next idle gap.
+const MAX_OUTPUT_FRAME = 64 * 1024;
+const OUTPUT_FLUSH_MS = 16;
+
+/**
+ * Merges PTY output so a firehose cannot grow memory with output a consumer
+ * still has to drain: a frame is released once the buffer reaches `maxBytes`,
+ * and the buffer never holds more than one read past it.
+ */
+export class TerminalOutputQueue {
+  private pending = "";
+
+  constructor(private readonly maxBytes: number) {}
+
+  /** Merges `chunk`, returning the frame to forward now, or "" while it waits. */
+  push(chunk: string): string {
+    if (this.pending.length + chunk.length < this.maxBytes) {
+      this.pending += chunk;
+      return "";
+    }
+    // The chunk would pass the cap, so the buffered frame goes now and the
+    // chunk starts the next one; no byte is dropped to hold the bound.
+    const frame = this.pending;
+    this.pending = chunk;
+    return frame;
+  }
+
+  /** The buffered frame, removed. */
+  flush(): string {
+    const data = this.pending;
+    this.pending = "";
+    return data;
+  }
+}
+
 function registry(): Map<string, TerminalRecord> {
   if (!globalThis.__piWebTerminals) {
     globalThis.__piWebTerminals = new Map();
@@ -138,12 +175,34 @@ export function createTerminal(cwd: string, cols: number, rows: number, id: stri
   // Includes creations whose response or initial SSE connection never arrives.
   scheduleCleanup(id, record);
 
-  pty.onData((data) => {
+  const output = new TerminalOutputQueue(MAX_OUTPUT_FRAME);
+  let outputTimer: ReturnType<typeof setTimeout> | null = null;
+  const forwardOutput = (data: string): void => {
     record.backlog = (record.backlog + data).slice(-MAX_BACKLOG);
     record.offset += data.length;
     emit(record, { type: "output", data, offset: record.offset });
+  };
+  const flushOutput = (): void => {
+    if (outputTimer) clearTimeout(outputTimer);
+    outputTimer = null;
+    const data = output.flush();
+    if (data) forwardOutput(data);
+  };
+
+  pty.onData((data) => {
+    const frame = output.push(data);
+    if (frame) forwardOutput(frame);
+    // A frame may leave the current chunk buffered, so the timer is scheduled
+    // from the buffer's state, not from whether this read produced a frame.
+    if (!outputTimer) {
+      outputTimer = setTimeout(flushOutput, OUTPUT_FLUSH_MS);
+      outputTimer.unref?.();
+    }
   });
   pty.onExit(({ exitCode }) => {
+    // What is still buffered is the shell's last output, and it has to precede
+    // the exit event: that is what ends the stream.
+    flushOutput();
     if (record.cleanupTimer) clearTimeout(record.cleanupTimer);
     record.cleanupTimer = null;
     record.exited = true;
@@ -204,18 +263,28 @@ export function resizeTerminal(id: string, cols: number, rows: number): boolean 
   return true;
 }
 
+// Closing a tab asks first and insists later: SIGTERM for the shell's jobs, the
+// SIGHUP an interactive shell exits on, then SIGKILL for one that traps both.
+const TERMINAL_HANGUP_MS = 200;
+const TERMINAL_KILL_MS = 1800;
+
 export function killTerminal(id: string, force = false): boolean {
   const record = registry().get(id);
   if (!record) return false;
   if (record.cleanupTimer) clearTimeout(record.cleanupTimer);
   registry().delete(id);
   if (!record.exited) {
-    record.pty.kill(force ? "SIGKILL" : undefined);
-    // A shell may trap SIGHUP; explicit close and lease expiry must still finish.
+    record.pty.kill(force ? "SIGKILL" : "SIGTERM");
     if (!force) {
       record.cleanupTimer = setTimeout(() => {
-        if (!record.exited) record.pty.kill("SIGKILL");
-      }, 2000);
+        if (record.exited) return;
+        record.pty.kill("SIGHUP");
+        // Explicit close and lease expiry must still finish.
+        record.cleanupTimer = setTimeout(() => {
+          if (!record.exited) record.pty.kill("SIGKILL");
+        }, TERMINAL_KILL_MS);
+        record.cleanupTimer.unref?.();
+      }, TERMINAL_HANGUP_MS);
       record.cleanupTimer.unref?.();
     }
   }

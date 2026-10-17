@@ -37,6 +37,15 @@ export interface PtyProcess {
 
 export type PtySpawn = (file: string, args: string[], options: PtySpawnOptions) => PtyProcess;
 
+// Sane PTY bounds. The terminal manager clamps to the same ones; this layer
+// applies them again because `resize` is what reallocates the terminal's buffer.
+const MIN_DIMENSION = 2;
+const MAX_DIMENSION = 1000;
+
+function clampDimension(value: number): number {
+  return Math.min(MAX_DIMENSION, Math.max(MIN_DIMENSION, Math.floor(value)));
+}
+
 // The types below mirror the Spawn reference in
 // https://bun.com/docs/runtime/child-process, trimmed to what this backend
 // uses. The repo has no `@types/bun` dependency; only the terminal backend
@@ -147,13 +156,26 @@ export function spawnBunPty(file: string, args: string[], options: PtySpawnOptio
       terminal.write(data);
     },
     resize(cols, rows) {
-      terminal.resize(cols, rows);
+      // The manager clamps to the same bounds; this repeats them where the
+      // terminal's buffer is actually reallocated.
+      if (!Number.isFinite(cols) || !Number.isFinite(rows)) return;
+      terminal.resize(clampDimension(cols), clampDimension(rows));
     },
     kill(signal) {
-      // node-pty's default signal is SIGHUP; the manager escalates to SIGKILL.
-      // node-pty types signals as plain strings, Bun as NodeJS.Signals; the
-      // manager only ever passes "SIGKILL" or nothing.
-      subprocess.kill((signal ?? "SIGHUP") as NodeJS.Signals);
+      // node-pty's default signal is SIGHUP; the manager drives the TERM → HUP
+      // → KILL wave. A negative pid is the shell's process group — Bun's
+      // terminal spawns it as the session leader, so it exists while the shell
+      // does — and the jobs it started (a dev server holding a port) go down
+      // with it instead of being orphaned.
+      const name = (signal ?? "SIGHUP") as NodeJS.Signals;
+      try {
+        process.kill(-subprocess.pid, name);
+      } catch (error) {
+        // ESRCH: the whole group is already gone, so there is nothing left to
+        // signal. Anything else (a platform without group signalling) still
+        // reaches the shell itself.
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") subprocess.kill(name);
+      }
     },
   };
 }

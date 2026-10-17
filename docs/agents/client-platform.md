@@ -15,6 +15,11 @@
 - The terminal header's sun/moon button switches the terminal alone between dark (the default) and light, apart from the app theme. The choice is per browser in `localStorage` (`pi-web:terminal-theme`), shared by every open terminal and synced across tabs by the `storage` event.
 - A switch sets `terminal.options.theme` on the live xterm, never recreating it, so the shell and its SSE stream stay. The panel's chrome reads `--terminal-*` variables that `.terminal-panel[data-terminal-theme="light"]` overrides; `--terminal-bg` must match each xterm palette's `background`.
 
+## Terminal lifecycle (`lib/terminal-manager.ts`, `lib/terminal-bun-pty.ts`)
+- A tab close, a lease expiry and the shutdown hook end the shell with a wave, not one signal: the whole process group gets SIGTERM, SIGHUP after 200ms and SIGKILL after 1.8s. An interactive shell ignores SIGTERM and exits on SIGHUP after handing it to its jobs, and the group signal reaches what stays in the shell's own group, so those jobs are not orphaned. Bun's terminal spawns the shell as its session leader, so the negative pid names a real group; ESRCH there means the group is already gone. A job that moved to a process group of its own and ignores both SIGHUP and SIGTERM still outlives the shell — nothing short of a process-tree walk reaches it.
+- PTY output is merged into frames of at most 64 KiB, flushed 16ms after a burst goes quiet and immediately before the exit event, so a `yes` firehose reaches the browser as frames instead of one event per read. The SSE route still drops a stream whose consumer stops draining it, and the manager's own replay backlog stays at 128 KiB.
+- The backend clamps cols and rows to 2..1000 and ignores a non-finite value before it resizes the terminal; the manager clamps to the same bounds, and the route rejects out-of-range values outright.
+
 ## Sidebar breakpoint (`components/AppShell.tsx`)
 - The mobile drawer starts closed on entering the mobile breakpoint. Desktop open state is remembered separately, seeded from the URL's initial `sidebarCollapsed` value and updated only by explicit desktop toggles. Returning to desktop restores that preference; mobile drawer toggles, backdrop clicks and toolbar actions must not replace it.
 
