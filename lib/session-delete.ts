@@ -32,6 +32,7 @@ import fs from "fs";
 import type { Dirent } from "fs";
 import { dirname, join } from "path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { writeSessionFileAtomicSync } from "./atomic-file";
 import { deleteBgLogsForSession } from "./bash-bg-tasks";
 import { abortSubagent, getRpcSession, getRpcSessionInfos, getRunningRpcSessionIds } from "./rpc-manager";
 import {
@@ -344,7 +345,9 @@ export async function deleteSessions(
             break;
           }
         }
-        fs.writeFileSync(childPath, lines.join("\n"));
+        // Atomic and mode-preserving: a kill mid-rewrite leaves the old file
+        // whole, not a truncated one, and the child keeps pi's own permissions.
+        writeSessionFileAtomicSync(childPath, lines.join("\n"));
       } catch { /* skip malformed */ }
     }
   }

@@ -1,6 +1,7 @@
 import { randomBytes } from "crypto";
-import { existsSync, writeFileSync } from "fs";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { existsSync } from "fs";
+import { SessionManager, type SessionEntry as PiSessionEntry } from "@earendil-works/pi-coding-agent";
+import { writeSessionFileAtomicSync } from "./atomic-file";
 import { forkSessionName, sessionDisplayTitle } from "./session-fork-name";
 import { scanSessionFileInfo } from "./session-list-scanner";
 import { readSubagentRun } from "./subagents";
@@ -24,6 +25,50 @@ export class SessionForkError extends Error {
 
 /** The session list's first message for a session with no user text (scanSessionFileInfo()). */
 const NO_USER_TEXT = "(no messages)";
+
+/** The tool-call ids an assistant entry is still asking for; empty for any other entry. */
+function requestedToolCallIds(entry: PiSessionEntry | undefined): Set<string> {
+  const ids = new Set<string>();
+  if (!entry || entry.type !== "message" || entry.message.role !== "assistant") return ids;
+  for (const block of entry.message.content) {
+    if (block.type === "toolCall" && typeof block.id === "string") ids.add(block.id);
+  }
+  return ids;
+}
+
+function toolResultCallId(entry: PiSessionEntry): string | undefined {
+  return entry.type === "message" && entry.message.role === "toolResult" ? entry.message.toolCallId : undefined;
+}
+
+/**
+ * The recorded result of a trailing tool call, when it sits below the cut.
+ *
+ * A live leaf can point at an assistant message whose calls were answered
+ * later on disk (a navigated branch): the copy would then end on a request
+ * with no answer, and the model reads it as one. Walks the entries below
+ * `tail` while they answer its calls, so the copy stops at the batch's end.
+ * Undefined when nothing was recorded (a call still running): no result is
+ * invented for it.
+ */
+function recordedToolResultId(manager: SessionManager, tail: PiSessionEntry | undefined): string | undefined {
+  const pending = requestedToolCallIds(tail);
+  if (!tail || pending.size === 0) return undefined;
+  const entries = manager.getEntries();
+  let parentId = tail.id;
+  let cutId: string | undefined;
+  while (pending.size > 0) {
+    const answer = entries.find((entry) => {
+      const callId = toolResultCallId(entry);
+      return entry.parentId === parentId && callId !== undefined && pending.has(callId);
+    });
+    const callId = answer ? toolResultCallId(answer) : undefined;
+    if (!answer || callId === undefined) break;
+    pending.delete(callId);
+    cutId = answer.id;
+    parentId = answer.id;
+  }
+  return cutId;
+}
 
 /**
  * The title the sidebar shows for the source, read as the session list reads
@@ -52,12 +97,14 @@ export async function readForkSourceTitle(sourcePath: string): Promise<string | 
  *
  * Only entries already on disk are copied: pi appends each finished entry
  * synchronously in this process, so a run in progress contributes what it has
- * finished. Opens its own SessionManager, because createBranchedSession()
- * repoints the instance it runs on: never the cached reader of
- * openSessionManager() nor a wrapper's. The name is a `session_info` entry
- * appended on that instance, as a rename appends one, so only the copy gets
- * it. pi's open-time migration may rewrite an old-version source, as viewing
- * it does; the source is otherwise unchanged.
+ * finished. A cut on an assistant message whose tool calls were answered below
+ * it takes those recorded results along (recordedToolResultId()): the copy
+ * must not end on a request with no answer. Opens its own SessionManager,
+ * because createBranchedSession() repoints the instance it runs on: never the
+ * cached reader of openSessionManager() nor a wrapper's. The name is a
+ * `session_info` entry appended on that instance, as a rename appends one, so
+ * only the copy gets it. pi's open-time migration may rewrite an old-version
+ * source, as viewing it does; the source is otherwise unchanged.
  */
 export function forkSessionBranch(
   sourcePath: string,
@@ -95,7 +142,8 @@ export function forkSessionBranch(
     randomBytes(2).toString("hex"),
     typeof manager.getHeader()?.parentSession === "string",
   );
-  const path = manager.createBranchedSession(leafId);
+  const cutId = recordedToolResultId(manager, branch[branch.length - 1]) ?? leafId;
+  const path = manager.createBranchedSession(cutId);
   // Appended to the copy's file; a shell-only copy keeps it in memory until
   // it is written below.
   if (name) manager.appendSessionInfo(name);
@@ -105,7 +153,7 @@ export function forkSessionBranch(
     const header = manager.getHeader();
     if (header) {
       const content = [header, ...manager.getEntries()].map((entry) => JSON.stringify(entry)).join("\n") + "\n";
-      writeFileSync(path, content, { encoding: "utf8", flag: "wx" });
+      writeSessionFileAtomicSync(path, content, { exclusive: true });
     }
   }
   if (!path || !existsSync(path)) throw new Error("Failed to fork the session");

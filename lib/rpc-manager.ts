@@ -2,9 +2,10 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, SettingsManager, Theme, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
-import { existsSync, realpathSync, writeFileSync } from "fs";
+import { existsSync, realpathSync } from "fs";
 import { resolve } from "path";
 import { validateAgentImages } from "./image-attachments";
+import { writeSessionFileAtomicSync } from "./atomic-file";
 import { invalidateModelsCache } from "./models-cache";
 import { invalidateModelRuntimeWithExtensions } from "./model-runtime";
 import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
@@ -803,7 +804,7 @@ export class AgentSessionWrapper {
     const content = [header, ...manager.getEntries()]
       .map((entry) => JSON.stringify(entry))
       .join("\n") + "\n";
-    writeFileSync(sessionFile, content, { encoding: "utf8", flag: "wx" });
+    writeSessionFileAtomicSync(sessionFile, content, { exclusive: true });
 
     // Pi delays the first flush until a user or assistant message exists.
     // A leading shell command is neither, so mark this SDK manager as
@@ -1170,7 +1171,7 @@ export class AgentSessionWrapper {
             const content = [header, ...forkedManager.getEntries()]
               .map((forkedEntry) => JSON.stringify(forkedEntry))
               .join("\n") + "\n";
-            writeFileSync(newSessionFile, content, { encoding: "utf8", flag: "wx" });
+            writeSessionFileAtomicSync(newSessionFile, content, { exclusive: true });
           }
 
           const newSessionId = forkedManager.getSessionId();

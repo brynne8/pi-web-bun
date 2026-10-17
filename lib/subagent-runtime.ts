@@ -45,7 +45,8 @@ import type { SettledReportSink } from "./settled-report-note";
 import { SubagentQueue } from "./subagent-queue";
 import { addWorktree, removeWorktree } from "./worktree";
 import { randomUUID } from "node:crypto";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { writeSessionFileAtomicSync } from "./atomic-file";
 
 interface HostSession {
   readonly inner: AgentSessionLike;
@@ -296,7 +297,7 @@ function persistChildSession(sessionManager: SessionManager): void {
   const header = sessionManager.getHeader();
   if (!sessionFile || !header || existsSync(sessionFile)) return;
   const lines = [header, ...sessionManager.getEntries()].map((entry) => JSON.stringify(entry));
-  writeFileSync(sessionFile, `${lines.join("\n")}\n`, { flag: "wx" });
+  writeSessionFileAtomicSync(sessionFile, `${lines.join("\n")}\n`, { exclusive: true });
   sessionManager.setSessionFile(sessionFile);
 }
 
