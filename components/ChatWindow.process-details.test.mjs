@@ -117,8 +117,8 @@ test("a turn's footer is the turn's, rendered once where the turn ends", () => {
   assert.doesNotMatch(source, /turnCopyText:/);
   assert.match(source, /<TurnFooter/);
   assert.match(source, /key=\{`turn-footer-\$\{entryIds\[groupStartIdx\] \?\? groupStartIdx\}`\}/);
-  // The numbers are the last response's: what the final message used to show.
-  assert.match(source, /if \(turnMessage\.usage && recordsUsage\(turnMessage\.usage\)\) turnUsage = turnMessage\.usage;/);
+  // The numbers are the turn's: every request the tool loop made, summed.
+  assert.match(source, /const turnUsage = getTurnUsage\(messages, userIdx, endIdx\)/);
   assert.match(messageSource, /const showsTurnFooter = !isTurnPart;/);
   assert.match(messageSource, /\{showsTurnFooter && message\.usage && !isStreaming && \(/);
   assert.match(messageSource, /\{textContent && showsTurnFooter && !isStreaming && \(/);

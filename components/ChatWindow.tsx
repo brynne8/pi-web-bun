@@ -11,7 +11,8 @@ import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { getAssistantErrorMessage, hasAssistantAnswer, isAssistantTruncated, isHiddenCustomMessage, isMessageGroupAnchor } from "@/lib/message-display";
 import { extractTurnWrittenFiles } from "@/lib/turn-written-files";
 import { splitTurnSegments, turnHasAnswer } from "@/lib/turn-segments";
-import { getTurnPart, recordsUsage, type TurnPartCache } from "@/lib/turn-views";
+import { getTurnPart, type TurnPartCache } from "@/lib/turn-views";
+import { getTurnUsage } from "@/lib/turn-usage";
 import { formatTurnDuration, getTurnDurationMs } from "@/lib/turn-duration";
 import { TurnFooter } from "./TurnFooter";
 import { buildQuotedSelection } from "@/lib/quoted-selection";
@@ -1228,17 +1229,14 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
                 // Each tool call is stored as its own assistant entry, so no single
                 // part carries what the turn wrote or what it cost: gather the turn's
-                // blocks once, and keep the last response's numbers.
+                // blocks once, and sum its requests' numbers.
                 const turnContent: AssistantContentBlock[] = [];
-                let turnUsage: AssistantMessage["usage"];
+                const turnUsage = getTurnUsage(messages, userIdx, endIdx);
                 let turnTimestamp: number | undefined;
                 for (let turnIdx = userIdx + 1; turnIdx < endIdx; turnIdx++) {
                   const turnMessage = messages[turnIdx] as AssistantMessage | undefined;
                   if (turnMessage?.role === "assistant") {
                     for (const block of turnMessage.content ?? []) turnContent.push(block);
-                    // The last response that recorded numbers: an aborted run leaves a
-                    // usage object of zeros, and a row of zeros says nothing.
-                    if (turnMessage.usage && recordsUsage(turnMessage.usage)) turnUsage = turnMessage.usage;
                     turnTimestamp = turnMessage.timestamp ?? turnTimestamp;
                   }
                 }
