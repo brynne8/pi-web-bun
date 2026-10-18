@@ -266,6 +266,18 @@ const THINKING_LEVEL_DESC_KEYS: Record<typeof THINKING_LEVELS[number], string> =
   medium: "chat.thinkingMedium", high: "chat.thinkingHigh", xhigh: "chat.thinkingXhigh", max: "chat.thinkingMax",
 };
 
+/** The composer's auto-grow step: fit one to 200 px, then only let a scrollbar
+    appear when the text is still taller than that. */
+export function autoGrowTextarea(ta: HTMLTextAreaElement): void {
+  ta.style.height = "auto";
+  // A wrapped placeholder counts toward scrollHeight, so an empty box grows to
+  // its own hint's lines. It keeps the height CSS gives it instead.
+  ta.style.height = `${ta.value ? Math.min(ta.scrollHeight, 200) : ta.clientHeight}px`;
+  // Only typed text scrolls: a placeholder that overflows the box stays cut off,
+  // so an empty composer never shows a scrollbar.
+  ta.style.overflowY = ta.value && ta.scrollHeight > ta.clientHeight ? "auto" : "hidden";
+}
+
 function formatTokenCount(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
   if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`;
@@ -738,8 +750,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       requestAnimationFrame(() => {
         if (!ta) return;
         ta.focus();
-        ta.style.height = "auto";
-        ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+        autoGrowTextarea(ta);
       });
     },
     replaceMessage(message: UserMessage) {
@@ -761,8 +772,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       requestAnimationFrame(() => {
         if (!ta) return;
         ta.focus();
-        ta.style.height = "auto";
-        ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+        autoGrowTextarea(ta);
       });
     },
     prependText(text: string) {
@@ -779,8 +789,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         if (!ta) return;
         ta.focus();
         ta.setSelectionRange(combined.length, combined.length);
-        ta.style.height = "auto";
-        ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+        autoGrowTextarea(ta);
       });
     },
     rekeyDraft(previousKey: string, nextKey: string) {
@@ -875,8 +884,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         if (!ta) return;
         ta.focus();
         ta.setSelectionRange(ta.value.length, ta.value.length);
-        ta.style.height = "auto";
-        ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+        autoGrowTextarea(ta);
       });
     },
     insertText(text: string) {
@@ -1004,7 +1012,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     const ta = textareaRef.current;
     if (!ta) return;
     ta.style.height = "auto";
-    if (ta.value) ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+    if (ta.value) autoGrowTextarea(ta);
+    else ta.style.overflowY = "hidden";
   }, []);
 
   useLayoutEffect(resizeTextarea, [value, fontSize, uiFontFamily, uiWeight, resizeTextarea]);
@@ -1268,8 +1277,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       if (!ta) return;
       ta.focus();
       ta.setSelectionRange(text.length, text.length);
-      ta.style.height = "auto";
-      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+      autoGrowTextarea(ta);
     });
   }, []);
 
@@ -1283,8 +1291,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       if (!ta) return;
       ta.focus();
       ta.setSelectionRange(nextValue.length, nextValue.length);
-      ta.style.height = "auto";
-      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+      autoGrowTextarea(ta);
     });
   }, []);
 
@@ -1510,8 +1517,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const handleInput = useCallback(() => {
     const ta = textareaRef.current;
     if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+    autoGrowTextarea(ta);
   }, []);
 
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
