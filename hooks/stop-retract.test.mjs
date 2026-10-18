@@ -175,3 +175,72 @@ test("Stop that took a message from the queue sends it and leaves the transcript
   assert.equal(commands[2].streamingBehavior, "steer");
   assert.deepEqual(restored, []);
 });
+
+/**
+ * Mounts on a session the server already reports as running (a reload into a streaming run, or
+ * a settled background report that started a turn) and presses Stop without ever sending a
+ * prompt from this client. Returns the commands the hook issued.
+ */
+async function stopResumedRun(abortReply) {
+  const commands = [];
+  const sources = [];
+  globalThis.EventSource = class {
+    readyState = 0;
+    onmessage = null;
+    onerror = null;
+    constructor(url) { this.url = url; sources.push(this); }
+    close() { this.readyState = 2; }
+    connect() {
+      this.readyState = 1;
+      this.onmessage?.({ data: JSON.stringify({ type: "connected", isStreaming: true }) });
+    }
+  };
+  globalThis.fetch = async (url, init = {}) => {
+    const command = init?.body ? JSON.parse(init.body) : null;
+    if (url.startsWith("/api/models")) return json({ models: {}, modelList: [] });
+    if (url.endsWith("/api/sessions/s1/state")) {
+      return json({ running: true, state: { isStreaming: true, isPromptRunning: false, queuedMessages: EMPTY_QUEUE } });
+    }
+    if (url.startsWith("/api/sessions/s1")) {
+      return json({ session: SESSION, context: { messages: [], entryIds: [] }, leafId: "e0", tree: [] });
+    }
+    if (url === "/api/agent/s1/running") return json({ running: true });
+    if (url === "/api/agent/s1" && command) {
+      commands.push(command);
+      if (command.type === "abort") return json({ success: true, data: abortReply });
+      return json({ success: true, data: null });
+    }
+    if (url === "/api/agent/s1") return json({ running: true, state: { isStreaming: true } });
+    throw new Error(`unexpected fetch ${url} ${init?.body ?? ""}`);
+  };
+
+  const hook = renderHook(useAgentSession, {
+    session: SESSION,
+    sessionRunning: true,
+    newSessionCwd: null,
+    newSessionDraftKey: null,
+  });
+  await settle();
+  hook.flush();
+  sources.at(-1)?.connect();
+  await settle();
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    await hook.result.handleAbort();
+    await settle();
+  } finally {
+    console.error = originalError;
+    for (const source of sources) source.close();
+    hook.unmount();
+  }
+  return { commands };
+}
+
+test("Stop aborts a run the server resumed without a submission from this client", async () => {
+  const { commands } = await stopResumedRun({ queuedMessages: EMPTY_QUEUE });
+
+  // No prompt is in flight, so Stop must reach the server instead of waiting for one that will
+  // never be sent. A background task's completion can start a turn this way after a reload.
+  assert.ok(commands.some((command) => command.type === "abort"));
+});

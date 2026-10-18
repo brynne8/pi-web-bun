@@ -460,7 +460,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const resendAfterStopRef = useRef<((queued: QueuedAfterStop[]) => Promise<void>) | undefined>(undefined);
   // A Stop pressed before this run has an id and its prompt is posted waits here and fires then.
   const pendingStopRef = useRef(false);
-  const promptPostedRef = useRef(false);
+  // True from the moment a submission optimistically marks the agent running until its prompt
+  // reaches the server (or its send fails). Only this window makes Stop wait: a run the server
+  // resumed on its own (a reload into a streaming session, a settled report that started a turn)
+  // has no submission in flight, so Stop must abort it instead of deferring forever.
+  const promptSubmittingRef = useRef(false);
   const handleAbortRef = useRef<(() => Promise<void>) | undefined>(undefined);
   // The last submitted text and images. Stop's retract re-enters the prompt from the session
   // file, which keeps only the text, so the images of the submission it matches come from here.
@@ -1787,7 +1791,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     cancelEventStreamGrace();
     rpcPromptPendingRef.current = true;
     pendingStopRef.current = false;
-    promptPostedRef.current = false;
+    promptSubmittingRef.current = true;
 
     const imageBlocks = images?.map((img) => ({ type: "image" as const, source: { type: "base64" as const, media_type: img.mimeType, data: img.data } }));
     const userMsg: AgentMessage = {
@@ -1842,7 +1846,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           message,
           ...(piImages?.length ? { images: piImages } : {}),
         });
-        promptPostedRef.current = true;
+        promptSubmittingRef.current = false;
         promoteNewSession(1, message);
       } else if (session) {
         sentSessionId = session.id;
@@ -1853,7 +1857,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           message,
           ...(piImages?.length ? { images: piImages } : {}),
         });
-        promptPostedRef.current = true;
+        promptSubmittingRef.current = false;
       } else {
         throw new Error("No active session for the prompt");
       }
@@ -1872,9 +1876,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // have accepted the prompt before the response was lost. Keep SSE alive
       // until server state confirms the run is idle.
       if (!definitivelyRejected && sentSessionId) {
+        promptSubmittingRef.current = false;
         void waitForPromptSettlement(sentSessionId, promptRunId);
         return;
       }
+      promptSubmittingRef.current = false;
       rpcPromptPendingRef.current = false;
       setMessages((prev) => {
         const optimisticIndex = prev.lastIndexOf(userMsg);
@@ -1935,7 +1941,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (agentRunningRef.current) pendingStopRef.current = true;
       return;
     }
-    if (agentRunningRef.current && !promptPostedRef.current && !bashRunningRef.current) {
+    if (agentRunningRef.current && promptSubmittingRef.current && !bashRunningRef.current) {
       // An abort delivered ahead of its prompt reaches a session with no run and stops nothing.
       pendingStopRef.current = true;
       return;
