@@ -10,7 +10,7 @@ import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
 import { getAssistantErrorMessage, getThinkingPreview, hasAssistantAnswer, isAssistantTruncated, isEmptyThinkingBlock } from "@/lib/message-display";
-import { parseUnifiedPatch, unifiedDiffLines, type SplitDiffCell, type SplitDiffFile, type UnifiedDiffLine } from "@/lib/patch";
+import { diffGapLabel, parseUnifiedPatch, unifiedDiffLines, type SplitDiffCell, type SplitDiffFile, type UnifiedDiffLine } from "@/lib/patch";
 import { applyPatchPreviewToFiles, applyPatchResultHasFailures, extractApplyPatchPaths, getApplyPatchInputText, parseApplyPatchInput } from "@/lib/apply-patch";
 import { isApplyPatchToolName, isEditToolName, isShellToolName } from "@/lib/tool-names";
 import { readSnapshotOfCall, type ReadSnapshot } from "@/lib/read-snapshot";
@@ -1560,6 +1560,9 @@ export function PatchDiffFiles({ files, layout }: { files: SplitDiffFile[]; layo
               if (row.type === "hunk") {
                 return null;
               }
+              if (row.type === "gap") {
+                return <DiffGapRow key={rowIndex} count={row.count} />;
+              }
 
               return (
                 <div key={rowIndex} style={{ display: "contents" }}>
@@ -1571,9 +1574,11 @@ export function PatchDiffFiles({ files, layout }: { files: SplitDiffFile[]; layo
           </div>
           )}
 
-          {layout === "stacked" && unifiedDiffLines(file).map((line, lineIndex) => (
-            <StackedDiffLineView key={lineIndex} line={line} />
-          ))}
+          {layout === "stacked" && unifiedDiffLines(file).map((line, lineIndex) =>
+            line.type === "gap"
+              ? <DiffGapRow key={lineIndex} count={line.count} />
+              : <StackedDiffLineView key={lineIndex} line={line} />
+          )}
         </div>
       ))}
     </div>
@@ -1585,7 +1590,27 @@ function stackedFilePath(file: SplitDiffFile): string {
   return file.newPath || file.oldPath || "";
 }
 
-function StackedDiffLineView({ line }: { line: UnifiedDiffLine }) {
+/** The unchanged lines a diff leaves out between two hunks, one marker row. */
+function DiffGapRow({ count }: { count: number | null }) {
+  const { t } = useI18n();
+  return (
+    <div
+      style={{
+        gridColumn: "1 / -1",
+        padding: "0 10px",
+        color: "var(--text-dim)",
+        background: "var(--bg-panel)",
+        borderTop: "1px solid var(--border)",
+        borderBottom: "1px solid var(--border)",
+        userSelect: "none",
+      }}
+    >
+      {count === null ? "⋯" : `⋯ ${diffGapLabel(count, t)}`}
+    </div>
+  );
+}
+
+function StackedDiffLineView({ line }: { line: Extract<UnifiedDiffLine, { text: string }> }) {
   return (
     <SplitDiffCellView
       side="right"

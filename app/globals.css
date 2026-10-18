@@ -818,6 +818,16 @@ html[data-keyboard-open] .terminal-extra-keys {
   }
 }
 
+/* The file panel's tab strip hides its scrollbar: a scrollbar takes its height
+   out of the 36px bar and squeezes the tabs (#1225). A wheel, a swipe or the
+   arrow keys scroll it, and TabBar keeps the active tab in view. */
+.tabbar-scroll {
+  scrollbar-width: none;
+}
+.tabbar-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 /* The terminal picks its surface apart from the app theme, so --text-dim
    could disappear against it. */
 .terminal-xterm .xterm-viewport::-webkit-scrollbar-thumb {
@@ -2793,8 +2803,13 @@ span.token.table {
    touch screens opt in too; tablets keep their controls because the keyboard
    leaves them enough height. */
 @media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
-  html[data-keyboard-open] .chat-input-controls,
   html[data-keyboard-open] .extension-status-shelf {
+    display: none !important;
+  }
+  /* Except while its model picker is open: the picker's filter is the field
+     the keyboard is for, and hiding its row would hide the picker (#1271).
+     Its own rule, so a browser without :has() drops only this one. */
+  html[data-keyboard-open] .chat-input-controls:not(:has(.model-selector [role="listbox"])) {
     display: none !important;
   }
   html[data-keyboard-open] .chat-content {
