@@ -69,6 +69,16 @@ test("a running turn prints no token counts under its parts", () => {
   assert.doesNotMatch(source, /renderMessage\(renderIdx\)/);
 });
 
+test("a running turn folds each step as the next one starts", () => {
+  // The live tail used to render every part raw until the run settled, so a long
+  // tool loop kept every step on screen. It folds the same way history does now,
+  // except that the step in progress stays open.
+  assert.match(source, /const isLiveTail = \(sessionBusy \|\| isStreaming\) && endIdx === messages\.length && userIdx === lastAnchorIdx/);
+  assert.match(source, /const liveSegments = splitTurnSegments\(messages, userIdx \+ 1, endIdx\)/);
+  assert.match(source, /if \(segment\.kind === "process" && liveSegmentIdx !== lastLiveSegmentIdx\)/);
+  assert.match(source, /const lastLiveSegmentIdx = liveSegments\.length - 1/);
+});
+
 test("a group keeps its open or closed state across a turn's updates", () => {
   // Nothing about a group's default depends on the turn's answer any more, so
   // re-keying it would close a group the user had opened by hand on every update.

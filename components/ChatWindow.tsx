@@ -1201,12 +1201,82 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
                 const isLiveTail = (sessionBusy || isStreaming) && endIdx === messages.length && userIdx === lastAnchorIdx;
                 if (isLiveTail) {
-                  // A running turn is still one turn. Its parts show what they are doing
-                  // as they do it, but the token counts, Copy and the failure wait for the
-                  // footer at the turn's end: per entry they were a row under every tool
-                  // call, all of it gone the moment the run folded.
+                  // A running turn folds exactly as it will once it is history: each run
+                  // of thinking and tool calls that a real paragraph of text has moved
+                  // past folds into its own group, and only the step in progress stays
+                  // open. A turn that writes no text keeps everything open until it
+                  // ends, then folds as a whole. The token counts, Copy and the failure
+                  // still wait for the footer at the turn's end.
+                  const liveSegments = splitTurnSegments(messages, userIdx + 1, endIdx);
+                  const lastLiveSegmentIdx = liveSegments.length - 1;
+                  const coveredIdx = new Set<number>();
+                  for (const segment of liveSegments) {
+                    for (const part of segment.parts) coveredIdx.add(part.index);
+                  }
+                  let liveSegmentIdx = 0;
                   for (let renderIdx = groupStartIdx; renderIdx < endIdx; renderIdx++) {
-                    rendered.push({ node: renderMessage(renderIdx, { isTurnPart: true }), messageIdx: renderIdx });
+                    const segment = liveSegments[liveSegmentIdx];
+                    if (!segment || segment.parts[0].index !== renderIdx) {
+                      if (!coveredIdx.has(renderIdx)) {
+                        rendered.push({ node: renderMessage(renderIdx, { isTurnPart: true }), messageIdx: renderIdx });
+                      }
+                      continue;
+                    }
+                    const views: { node: ReactNode; messageIdx: number }[] = [];
+                    let revealSegment = false;
+                    let segmentRefIdx: number | undefined;
+                    for (const part of segment.parts) {
+                      const stored = messages[part.index] as AssistantMessage;
+                      if (part.custom) {
+                        revealSegment ||= Boolean(pendingSearchScroll && pendingSearchScroll.entryId === entryIds[part.index]);
+                        views.push({ node: renderMessage(part.index, { attachRef: false, keyPrefix: `segment-${liveSegmentIdx}` }), messageIdx: part.index });
+                        continue;
+                      }
+                      const view = getTurnPart(turnPartCache, stored, part.start, part.end);
+                      const partBlocks = view.content ?? [];
+                      revealSegment ||= Boolean(pendingSearchScroll && entryIds[part.index] === pendingSearchScroll.entryId && (!searchBlock || partBlocks.includes(searchBlock)));
+                      segmentRefIdx ??= visibleRefIndexByMessage.get(part.index);
+                      views.push({
+                        node: renderMessage(part.index, {
+                          attachRef: segment.kind === "answer",
+                          keyPrefix: `segment-${liveSegmentIdx}-${part.start}`,
+                          messageOverride: view,
+                          blockIndexOffset: part.start,
+                          isTurnPart: true,
+                        }),
+                        messageIdx: part.index,
+                      });
+                    }
+                    // The step in progress (the last segment) stays open; every earlier
+                    // run has real text after it, so it folds here and now.
+                    if (segment.kind === "process" && liveSegmentIdx !== lastLiveSegmentIdx) {
+                      const firstIdx = segment.parts[0].index;
+                      const lastIdx = segment.parts[segment.parts.length - 1].index;
+                      const segmentMessages = messages.slice(firstIdx, lastIdx + 1);
+                      rendered.push({
+                        node: (
+                          <div
+                            key={`process-group-${entryIds[groupStartIdx] ?? groupStartIdx}-${liveSegmentIdx}`}
+                            ref={segmentRefIdx === undefined ? undefined : (el) => { messageRefs.current[segmentRefIdx] = el; }}
+                          >
+                            <ProcessDetailsGroup
+                              messageCount={segment.messageCount}
+                              toolCallCount={segment.toolCallCount}
+                              durationMs={getTurnDurationMs(messages, firstIdx, lastIdx + 1)}
+                              cacheMisses={summarizeCacheMisses(segmentMessages)}
+                              reveal={revealSegment}
+                              t={t}
+                            >
+                              {views.map((entry) => entry.node)}
+                            </ProcessDetailsGroup>
+                          </div>
+                        ),
+                        messageIdx: groupStartIdx,
+                      });
+                    } else {
+                      rendered.push(...views);
+                    }
+                    liveSegmentIdx += 1;
                   }
                   idx = endIdx;
                   continue;

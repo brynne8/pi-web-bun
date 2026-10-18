@@ -123,7 +123,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **工具参数按行显示，不再是一段 JSON。** 参数都是单个值的工具卡片，会一个参数一行地列出来——`write` 写下的路径和正文、子代理的 profile 和 prompt、MCP 工具的 query 和 limit——本身带换行的值保留成一块可以滚动的文本。规则是全部参数都上表，否则一个也不上：只要有一个值是嵌套的，比如 `edit` 的 `edits[]`、或者 MCP 参数里装着列表，这张卡片就照旧显示 JSON，因为一行漏掉子树就等于一个谁也看不见的参数。原版的处理是每个工具都把参数显示成缩进 JSON。
 
-**模型写下的文字留在屏幕上，只折叠中间的过程。** 一次运行按片段渲染：它写的文字就在写下的位置显示，中间连着的思考块和工具调用各自折进自己那一组「处理详情」。最后一组下面只有一个结尾，写着这次运行的事：token 数与耗时、这一轮改过的文件、交出全部文字的「复制」，还有运行停在 Provider 报错或输出上限上时的那句原因（[#906](https://github.com/agegr/pi-web/issues/906)）。各组一律从折叠开始，你亲手展开的那一组会一直开着。原版把最后一次工具调用之前的东西全折进同一个框，只显示它之后的文字，并把数字、改动文件清单和失败原因挂到那条回复消息上。（[说明](./docs/agents/sessions.md#a-turn-shows-every-word-it-wrote-only-the-workings-fold-processdetailsgroup-componentschatwindowtsx)）
+**模型写下的文字留在屏幕上，只折叠中间的过程。** 一次运行按片段渲染：它写的文字就在写下的位置显示，中间连着的思考块和工具调用各自折进自己那一组「处理详情」。最后一组下面只有一个结尾，写着这次运行的事：token 数与耗时、这一轮改过的文件、交出全部文字的「复制」，还有运行停在 Provider 报错或输出上限上时的那句原因（[#906](https://github.com/agegr/pi-web/issues/906)）。各组一律从折叠开始，运行中的一轮边走边折、下一步一出现就把上一步折起来，你亲手展开的那一组会一直开着。原版把最后一次工具调用之前的东西全折进同一个框，只显示它之后的文字，并把数字、改动文件清单和失败原因挂到那条回复消息上。（[说明](./docs/agents/sessions.md#a-turn-shows-every-word-it-wrote-only-the-workings-fold-processdetailsgroup-componentschatwindowtsx)）
 
 **思考过程按 Markdown 渲染。** 展开的思考块走的是和回复同一套 Markdown 流水线：标题、列表、表格和围栏代码都渲染出来，不再把标记符号直接摆给你看，写成链接的路径也能在应用里打开。字号仍是这张卡片一贯的那一号。原版的处理是把整段思考当成一串保留换行的纯文本。（[说明](./docs/agents/sessions.md#thinking-renders-as-markdown-at-the-cards-own-size-thinkingblock-componentsmessageviewtsx)）
 
