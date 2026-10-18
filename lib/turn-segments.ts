@@ -147,3 +147,43 @@ export function splitTurnSegments(messages: AgentMessage[], from: number, to: nu
 export function turnHasAnswer(segments: TurnSegment[]): boolean {
   return segments.some((segment) => segment.kind === "answer");
 }
+
+/** One thing a turn renders, in order: a segment, or a message no segment covers. */
+export type TurnRenderItem =
+  | { kind: "segment"; segment: TurnSegment; segmentIndex: number }
+  | { kind: "raw"; index: number };
+
+/**
+ * The live turn's render order: its segments in turn, with the messages no
+ * segment covers (the anchor, a tool result) kept in their place.
+ *
+ * The plan is built from the segments themselves, never by walking message
+ * indices: one message can start more than one segment — a response that
+ * thinks, writes and then calls a tool yields process, answer, process — so a
+ * walk that advances one index per rendered thing drops every segment after
+ * the first that starts on the same message. That is what hid a running turn's
+ * later steps and left its foot waiting for a model with nothing above it.
+ */
+export function planTurnRender(segments: TurnSegment[], from: number, to: number): TurnRenderItem[] {
+  const covered = new Set<number>();
+  for (const segment of segments) {
+    for (const part of segment.parts) covered.add(part.index);
+  }
+  const uncovered: number[] = [];
+  for (let index = from; index < to; index++) {
+    if (!covered.has(index)) uncovered.push(index);
+  }
+
+  const items: TurnRenderItem[] = [];
+  let at = 0;
+  for (const [segmentIndex, segment] of segments.entries()) {
+    while (at < uncovered.length && uncovered[at] < segment.parts[0].index) {
+      items.push({ kind: "raw", index: uncovered[at++] });
+    }
+    items.push({ kind: "segment", segment, segmentIndex });
+  }
+  while (at < uncovered.length) {
+    items.push({ kind: "raw", index: uncovered[at++] });
+  }
+  return items;
+}

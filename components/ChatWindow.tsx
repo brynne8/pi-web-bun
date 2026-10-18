@@ -10,7 +10,7 @@ import { EXTENSION_DIALOG_BASE_WIDTH, fitExtensionDialogWidth } from "@/lib/exte
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { getAssistantErrorMessage, hasAssistantAnswer, isAssistantTruncated, isHiddenCustomMessage, isMessageGroupAnchor } from "@/lib/message-display";
 import { extractTurnWrittenFiles } from "@/lib/turn-written-files";
-import { splitTurnSegments, turnHasAnswer } from "@/lib/turn-segments";
+import { planTurnRender, splitTurnSegments, turnHasAnswer } from "@/lib/turn-segments";
 import { getTurnPart, type TurnPartCache } from "@/lib/turn-views";
 import { getTurnUsage } from "@/lib/turn-usage";
 import { formatTurnDuration, getTurnDurationMs } from "@/lib/turn-duration";
@@ -1209,19 +1209,14 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                   // still wait for the footer at the turn's end.
                   const liveSegments = splitTurnSegments(messages, userIdx + 1, endIdx);
                   const lastLiveSegmentIdx = liveSegments.length - 1;
-                  const coveredIdx = new Set<number>();
-                  for (const segment of liveSegments) {
-                    for (const part of segment.parts) coveredIdx.add(part.index);
-                  }
-                  let liveSegmentIdx = 0;
-                  for (let renderIdx = groupStartIdx; renderIdx < endIdx; renderIdx++) {
-                    const segment = liveSegments[liveSegmentIdx];
-                    if (!segment || segment.parts[0].index !== renderIdx) {
-                      if (!coveredIdx.has(renderIdx)) {
-                        rendered.push({ node: renderMessage(renderIdx, { isTurnPart: true }), messageIdx: renderIdx });
-                      }
+                  for (const item of planTurnRender(liveSegments, groupStartIdx, endIdx)) {
+                    if (item.kind === "raw") {
+                      // A message no segment covers (the anchor, a tool result)
+                      // keeps its place in the turn as it is.
+                      rendered.push({ node: renderMessage(item.index, { isTurnPart: true }), messageIdx: item.index });
                       continue;
                     }
+                    const { segment, segmentIndex: liveSegmentIdx } = item;
                     const views: { node: ReactNode; messageIdx: number }[] = [];
                     let revealSegment = false;
                     let segmentRefIdx: number | undefined;
@@ -1276,7 +1271,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                     } else {
                       rendered.push(...views);
                     }
-                    liveSegmentIdx += 1;
                   }
                   idx = endIdx;
                   continue;

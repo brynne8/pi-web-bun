@@ -65,7 +65,7 @@ test("a running turn prints no token counts under its parts", () => {
   // While the run was going, each stored entry printed its own "… in · … out" row,
   // and every one of them vanished the moment the run ended and folded. The numbers
   // describe the turn, so they come with the turn's footer and not before it exists.
-  assert.match(source, /rendered\.push\(\{ node: renderMessage\(renderIdx, \{ isTurnPart: true \}\), messageIdx: renderIdx \}\)/);
+  assert.match(source, /rendered\.push\(\{ node: renderMessage\(item\.index, \{ isTurnPart: true \}\), messageIdx: item\.index \}\)/);
   assert.doesNotMatch(source, /renderMessage\(renderIdx\)/);
 });
 
@@ -75,6 +75,7 @@ test("a running turn folds each step as the next one starts", () => {
   // except that the step in progress stays open.
   assert.match(source, /const isLiveTail = \(sessionBusy \|\| isStreaming\) && endIdx === messages\.length && userIdx === lastAnchorIdx/);
   assert.match(source, /const liveSegments = splitTurnSegments\(messages, userIdx \+ 1, endIdx\)/);
+  assert.match(source, /for \(const item of planTurnRender\(liveSegments, groupStartIdx, endIdx\)\)/);
   assert.match(source, /if \(segment\.kind === "process" && liveSegmentIdx !== lastLiveSegmentIdx\)/);
   assert.match(source, /const lastLiveSegmentIdx = liveSegments\.length - 1/);
 });
