@@ -125,6 +125,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **模型写下的文字留在屏幕上，只折叠中间的过程。** 一次运行按片段渲染：它写的文字就在写下的位置显示，中间连着的思考块和工具调用各自折进自己那一组「处理详情」。最后一组下面只有一个结尾，写着这次运行的事：token 数与耗时、这一轮改过的文件、交出全部文字的「复制」，还有运行停在 Provider 报错或输出上限上时的那句原因（[#906](https://github.com/agegr/pi-web/issues/906)）。各组一律从折叠开始，运行中的一轮边走边折、下一步一出现就把上一步折起来，你亲手展开的那一组会一直开着。原版把最后一次工具调用之前的东西全折进同一个框，只显示它之后的文字，并把数字、改动文件清单和失败原因挂到那条回复消息上。（[说明](./docs/agents/sessions.md#a-turn-shows-every-word-it-wrote-only-the-workings-fold-processdetailsgroup-componentschatwindowtsx)）
 
+**子代理的报告按 Markdown 渲染。** `Agent` 或 `get_subagent_result` 的结果会把标题、列表、表格和围栏代码真的渲染出来，字号仍是这张卡片自己那一号，不再把子代理写下的标记符号直接摆给你看。其他工具的输出仍是原始文本——在那里 `*` 和 `#` 只是字符，不是标题。原版是把报告原样打印。（[说明](./docs/agents/subagents.md#the-report-on-screen)）
+
 **思考过程按 Markdown 渲染。** 展开的思考块走的是和回复同一套 Markdown 流水线：标题、列表、表格和围栏代码都渲染出来，不再把标记符号直接摆给你看，写成链接的路径也能在应用里打开。字号仍是这张卡片一贯的那一号。原版的处理是把整段思考当成一串保留换行的纯文本。（[说明](./docs/agents/sessions.md#thinking-renders-as-markdown-at-the-cards-own-size-thinkingblock-componentsmessageviewtsx)）
 
 **子代理由 profile 配置，不由模型猜。** 子代理的思考档位、轮次上限、是否继承这段对话，都由它的 profile 决定，于是一次运行可以从产出它的那份 profile 复现。`model` 是调用方唯一还能指定的参数，因为换某个模型跑一次是常见且明确的需求，而工具描述里列着每个 profile 自己的模型。要让子代理看哪些文件，就写在 `prompt` 里，它用自己的 `read` 去打开，被委派出去的会话因此只占它真正需要的上下文。原版另外接受调用上的 `input_files` 列表（[#1138](https://github.com/agegr/pi-web/pull/1138)）。（[说明](./docs/agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）

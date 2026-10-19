@@ -423,6 +423,52 @@ test("renders subagents as standard tool calls with only an extra side-panel but
   assert.doesNotMatch(ordinaryHtml, /View sub-agent work in side panel/);
 });
 
+test("renders a subagent's report as Markdown, and another tool's result verbatim", (t) => {
+  // The child writes its report to be read: headings, lists and code fences are
+  // Markdown, and a card that prints their markup hides what the run produced.
+  const block = { type: "toolCall", toolCallId: "call-agent-markdown", toolName: "Agent", input: { subagent_type: "Explore", prompt: "Find the parser" } };
+  const report = "Subagent child-session completed.\n\n## Findings\n\n- parser is in `lib/parser.ts`";
+  const subagentResult = {
+    role: "toolResult",
+    toolCallId: block.toolCallId,
+    content: [{ type: "text", text: report }],
+    details: {
+      kind: "pi-web-subagent",
+      sessionId: "child-session",
+      profile: "Explore",
+      description: "Find parser",
+      status: "completed",
+      runInBackground: false,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    },
+  };
+  setToolCallExpanded(block.toolCallId, true);
+  t.after(() => clearExpandedToolCalls());
+  const html = renderMessage({ role: "assistant", provider: "anthropic", model: "claude-test", content: [block] }, {
+    toolResults: new Map([[block.toolCallId, subagentResult]]),
+    onOpenSubagent() {},
+  });
+  assert.match(html, /class="[^"]*markdown-tool-result/);
+  assert.match(html, /<h2>Findings<\/h2>/);
+  assert.match(html, /<li>parser is in <code[^>]*>lib\/parser\.ts<\/code><\/li>/);
+  assert.doesNotMatch(html, /## Findings/);
+
+  // Every other tool's result is raw output and stays that way: a grep hit holding
+  // `*` or `_` must not turn into emphasis.
+  const bashBlock = { type: "toolCall", toolCallId: "call-bash-raw", toolName: "bash", input: { command: "grep -n x a.txt" } };
+  setToolCallExpanded(bashBlock.toolCallId, true);
+  const rawHtml = renderMessage({ role: "assistant", provider: "anthropic", model: "claude-test", content: [bashBlock] }, {
+    toolResults: new Map([[bashBlock.toolCallId, {
+      role: "toolResult",
+      toolCallId: bashBlock.toolCallId,
+      toolName: "bash",
+      content: [{ type: "text", text: "## not a heading\n- not a list" }],
+    }]]),
+  });
+  assert.doesNotMatch(rawHtml, /markdown-tool-result/);
+  assert.match(rawHtml, /## not a heading/);
+});
+
 test("a tool card shows the run time pi recorded, else the timestamps' difference, never a tiny one", () => {
   const block = { type: "toolCall", toolCallId: "call-duration-1", toolName: "bash", arguments: { command: "make" } };
   const message = { role: "assistant", provider: "anthropic", model: "claude-test", content: [block], timestamp: 1_000_000, durationMs: 4_000 };

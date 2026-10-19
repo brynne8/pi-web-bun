@@ -1351,6 +1351,28 @@ pre, code {
   margin: 4px 0;
 }
 
+/* A tool result rendered as Markdown (a subagent's report): the card's own 12px scale, never a
+   step up from the answer's 14px. Only the vertical rhythm is compacted, so a report's prose
+   keeps the spacing the chat gives it. */
+.markdown-body.markdown-tool-result {
+  font-size: calc(12px + var(--chat-font-size-offset, 0px));
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+.markdown-body.markdown-tool-result :is(h1, h2, h3, h4, h5, h6) {
+  margin: 8px 0 4px;
+  color: var(--text);
+}
+.markdown-body.markdown-tool-result p { margin: 0 0 7px; }
+.markdown-body.markdown-tool-result ul,
+.markdown-body.markdown-tool-result ol { margin: 4px 0 7px; }
+.markdown-body.markdown-tool-result li { margin: 2px 0; }
+.markdown-body.markdown-tool-result blockquote { margin: 5px 0; }
+.markdown-body.markdown-tool-result .markdown-inline-code { font-size: inherit; }
+.markdown-body.markdown-tool-result table { font-size: inherit; }
+.markdown-body.markdown-tool-result .markdown-table-frame,
+.markdown-body.markdown-tool-result .markdown-code-block { margin: 6px 0; }
+
 .markdown-compaction-message {
   line-height: 1.5;
 }

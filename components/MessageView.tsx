@@ -1038,7 +1038,7 @@ function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDur
     const tc = block as ToolCallContent;
     const result = toolResults?.get(tc.toolCallId);
     const duration = toolCallDurations?.get(tc.toolCallId);
-    return <ToolCallBlock block={tc} result={result} duration={duration} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} />;
+    return <ToolCallBlock block={tc} result={result} duration={duration} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} />;
   }
   return null;
 }
@@ -1221,7 +1221,7 @@ export function formatToolDuration(ms: number): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m ${remainder}s`;
 }
 
-function ToolCallBlock({ block, result, duration, onOpenSubagent, onOpenReadSnapshot }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; onOpenSubagent?: (sessionId: string, label: string) => void; onOpenReadSnapshot?: (toolCallId: string, snapshot: ReadSnapshot) => void }) {
+function ToolCallBlock({ block, result, duration, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; cwd?: string; onOpenFile?: (filePath: string, page?: number) => void; onOpenSubagent?: (sessionId: string, label: string) => void; onOpenReadSnapshot?: (toolCallId: string, snapshot: ReadSnapshot) => void }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(() => isToolCallExpanded(block.toolCallId));
   const toggleExpanded = () => {
@@ -1449,11 +1449,15 @@ function ToolCallBlock({ block, result, duration, onOpenSubagent, onOpenReadSnap
             diff={resultDiff}
           />
         ) : (!resultIsEmpty || resultImages.length === 0) && (
-          <PairedResult
-            text={resultText ?? ""}
-            isEmpty={resultIsEmpty}
-            isError={isError}
-          />
+          // A subagent's result is its report, not a tool's raw output: it carries Markdown
+          // written to be read, so it renders as Markdown at the card's own size.
+          subagent && !resultIsEmpty
+            ? <MarkdownResult text={resultText ?? ""} isError={isError} cwd={cwd} onOpenFile={onOpenFile} />
+            : <PairedResult
+                text={resultText ?? ""}
+                isEmpty={resultIsEmpty}
+                isError={isError}
+              />
         )
       )}
     </div>
@@ -1854,6 +1858,35 @@ function ResultImages({ images, isError }: { images: ImageContent[]; isError: bo
           </ImagePreview>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * A subagent's report in its tool card: Markdown rendered, because what the child wrote was
+ * written to be read — headings, lists, tables and code fences included. The status line the
+ * result opens with stays a paragraph of its own. The chat's own compact result styling is kept,
+ * at the card's size rather than the answer's; see `.markdown-tool-result`.
+ */
+function MarkdownResult({ text, isError, cwd, onOpenFile }: {
+  text: string;
+  isError: boolean;
+  cwd?: string;
+  onOpenFile?: (filePath: string, page?: number) => void;
+}) {
+  return (
+    <div
+      style={{
+        borderTop: `1px solid ${isError ? "rgba(248,113,113,0.3)" : "rgba(34,197,94,0.15)"}`,
+        background: isError ? "rgba(248,113,113,0.04)" : "var(--bg)",
+        padding: "8px 10px",
+        maxHeight: 400,
+        overflow: "auto",
+        // A failed run's report keeps the card's error colour: the class sets the muted one.
+        color: isError ? "#f87171" : undefined,
+      }}
+    >
+      <SafeMarkdownBody className="markdown-tool-result" cwd={cwd} onOpenFile={onOpenFile}>{text}</SafeMarkdownBody>
     </div>
   );
 }
