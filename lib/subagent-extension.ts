@@ -194,13 +194,13 @@ export function createSubagentExtension(
       pi.registerTool(defineTool({
         name: "Agent",
         label: "Agent",
-        description: `Delegate a focused task to a configured subagent. Each subagent runs as a full, inspectable Pi session. Use background mode for independent work and foreground mode when the result is needed immediately.\n\nAvailable agent types:\n${agentTypeDescription(profiles)}`,
+        description: `Delegate a focused task to a configured subagent. Each subagent runs as a full, inspectable Pi session. Use background mode for work that can run while you continue, and foreground mode when the result is needed immediately.\n\nAvailable agent types:\n${agentTypeDescription(profiles)}`,
         promptSnippet: "Delegate a focused task to an inspectable subagent session",
         exposure: SUBAGENT_TOOL_EXPOSURE,
         promptGuidelines: [
-          "Use Agent for a focused task that benefits from an isolated context.",
-          "Use multiple background Agent calls in the same response for independent parallel work.",
-          "Do not duplicate work already delegated to a running subagent.",
+          "When a piece of work can be split across several subagents, dispatch them all; their scopes may overlap, since an isolated run can use a worktree and be merged afterwards.",
+          "Delegate routine exploration and planning to a subagent instead of doing it here; it keeps this conversation's context small.",
+          "Do not duplicate work already delegated.",
         ],
         executionMode: "parallel",
         // Only the parameters a model can choose from the information this tool gives it. A profile

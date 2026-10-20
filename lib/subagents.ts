@@ -208,7 +208,8 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
   {
     name: "general-purpose",
     displayName: "General purpose",
-    description: "Handle a focused implementation or investigation task",
+    // The model picks a profile by this line: name the work, not the profile.
+    description: "Implement a delegated task: edit files, run checks, report changes",
     systemPrompt: "Work autonomously on the delegated task. Keep the final answer concise and include important files, decisions, and remaining risks.",
     tools: DEFAULT_TOOLS,
     loadSkills: false,
@@ -224,7 +225,7 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
   {
     name: "explore",
     displayName: "Explore",
-    description: "Quickly inspect a codebase without modifying it",
+    description: "Use when locating files or code, or answering how existing code works; read-only",
     systemPrompt: "Explore the codebase to answer the delegated question. Do not modify files. Report concrete findings with file paths and relevant symbols.",
     tools: [...PRESET_READ_ONLY],
     loadSkills: false,
@@ -240,7 +241,7 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
   {
     name: "plan",
     displayName: "Plan",
-    description: "Design an implementation plan without modifying files",
+    description: "Use before a multi-step change; read-only plan of steps, files, risks, verification",
     systemPrompt: "Produce an implementation-ready plan for the delegated task. Inspect the repository as needed, do not modify files, and call out dependencies, risks, and verification steps.",
     tools: [...PRESET_READ_ONLY],
     loadSkills: false,
