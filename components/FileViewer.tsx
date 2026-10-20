@@ -21,12 +21,12 @@ import {
 import { encodeFilePathForApi, getFileDirectory, getFileName, getRelativeFilePath } from "@/lib/file-paths";
 import { parsePdfPageFragment, resolveLocalFileHref, shouldOpenLocalFileInApp } from "@/lib/file-links";
 import { parseFrontmatter } from "@/lib/frontmatter";
-import { isExternalMarkdownHref, markdownAppUrlTransform, markdownPreviewRehypePlugins, markdownPreviewRemarkPlugins, markdownUrlTransform, normalizeDisplayMath } from "@/lib/markdown";
+import { isExternalMarkdownHref, jumpToMarkdownFragment, markdownAppUrlTransform, markdownPreviewRehypePlugins, markdownPreviewRemarkPlugins, markdownUrlTransform, normalizeDisplayMath } from "@/lib/markdown";
 import { CodeBlock, MermaidBlock } from "./MermaidBlock";
 import { DelimitedTable } from "./DelimitedTable";
 import { isDelimitedTablePath } from "@/lib/delimited-table";
 import { FrontmatterCard } from "./FrontmatterCard";
-import { diffGapLabel, parseUnifiedPatch, unifiedDiffLines, type UnifiedDiffLine } from "@/lib/patch";
+import { diffGapLabel, parseUnifiedPatch, unifiedDiffLines, type SplitDiffGap, type UnifiedDiffLine } from "@/lib/patch";
 import type { GitFileDiffResponse } from "@/lib/git-types";
 import { useI18n } from "@/hooks/useI18n";
 import {
@@ -350,9 +350,9 @@ function DownloadLink({ filePath, sourceSessionId }: { filePath: string; sourceS
 // The same rows the tool card's split diff parses, in one column; see `unifiedDiffLines()`.
 // A gap row rides along, so a fold's skipped count includes the unchanged lines
 // a patch leaves out between two hunks.
-type DiffLine = UnifiedDiffLine;
+type DiffLine = UnifiedDiffLine | SplitDiffGap;
 // A gap row is counted by a fold, never drawn as a line of the diff.
-type DiffCodeLine = Extract<UnifiedDiffLine, { text: string }>;
+type DiffCodeLine = UnifiedDiffLine;
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -1844,7 +1844,7 @@ function TextFileViewer({
                     // Like chat links: a web or app link must not replace Pi Web.
                     return isExternalMarkdownHref(href)
                       ? <a href={href} {...props} target="_blank" rel="noopener noreferrer">{children}</a>
-                      : <a href={href} {...props}>{children}</a>;
+                      : <a href={href} {...props} onClick={jumpToMarkdownFragment}>{children}</a>;
                   }
 
                   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {

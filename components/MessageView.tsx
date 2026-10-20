@@ -10,7 +10,7 @@ import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
 import { getAssistantErrorMessage, getThinkingPreview, hasAssistantAnswer, isAssistantTruncated, isEmptyThinkingBlock } from "@/lib/message-display";
-import { diffGapLabel, parseUnifiedPatch, unifiedDiffLines, type SplitDiffCell, type SplitDiffFile, type UnifiedDiffLine } from "@/lib/patch";
+import { diffGapLabel, parseUnifiedPatch, unifiedDiffLines, type SplitDiffCell, type SplitDiffFile, type SplitDiffGap, type UnifiedDiffLine } from "@/lib/patch";
 import { applyPatchPreviewToFiles, applyPatchResultHasFailures, extractApplyPatchPaths, getApplyPatchInputText, parseApplyPatchInput } from "@/lib/apply-patch";
 import { isApplyPatchToolName, isEditToolName, isShellToolName } from "@/lib/tool-names";
 import { readSnapshotOfCall, type ReadSnapshot } from "@/lib/read-snapshot";
@@ -1565,7 +1565,7 @@ export function PatchDiffFiles({ files, layout }: { files: SplitDiffFile[]; layo
                 return null;
               }
               if (row.type === "gap") {
-                return <DiffGapRow key={rowIndex} count={row.count} />;
+                return <DiffGapRow key={rowIndex} gap={row} />;
               }
 
               return (
@@ -1578,24 +1578,19 @@ export function PatchDiffFiles({ files, layout }: { files: SplitDiffFile[]; layo
           </div>
           )}
 
-          {layout === "stacked" && unifiedDiffLines(file).map((line, lineIndex) =>
+          {layout === "stacked" && unifiedDiffLines(file).map((line, lineIndex) => (
             line.type === "gap"
-              ? <DiffGapRow key={lineIndex} count={line.count} />
+              ? <DiffGapRow key={lineIndex} gap={line} />
               : <StackedDiffLineView key={lineIndex} line={line} />
-          )}
+          ))}
         </div>
       ))}
     </div>
   );
 }
 
-/** The file a stacked section is named for; the new path, which is the one that survives. */
-function stackedFilePath(file: SplitDiffFile): string {
-  return file.newPath || file.oldPath || "";
-}
-
-/** The unchanged lines a diff leaves out between two hunks, one marker row. */
-function DiffGapRow({ count }: { count: number | null }) {
+/** Unchanged lines the patch leaves out between two hunks, across the whole width. */
+function DiffGapRow({ gap }: { gap: SplitDiffGap }) {
   const { t } = useI18n();
   return (
     <div
@@ -1609,24 +1604,31 @@ function DiffGapRow({ count }: { count: number | null }) {
         userSelect: "none",
       }}
     >
-      {count === null ? "⋯" : `⋯ ${diffGapLabel(count, t)}`}
+      {gap.count === null ? "⋯" : `⋯ ${diffGapLabel(gap.count, t)}`}
     </div>
   );
 }
 
-function StackedDiffLineView({ line }: { line: Extract<UnifiedDiffLine, { text: string }> }) {
+/** The file a stacked section is named for: the new path, the one that survives, unless the file was deleted. */
+function stackedFilePath(file: SplitDiffFile): string {
+  if (file.newPath && file.newPath !== "/dev/null") return file.newPath;
+  return file.oldPath || file.newPath || "";
+}
+
+function StackedDiffLineView({ line }: { line: UnifiedDiffLine }) {
   return (
     <SplitDiffCellView
       side="right"
       cell={{
         // One gutter, so a removed line keeps the old number and everything else the new one.
-        lineNo: line.oldLineNo ?? line.newLineNo,
+        lineNo: line.type === "removed" ? line.oldLineNo : line.newLineNo,
         text: line.text,
         type: line.type,
       }}
     />
   );
 }
+
 
 function SplitDiffHeader({ title, side }: { title: string; side: "left" | "right" }) {
   return (

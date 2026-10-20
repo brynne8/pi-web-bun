@@ -15,6 +15,8 @@ export type SplitDiffRow =
   | { type: "gap"; count: number | null }
   | { type: "line"; left: SplitDiffCell; right: SplitDiffCell };
 
+export type SplitDiffGap = Extract<SplitDiffRow, { type: "gap" }>;
+
 export interface SplitDiffFile {
   oldPath?: string;
   newPath?: string;
@@ -149,28 +151,26 @@ export function parseUnifiedPatch(text: string): SplitDiffFile[] | null {
   return parsed.length > 0 ? parsed : null;
 }
 
-/** One row of a single-column diff: a line, or the unchanged lines left out. */
-export type UnifiedDiffLine =
-  | {
-      type: "context" | "removed" | "added";
-      text: string;
-      oldLineNo: number | null;
-      newLineNo: number | null;
-    }
-  | { type: "gap"; count: number | null };
+/** One line of a single-column diff: old and new numbering, whichever applies. */
+export interface UnifiedDiffLine {
+  type: "context" | "removed" | "added";
+  text: string;
+  oldLineNo: number | null;
+  newLineNo: number | null;
+}
 
 /**
  * One file's rows as a single column. A pair the split view puts side by side
- * becomes its own line in patch order (removed first, then added), and a
- * context row becomes one line instead of two copies of itself. Hunk headers
- * carry no file content, as in the split view.
+ * becomes two lines, the removed one above the added one, and a context row
+ * becomes one line instead of two copies of itself. Hunk headers carry no file
+ * content, as in the split view; a gap between hunks stays a gap.
  */
-export function unifiedDiffLines(file: SplitDiffFile): UnifiedDiffLine[] {
-  const lines: UnifiedDiffLine[] = [];
+export function unifiedDiffLines(file: SplitDiffFile): Array<UnifiedDiffLine | SplitDiffGap> {
+  const lines: Array<UnifiedDiffLine | SplitDiffGap> = [];
   for (const row of file.rows) {
     if (row.type === "hunk") continue;
     if (row.type === "gap") {
-      lines.push({ type: "gap", count: row.count });
+      lines.push(row);
       continue;
     }
     if (row.left.type === "context" && row.right.type === "context") {
