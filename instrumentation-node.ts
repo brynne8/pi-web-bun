@@ -1,3 +1,9 @@
+// First import on purpose. It patches `fs.promises.realpath`, and a named
+// builtin import only takes a patch that was already there when the module was
+// evaluated, so this has to precede anything that may load `node:fs/promises`
+// (including the pi SDK preimport at the bottom). `lib/dlp-realpath-compat.ts`
+// holds the driver story and what its one start-up log line means.
+import "@/lib/dlp-realpath-compat";
 import { configureHttpDispatcher, readHttpIdleTimeoutMs } from "@/lib/http-dispatcher";
 import { closeAllAgentEventStreams } from "@/lib/agent-event-stream";
 import { pruneBgLogs } from "@/lib/bash-bg-tasks";

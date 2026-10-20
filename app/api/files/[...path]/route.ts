@@ -32,7 +32,7 @@ import {
 import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
 import { filePathFromApiSegments, samePath } from "@/lib/paths";
 import { hasParentDirectorySegment } from "@/lib/path-security";
-import { readTextPreviewChunk } from "@/lib/text-preview";
+import { getReadableFileSize, readTextPreviewChunk } from "@/lib/text-preview";
 
 const FILE_REQUEST_TYPES = ["list", "read", "download", "meta", "preview", "watch"] as const;
 type FileRequestType = typeof FILE_REQUEST_TYPES[number];
@@ -285,6 +285,10 @@ function getContentDisposition(filePath: string, asDownload = false): string {
 }
 
 function streamFile(filePath: string, stat: fs.Stats, contentType: string, rangeHeader: string | null, asDownload = false): Response {
+  // Stream what the file can really hand back. A transparent encryption driver's
+  // stat size can exceed its readable data, and a body shorter than the declared
+  // `Content-Length` is a download the reader keeps waiting on.
+  const size = getReadableFileSize(filePath, stat.size);
   const headers: Record<string, string> = {
     "Content-Type": contentType,
     "Cache-Control": "no-cache",
@@ -307,7 +311,7 @@ function streamFile(filePath: string, stat: fs.Stats, contentType: string, range
     return new Response(createFileBodyStream(filePath), {
       headers: {
         ...headers,
-        "Content-Length": String(stat.size),
+        "Content-Length": String(size),
       },
     });
   }
@@ -318,37 +322,37 @@ function streamFile(filePath: string, stat: fs.Stats, contentType: string, range
       status: 416,
       headers: {
         ...headers,
-        "Content-Range": `bytes */${stat.size}`,
+        "Content-Range": `bytes */${size}`,
       },
     });
   }
 
   let start = match[1] ? Number(match[1]) : 0;
-  let end = match[2] ? Number(match[2]) : stat.size - 1;
+  let end = match[2] ? Number(match[2]) : size - 1;
   if (!match[1] && match[2]) {
     const suffixLength = Number(match[2]);
-    start = Math.max(stat.size - suffixLength, 0);
-    end = stat.size - 1;
+    start = Math.max(size - suffixLength, 0);
+    end = size - 1;
   }
 
-  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= stat.size) {
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= size) {
     return new Response(null, {
       status: 416,
       headers: {
         ...headers,
-        "Content-Range": `bytes */${stat.size}`,
+        "Content-Range": `bytes */${size}`,
       },
     });
   }
 
-  end = Math.min(end, stat.size - 1);
+  end = Math.min(end, size - 1);
   const chunkSize = end - start + 1;
   return new Response(createFileBodyStream(filePath, { start, end }), {
     status: 206,
     headers: {
       ...headers,
       "Content-Length": String(chunkSize),
-      "Content-Range": `bytes ${start}-${end}/${stat.size}`,
+      "Content-Range": `bytes ${start}-${end}/${size}`,
     },
   });
 }
@@ -492,9 +496,11 @@ export async function GET(
       if (!Number.isSafeInteger(offset) || offset > stat.size) {
         return NextResponse.json({ error: "Invalid text preview offset" }, { status: 400 });
       }
-      const chunk = readTextPreviewChunk(filePath, stat.size, offset);
+      // `chunk.size` is what the read really reaches; a transparent encryption
+      // driver can make it shorter than stat.size (see lib/text-preview.ts).
+      const { size: readableSize, ...chunk } = readTextPreviewChunk(filePath, stat.size, offset);
       const language = getLanguage(filePath);
-      return NextResponse.json({ ...chunk, language, size: stat.size });
+      return NextResponse.json({ ...chunk, size: readableSize, language });
     }
 
     if (type === "download") {
