@@ -117,11 +117,9 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **散文默认折行，代码不折。** Markdown 和纯文本文件的源码视图和 Diff 视图打开时就按面板宽度折行，长句子能一口气读到底，不必拖动横向滚动条去找后半句。源代码则默认不折行，一行一行铺开、横向滚动——和编辑器一致，因为读代码靠的是缩进和列对齐，日志也按这条走。折行按钮仍然可以随手翻转任意一种文件，这个选择会在标签页里保留。原版所有文件都默认不折行。（[说明](./docs/agents/files-and-access.md#which-lines-wrap))
 
-**手机上放得下的 diff。** edit 和 apply_patch 的改动默认两栏显示：左边改动前，右边改动后。在手机上每一栏只占屏幕一小块，改动的那一行在自己那一半里就折了行，两半只能靠记忆对照。所以在手机上，同样一份改动以单栏打开——删掉的行排在替换它的那一行上面，各自带着自己的行号——和文件预览里 Diff 视图一直以来的样子相同。卡片上别的东西不变。原版在任何宽度上都画两栏（[#744](https://github.com/agegr/pi-web/pull/744)）。（[说明](./docs/agents/sessions.md#tool-execution-events-on-the-sse-stream)）
-
 **运行时按钮不挪位。** 「停止」放在输入框里，与「引导」和「后续消息」并排，输入框下方那一排在运行中和结束后只有一套摆法——你正要点的东西不会在这次运行结束的一瞬变成别的东西。上下文真的装满时，「压缩」那颗按钮就是「停止压缩」，所以你需要的操作就在手底下。原版的处理是挡住一次运行刚结束时的误点（[#1131](https://github.com/agegr/pi-web/pull/1131)）；本分支把这道守卫留着，而在桌面上，它所要防的那种按钮替换已经不存在了。（[说明](./docs/agents/sessions.md#composer-action-row-nothing-moves-under-the-pointer-at-a-run-boundary)）
 
-**工具参数按行显示，不再是一段 JSON。** 参数都是单个值的工具卡片，会一个参数一行地列出来——`write` 写下的路径和正文、子代理的 profile 和 prompt、MCP 工具的 query 和 limit——本身带换行的值保留成一块可以滚动的文本。规则是全部参数都上表，否则一个也不上：只要有一个值是嵌套的，比如 `edit` 的 `edits[]`、或者 MCP 参数里装着列表，这张卡片就照旧显示 JSON，因为一行漏掉子树就等于一个谁也看不见的参数。原版的处理是每个工具都把参数显示成缩进 JSON。
+**工具参数按行显示，不再是一段 JSON。** 参数都是单个值的工具卡片，会一个参数一行地列出来——`write` 写下的路径和正文、子代理的 profile 和 prompt、MCP 工具的 query 和 limit——本身带换行的值保留成一块可以滚动的文本。规则是全部参数都上表，否则一个也不上：只要有一个值是嵌套的，比如 `edit` 的 `edits[]`、或者 MCP 参数里装着列表，这张卡片就照旧显示 JSON，因为一行漏掉子树就等于一个谁也看不见的参数。原版的处理同样是单个值的参数按行显示，但 `write` 保留自己那套看法：只显示文件正文，路径不跟在旁边。
 
 **模型写下的文字留在屏幕上，只折叠中间的过程。** 一次运行按片段渲染：它写的文字就在写下的位置显示，中间连着的思考块和工具调用各自折进自己那一组「处理详情」。最后一组下面只有一个结尾，写着这次运行的事：token 数与耗时、这一轮改过的文件、交出全部文字的「复制」，还有运行停在 Provider 报错或输出上限上时的那句原因（[#906](https://github.com/agegr/pi-web/issues/906)）。各组一律从折叠开始，运行中的一轮边走边折、下一步一出现就把上一步折起来，你亲手展开的那一组会一直开着。原版把最后一次工具调用之前的东西全折进同一个框，只显示它之后的文字，并把数字、改动文件清单和失败原因挂到那条回复消息上。（[说明](./docs/agents/sessions.md#a-turn-shows-every-word-it-wrote-only-the-workings-fold-processdetailsgroup-componentschatwindowtsx)）
 
@@ -135,8 +133,6 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **文件行自己的右键菜单。** 在项目文件树里右键某一行——在 Git 改动清单里右键也一样——这一行会给出这个文件自己的操作：把路径插入聊天、下载这个文件、撤销它未提交的改动（已暂存的一并取消暂存并还原内容），在访达 / 文件资源管理器 / 文件管理器里看到它，而且是选中这个文件本身，不只是打开它所在的目录。只有 Git 能还原的改动才有这一项——新增的文件、重命名、冲突都不算——而且它会先问一句再动手，因为它丢弃的内容不会保留。原版的处理是把前两项做成悬停时浮在文件名上的按钮；它通往文件管理器的入口只打开工作区所在目录，没有按文件的入口（[#907](https://github.com/agegr/pi-web/pull/907)）。（[说明](./docs/agents/files-and-access.md#a-rows-own-actions)）
 
-**渲染文档里的页内跳转能落地。** 一份自己带导航的 Markdown——手写目录配锚点链接，或者脚注——里的目标会被清洗器改名：内容中每个 `id` 都被加上 GitHub 那套 `user-content-` 前缀（防不可信内容冒充页面自身元素），而指向它们的链接却原样留着，于是每一个页内跳转、每一条脚注都落在空处。这个分支给链接加前缀的规则与清洗器给 id 加前缀完全一致——GitHub 两边就是配套改的——`<a id="s2">` 和 `[S2](#s2)` 渲染后仍然对得上。指向应用自身元素的链接依旧够不着，那是防护在起作用，不算毛病。原版只有这条规则的一半，只改 id（[hast-util-sanitize](https://github.com/syntax-tree/hast-util-sanitize)）。（[说明](./docs/agents/sessions.md#hand-written-anchors-in-rendered-markdown-land-libmarkdownts-rehypematchclobberedids)）
-
 **删除会带走会话在别处留下的东西。** 隔离运行的 subagent 在自己的 git worktree 里工作，它的会话文件因此记在那个 worktree 路径下，自成目录。删除父会话时会通读整个 sessions 根目录去找这样的子会话，连它一起删，并把留下来的重新挂到最近一个仍然存在的祖先。被删空的东西也跟着走：它清空的目录，还有你在应用外删掉某个项目目录之后侧栏仍替它保有的位置和名称。原版寻找子会话、也寻找该改挂谁，只看被删文件所在的那些目录。（[说明](./docs/agents/sessions.md#session-sidebar-project-groups-pins-and-archive)）
 
 **解析不了的 settings 文件会报出自己的路径。** 读取全局 `settings.json` 的那些面板在报错时把文件路径一并带上，于是这条诊断直接指向要修的文件，而不是只把解析器的话重复一遍。文件原地不动：pi 读的是同一个文件，它继续报同一个错，并且拒绝一切写入，直到你手动把它修好。原版同样拒绝这些写入、同样把文件留在原地，只是它的报错里没有文件名。（[说明](./docs/agents/tools.md)）
@@ -146,6 +142,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 ### 不算 fork 差异的部分
 
 下面这些来自上游，本仓库有它们只是因为上游写了它们：让「停止」不落在「压缩」接手的格子里、以免误双击（`0a38de9`，[#1131](https://github.com/agegr/pi-web/pull/1131)）；从标题折叠自定义消息（`574cbba`，[#1133](https://github.com/agegr/pi-web/pull/1133)）；已删除的子代理 worktree 改从它分叉出来的仓库回答（`f9a370e`，[#1137](https://github.com/agegr/pi-web/pull/1137)）；由 profile 决定子代理的启动参数（`fb6df88`，[#1138](https://github.com/agegr/pi-web/pull/1138)）；以及文件预览里的 CSV/TSV 表格（`f87afbb`，[#1150](https://github.com/agegr/pi-web/pull/1150)）。本 README 的早期版本把这些算成了 fork 的工作，现在不再这样写。
+
+上游后来又收走了这个分支的三项：手机上以单栏打开的 patch（`408230c`，[#1325](https://github.com/agegr/pi-web/pull/1325)）、按行显示的工具参数（`083fd11`，[#1324](https://github.com/agegr/pi-web/pull/1324)），以及落在自己文档里的页内片段链接（`2cefb72`，[#1323](https://github.com/agegr/pi-web/pull/1323)）。上一次同步之后上游写的其余部分同样照单全收：浏览器测试在断点变化后等侧栏开关稳定（`a26d85f`，[#1326](https://github.com/agegr/pi-web/pull/1326)）、会话搜索覆盖改名与自动生成的标题（`7c0778a`，[#1318](https://github.com/agegr/pi-web/pull/1318)）、手机上「引导」与「后续消息」各占一行（`628d6ac`，[#1330](https://github.com/agegr/pi-web/pull/1330)）、引用末尾保留光标（`bc762a3`，[#1319](https://github.com/agegr/pi-web/pull/1319)），以及桌面上新建会话后输入框直接拿到焦点（`12b157d`，[#1313](https://github.com/agegr/pi-web/pull/1313)）。
 
 其余没有列出的部分——会话、文件、Git、worktree、模型、MCP、扩展——都是上游代码，行为与原版描述一致。侧边栏的整体摆法也一样是上游的，而且是在本分支存在期间改掉的：桌面上文件栏放在会话列表下面、或者单独占一个标签页，项目分组用分区式标题，文件栏可折叠也可拖动，28px 行高、文件键按标签页的顺序排（`3fe257f`、`4fa6799`、`02532c3`、`0066d5f`、`51dda7c`、`cae6201`）；空白新会话页上，品牌字样位于项目与 worktree 选择器之上（`e2fe4fb`）。
 
