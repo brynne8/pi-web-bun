@@ -46,10 +46,10 @@ export function toGitPath(filePath: string): string {
 }
 
 async function readStatusEntries(
-  repositoryRoot: string,
+  directory: string,
   gitConfig: readonly string[] = [],
 ): Promise<GitPorcelainEntry[]> {
-  const output = await git(repositoryRoot, [
+  const output = await git(directory, [
     ...gitConfig,
     "status",
     "--porcelain=v1",
@@ -59,21 +59,23 @@ async function readStatusEntries(
   return parseGitPorcelainV1(output);
 }
 
+/**
+ * The line stats of the tracked changes under `cwd`. Git reports the paths
+ * relative to the repository root however it is asked, and `-- .` from the
+ * folder itself covers the same files as the root with that folder's path.
+ */
 async function readTrackedLineStats(
-  repositoryRoot: string,
   cwd: string,
 ): Promise<{ additions: number; deletions: number }> {
-  const relativeCwd = toGitPath(path.relative(repositoryRoot, cwd));
-  const pathspec = relativeCwd || ".";
   try {
-    const output = await git(repositoryRoot, [
+    const output = await git(cwd, [
       "diff",
       "--no-color",
       "--no-ext-diff",
       "--numstat",
       "HEAD",
       "--",
-      pathspec,
+      ".",
     ]);
     let additions = 0;
     let deletions = 0;
@@ -91,21 +93,89 @@ async function readTrackedLineStats(
   }
 }
 
+/**
+ * The lines an untracked file holds, remembered while the file is unchanged.
+ * A file's size, times and inode say whether its bytes are the ones that were
+ * counted, so an unchanged file is not read again on the next scan. The
+ * listing itself is never remembered: it is read from Git on every request.
+ */
+interface UntrackedLineCount {
+  size: bigint;
+  mtimeNs: bigint;
+  ctimeNs: bigint;
+  ino: bigint;
+  lines: number;
+}
+
+const untrackedLineCounts = new Map<string, UntrackedLineCount>();
+const MAX_UNTRACKED_LINE_COUNTS = 2048;
+// A file is only remembered once it has been quiet for this long, and a
+// remembered file is only trusted while it is quiet for this long: a
+// filesystem with coarse timestamps (a second, or two) can leave a rewritten
+// file's times where they were, and a file's own change time is the signal,
+// because a program cannot set it back. The window is the coarsest timestamp a
+// filesystem reports, so a later change always carries a later stamp.
+const RECENT_FILE_MS = 2_000;
+
 function countUntrackedTextLines(filePath: string): number {
   try {
-    const stat = fs.lstatSync(filePath);
-    if (!stat.isFile() || stat.size > TEXT_PREVIEW_MAX_BYTES) return 0;
+    const stat = fs.lstatSync(filePath, { bigint: true });
+    if (!stat.isFile() || stat.size > BigInt(TEXT_PREVIEW_MAX_BYTES)) return 0;
+    const remembered = untrackedLineCounts.get(filePath);
+    if (
+      remembered
+      && remembered.size === stat.size
+      && remembered.mtimeNs === stat.mtimeNs
+      && remembered.ctimeNs === stat.ctimeNs
+      && remembered.ino === stat.ino
+    ) {
+      // A remembered file stays in the map, and moves to its end.
+      untrackedLineCounts.delete(filePath);
+      untrackedLineCounts.set(filePath, remembered);
+      return remembered.lines;
+    }
     const content = fs.readFileSync(filePath);
     if (hasNullByte(content) || content.length === 0) return 0;
-    const text = content.toString("utf8");
-    return text.endsWith("\n") ? text.split("\n").length - 1 : text.split("\n").length;
+    // The lines of a text file are its newlines, and a last line without one
+    // counts as a line of its own.
+    let newlines = 0;
+    for (let i = 0; i < content.length; i++) if (content[i] === 10) newlines++;
+    const lines = content[content.length - 1] === 10 ? newlines : newlines + 1;
+    // Only a file that has been quiet for a while is remembered: a change to it
+    // after this point carries a later stamp, and is therefore seen.
+    if (Date.now() - Number(stat.ctimeNs) / 1e6 >= RECENT_FILE_MS) {
+      untrackedLineCounts.set(filePath, {
+        size: stat.size,
+        mtimeNs: stat.mtimeNs,
+        ctimeNs: stat.ctimeNs,
+        ino: stat.ino,
+        lines,
+      });
+      while (untrackedLineCounts.size > MAX_UNTRACKED_LINE_COUNTS) {
+        const oldest = untrackedLineCounts.keys().next().value;
+        if (oldest === undefined) break;
+        untrackedLineCounts.delete(oldest);
+      }
+    }
+    return lines;
   } catch {
     return 0;
   }
 }
 
 export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
-  const repositoryRoot = await findRepositoryRoot(cwd);
+  // The three Git commands do not depend on each other, so they run at once:
+  // the repository root, the status listing and the line stats of the tracked
+  // changes. Git names its paths by the repository root however it is asked, so
+  // asking from the folder itself answers what asking from the root does.
+  const [repositoryRoot, statusResult, trackedLineStats] = await Promise.all([
+    findRepositoryRoot(cwd),
+    readStatusEntries(cwd).then(
+      (entries) => ({ entries }),
+      (error: unknown) => ({ error }),
+    ),
+    readTrackedLineStats(cwd),
+  ]);
   if (!repositoryRoot) {
     return {
       isGitRepository: false,
@@ -115,17 +185,14 @@ export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
       deletions: 0,
     };
   }
-
-  const [entries, trackedLineStats] = await Promise.all([
-    readStatusEntries(repositoryRoot),
-    readTrackedLineStats(repositoryRoot, resolveExistingPath(cwd)),
-  ]);
+  if ("error" in statusResult) throw statusResult.error;
+  const entries = statusResult.entries;
   // Git names the repository by its real path, while the caller asked about a cwd that
   // may reach it through a link (`/tmp` and `/var/folders/…` are links on macOS). Every
   // path reported here is therefore rebased onto the cwd as given: the file tree lists
   // what it was given, and a row can only carry its change if the two spell the path
   // the same way. `repositoryRoot` stays what Git says, since it is the repository's own
-  // name and is where the git commands run.
+  // name.
   const resolvedCwd = resolveExistingPath(cwd);
   const files = entries.flatMap((entry): GitFileStatus[] => {
     const relativeToCwd = path.relative(resolvedCwd, path.resolve(repositoryRoot, entry.path));

@@ -223,17 +223,17 @@ test("Code mode reports the global preference and a self-test nobody has run yet
   await writeFile(settingsPath, "{ not json");
   const response = await get();
   assert.equal(response.status, 200, "an unreadable settings file does not fail the listing");
-  // The first read of the corrupt file moves it to a timestamped backup and reports
-  // that. The reads after it see no file, so they show pi's defaults.
+  // The corrupt file is pi's own, so it stays where it is: every read of it
+  // reports the same failure, naming the file, and pi keeps its own error.
   assert.equal(response.body.codemode.preference, undefined);
-  assert.match(response.body.codemode.preferenceError, /preserved as .*settings\.json\.broken-/);
-  assert.deepEqual(response.body.codemode.mode, { settingsPath, value: "on" });
-  assert.equal(response.body.codemode.modeError, undefined);
-  assert.deepEqual(response.body.codemode.inlineBudget, { settingsPath, default: 3000, max: 1_000_000 });
-  assert.equal(response.body.codemode.inlineBudgetError, undefined);
-  const backups = (await readdir(agentDir)).filter((name) => name.startsWith("settings.json.broken-"));
-  assert.equal(backups.length, 1);
-  assert.equal(existsSync(settingsPath), false);
+  assert.match(response.body.codemode.preferenceError, new RegExp(`${settingsPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: `));
+  assert.match(response.body.codemode.preferenceError, /JSON Parse error/);
+  assert.equal(response.body.codemode.mode, undefined);
+  assert.equal(response.body.codemode.modeError, response.body.codemode.preferenceError);
+  assert.equal(response.body.codemode.inlineBudget, undefined);
+  assert.equal(response.body.codemode.inlineBudgetError, response.body.codemode.preferenceError);
+  assert.deepEqual((await readdir(agentDir)).filter((name) => name.startsWith("settings.json.")), []);
+  assert.equal(existsSync(settingsPath), true);
   assert.deepEqual(response.body.servers.map((server) => server.name), ["docs", "shared"]);
 });
 

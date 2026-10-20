@@ -20,11 +20,9 @@ const jiti = createJiti(import.meta.url, {
 });
 const { GET } = await jiti.import("./route.ts");
 const { allowFileRoot } = await jiti.import("../../../../lib/file-access.ts");
-const { invalidateGitStatusCache } = await jiti.import("../../../../lib/git-status-cache.ts");
 const { NextRequest } = await jiti.import("next/server");
 
 test.after(() => {
-  invalidateGitStatusCache();
   if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
   else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
   globalThis.__piAllowedRootsCache = previousRootsCache;
@@ -75,8 +73,7 @@ test("answers the listing the sidebar consumes", async () => {
   assert.equal(body.deletions, 1);
 });
 
-test("reuses one scan inside the TTL, never across projects, and invalidates eagerly", async () => {
-  invalidateGitStatusCache();
+test("every request answers for the tree as it is now", async () => {
   const root = fixture();
   const other = fixture();
 
@@ -92,16 +89,14 @@ test("reuses one scan inside the TTL, never across projects, and invalidates eag
     "a second cwd is never served the first cwd's listing",
   );
 
-  // The scan is what is cached: a file added inside the TTL does not appear...
-  fs.writeFileSync(path.join(root, "added-inside-ttl.txt"), "new\n");
-  const cached = await request(root);
-  assert.deepEqual(cached.body, first.body);
-
-  // ...until the write invalidates it, which is what an upload or a revert does.
-  invalidateGitStatusCache();
-  const rescanned = await request(root);
+  // A file written since the last listing is in the next answer: the changed-file
+  // badges are what the reloads are for, so a listing older than the request is
+  // not one.
+  fs.writeFileSync(path.join(root, "added-after.txt"), "new\n");
+  const next = await request(root);
   assert.ok(
-    rescanned.body.files.some((file) => file.filePath === path.join(root, "added-inside-ttl.txt")),
-    "an invalidated listing rescans",
+    next.body.files.some((file) => file.filePath === path.join(root, "added-after.txt")),
+    "a file written since the last listing shows up in the next answer",
   );
+  assert.notDeepEqual(next.body, first.body);
 });

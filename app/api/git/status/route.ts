@@ -2,7 +2,6 @@ import fs from "fs";
 import { NextRequest, NextResponse } from "next/server";
 import { getAllowedFileRoots, isExistingFilePathAllowed, isFilePathAllowed, isWindowsAbsolutePath } from "@/lib/file-access";
 import { getGitStatus } from "@/lib/git-changes";
-import { loadGitStatusWithCache } from "@/lib/git-status-cache";
 
 export async function GET(request: NextRequest) {
   try {
@@ -29,8 +28,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 
-    // The allow-list checks above run per request; only the scan itself is cached.
-    return NextResponse.json(await loadGitStatusWithCache(cwd, () => getGitStatus(cwd)));
+    // The scan answers for the tree as it is now: the changed-file badges are
+    // what the reloads are for, so a listing older than the request is not one.
+    return NextResponse.json(await getGitStatus(cwd));
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }

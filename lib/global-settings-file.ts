@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import lockfile from "proper-lockfile";
@@ -15,35 +15,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * Move a settings file that does not parse to a timestamped `.broken-*`
- * sibling, the way oh-my-pi archives a hand-edit mistake: the bytes are kept
- * and the problem is visible, rather than read as an empty configuration.
- */
-function backupCorruptSettings(path: string): string {
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  let backup = `${path}.broken-${stamp}`;
-  // Two failures inside one millisecond must not overwrite each other's bytes.
-  for (let n = 1; existsSync(backup); n++) backup = `${path}.broken-${stamp}-${n}`;
-  renameSync(path, backup);
-  return backup;
-}
-
-function corruptSettingsError(path: string, cause: unknown): Error {
-  const backup = backupCorruptSettings(path);
-  const reason = cause instanceof Error ? cause.message : String(cause);
-  return new Error(`Invalid settings.json: ${reason}; the file was preserved as ${backup}`);
-}
-
 function parseSettings(path: string): Record<string, unknown> {
   if (!existsSync(path)) return {};
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(path, "utf8"));
   } catch (error) {
-    throw corruptSettingsError(path, error);
+    // The file is pi's own, and pi reads it too: it stays where it is, so pi
+    // keeps reporting the same failure and the user can repair it by hand.
+    // The path is in the message, because the parser's text alone does not say
+    // which file is broken.
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new SyntaxError(`${path}: ${reason}`);
   }
-  if (!isRecord(parsed)) throw corruptSettingsError(path, new Error("expected an object"));
+  if (!isRecord(parsed)) throw new Error("Invalid settings.json: expected an object");
   return parsed;
 }
 
@@ -75,8 +60,8 @@ export async function readGlobalSettings<T>(
 
 /**
  * Change the settings under the lock and write them back with mode 0600. `update`
- * mutates the object it is given; a file that does not parse is preserved as a
- * `.broken-*` sibling and the write is refused, so the edit is never applied.
+ * mutates the object it is given; a file that does not parse is left untouched
+ * and the write is refused, so the edit is never applied.
  */
 export async function updateGlobalSettings<T>(
   settingsPath: string,

@@ -139,6 +139,10 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **删除会带走会话在别处留下的东西。** 隔离运行的 subagent 在自己的 git worktree 里工作，它的会话文件因此记在那个 worktree 路径下，自成目录。删除父会话时会通读整个 sessions 根目录去找这样的子会话，连它一起删，并把留下来的重新挂到最近一个仍然存在的祖先。被删空的东西也跟着走：它清空的目录，还有你在应用外删掉某个项目目录之后侧栏仍替它保有的位置和名称。原版寻找子会话、也寻找该改挂谁，只看被删文件所在的那些目录。（[说明](./docs/agents/sessions.md#session-sidebar-project-groups-pins-and-archive)）
 
+**解析不了的 settings 文件会报出自己的路径。** 读取全局 `settings.json` 的那些面板在报错时把文件路径一并带上，于是这条诊断直接指向要修的文件，而不是只把解析器的话重复一遍。文件原地不动：pi 读的是同一个文件，它继续报同一个错，并且拒绝一切写入，直到你手动把它修好。原版同样拒绝这些写入、同样把文件留在原地，只是它的报错里没有文件名。（[说明](./docs/agents/tools.md)）
+
+**改动清单不用再看一遍目录树。** 侧边栏的 Git 清单每次刷新都重新从 Git 读，所以它显示的就是此刻的目录树。问 Git 的三个问题——仓库根目录、状态、改动行数——是一起发出的，不是一个接一个；未跟踪文件的行数只数一遍，文件没变就留着这个结果，所以未跟踪文件很多的仓库也能很快作答。原版把同样的问题一个接一个地问，并且每次刷新都把所有未跟踪文件重数一遍。（[说明](./docs/agents/files-and-access.md#when-the-file-tree-reloads)）
+
 ### 不算 fork 差异的部分
 
 下面这些来自上游，本仓库有它们只是因为上游写了它们：让「停止」不落在「压缩」接手的格子里、以免误双击（`0a38de9`，[#1131](https://github.com/agegr/pi-web/pull/1131)）；从标题折叠自定义消息（`574cbba`，[#1133](https://github.com/agegr/pi-web/pull/1133)）；已删除的子代理 worktree 改从它分叉出来的仓库回答（`f9a370e`，[#1137](https://github.com/agegr/pi-web/pull/1137)）；由 profile 决定子代理的启动参数（`fb6df88`，[#1138](https://github.com/agegr/pi-web/pull/1138)）；以及文件预览里的 CSV/TSV 表格（`f87afbb`，[#1150](https://github.com/agegr/pi-web/pull/1150)）。本 README 的早期版本把这些算成了 fork 的工作，现在不再这样写。

@@ -3,7 +3,6 @@ import fs from "fs";
 import path from "path";
 import { promisify } from "util";
 import { getGitStatus, isWithinPath, toGitPath } from "./git-changes";
-import { invalidateGitStatusCache } from "./git-status-cache";
 import { resolveExistingPath } from "./paths";
 import { isGitPathRevertible, type GitRevertRefusal } from "./git-revert-rule";
 
@@ -139,8 +138,5 @@ export async function revertGitPath(cwd: string, filePath: string): Promise<GitR
     return refuse("failed", gitErrorText(error));
   }
 
-  // The listing the caller refetches after a revert must not be the one cached
-  // before the checkout.
-  invalidateGitStatusCache();
   return { reverted: true, filePath: entry.filePath };
 }

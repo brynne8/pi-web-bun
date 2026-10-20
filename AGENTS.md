@@ -166,6 +166,7 @@ lib/
   default-cwd.ts            dated ~/pi-cwd/YYYYMMDD path for "Use default directory"
   home-dir.ts               homeDir(): $HOME before the user database, which is all Bun's os.homedir() reads
   worktree.ts               project/worktree resolution and git worktree operations
+  git-changes.ts            the working tree's listing: the status, the line counts, and the untracked files' lines
   git-revert.ts             one changed file back to HEAD (the file row's Revert), with its refusals
   git-revert-rule.ts        client-safe: which changed file the Revert offers, read by the menu and the server
   git-revert-request.ts     the row's revert request and how its answer becomes a toast

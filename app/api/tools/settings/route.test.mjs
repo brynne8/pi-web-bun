@@ -160,30 +160,27 @@ test("keeps the PowerShell switch Windows-only", { skip: isWindows }, async () =
   assert.equal((await response.json()).reason, "invalid-request");
 });
 
-test("preserves a settings file it cannot parse as a timestamped backup instead of overwriting it", async () => {
+test("refuses to write over a settings file it cannot parse, and leaves it where it is", async () => {
   await writeFile(settingsPath, "{ not json");
   const read = await GET();
   assert.equal(read.status, 500);
   const readRefusal = await read.json();
   assert.equal(readRefusal.reason, "internal");
-  // The panel shows the diagnostic of an internal failure, naming the backup.
-  assert.match(readRefusal.error, /Invalid settings\.json: .*preserved as .*settings\.json\.broken-/);
+  // The panel shows the diagnostic of an internal failure, naming the file.
+  assert.match(readRefusal.error, new RegExp(`${settingsPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: `));
+  assert.match(readRefusal.error, /JSON Parse error/);
 
-  const backups = (await readdir(agentDir)).filter((name) => name.startsWith("settings.json.broken-"));
-  assert.equal(backups.length, 1);
-  assert.match(backups[0], /^settings\.json\.broken-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/);
-  assert.equal(await readFile(path.join(agentDir, backups[0]), "utf8"), "{ not json");
-  assert.deepEqual(await readdir(agentDir), backups);
+  // The file is pi's own, and pi reads it too: it stays where it is, so pi keeps
+  // reporting the same failure and the user can repair it by hand.
+  assert.deepEqual((await readdir(agentDir)).filter((name) => name.startsWith("settings.json.")), []);
+  assert.equal(await readFile(settingsPath, "utf8"), "{ not json");
+  assert.equal((await GET()).status, 500);
 
-  // The bad file is out of the way, so the next read starts from an empty configuration.
-  assert.equal((await GET()).status, 200);
-
-  // A write against a corrupt file is refused the same way, and preserves it too.
-  await writeFile(settingsPath, "{ not json");
+  // A write against a corrupt file is refused the same way.
   const write = await put({ codemode: "always" });
   assert.equal(write.status, 500);
   const writeRefusal = await write.json();
   assert.equal(writeRefusal.reason, "internal");
-  assert.match(writeRefusal.error, /preserved as/);
-  assert.equal((await readdir(agentDir)).filter((name) => name.startsWith("settings.json.broken-")).length, 2);
+  assert.match(writeRefusal.error, /JSON Parse error/);
+  assert.equal(await readFile(settingsPath, "utf8"), "{ not json");
 });
