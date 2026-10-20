@@ -227,7 +227,10 @@ test("Code mode reports the global preference and a self-test nobody has run yet
   // reports the same failure, naming the file, and pi keeps its own error.
   assert.equal(response.body.codemode.preference, undefined);
   assert.match(response.body.codemode.preferenceError, new RegExp(`${settingsPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: `));
-  assert.match(response.body.codemode.preferenceError, /JSON Parse error/);
+  // The parser's wording is the engine's — V8 names the token it expected, JavaScriptCore
+  // says `JSON Parse error` — so what is pinned is the file named first (above) and
+  // JSON blamed, never one engine's phrasing (docs/agents/tests.md).
+  assert.match(response.body.codemode.preferenceError, /JSON/);
   assert.equal(response.body.codemode.mode, undefined);
   assert.equal(response.body.codemode.modeError, response.body.codemode.preferenceError);
   assert.equal(response.body.codemode.inlineBudget, undefined);

@@ -166,9 +166,12 @@ test("refuses to write over a settings file it cannot parse, and leaves it where
   assert.equal(read.status, 500);
   const readRefusal = await read.json();
   assert.equal(readRefusal.reason, "internal");
-  // The panel shows the diagnostic of an internal failure, naming the file.
+  // The panel shows the diagnostic of an internal failure, naming the file. The
+  // parser's own wording is the engine's — V8 names the token it expected, JavaScriptCore
+  // says `JSON Parse error` — so only the file named first and JSON blamed are pinned,
+  // never one engine's phrasing (docs/agents/tests.md).
   assert.match(readRefusal.error, new RegExp(`${settingsPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: `));
-  assert.match(readRefusal.error, /JSON Parse error/);
+  assert.match(readRefusal.error, /JSON/);
 
   // The file is pi's own, and pi reads it too: it stays where it is, so pi keeps
   // reporting the same failure and the user can repair it by hand.
@@ -181,6 +184,6 @@ test("refuses to write over a settings file it cannot parse, and leaves it where
   assert.equal(write.status, 500);
   const writeRefusal = await write.json();
   assert.equal(writeRefusal.reason, "internal");
-  assert.match(writeRefusal.error, /JSON Parse error/);
+  assert.match(writeRefusal.error, /settings\.json: .*JSON/);
   assert.equal(await readFile(settingsPath, "utf8"), "{ not json");
 });
