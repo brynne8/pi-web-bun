@@ -46,12 +46,11 @@ export function writePrivateFileAtomicSync(path: string, contents: string): void
 }
 
 /**
- * Replace a session file atomically at pi's own permissions: an existing file
- * keeps the mode it has, and a new one takes pi's 0644 default (through the
- * umask, as pi creates them) rather than the private 0600. `exclusive` keeps
- * the `flag: "wx"` guarantee for the fresh-id copies pi-web writes itself: the
- * replacement refuses a destination that already exists instead of clobbering
- * it. The caller must create the parent directory first.
+ * Replace a session file atomically at pi's own permissions: an existing file keeps
+ * its mode, a new one takes pi's 0644 default through the umask, as pi creates them,
+ * not the private 0600. `exclusive` keeps the `flag: "wx"` guarantee for the
+ * fresh-id copies pi-web writes itself: the replacement refuses a destination that
+ * already exists. The caller must create the parent directory first.
  */
 export function writeSessionFileAtomicSync(
   path: string,

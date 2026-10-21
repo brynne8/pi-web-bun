@@ -86,7 +86,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 | 运行时 | Node.js 22.19.0+ | Bun 1.4.2+ |
 | 内置终端 | 通过 `node-pty` 正常工作 | 通过一层薄薄的 node-pty 兼容封装使用 Bun 原生 PTY（见下，另见 [docs/terminal.md](./docs/terminal.md)） |
 | SDK 包解析 | `node:module` 的 `findPackageJSON()` | `lib/pi-sdk-internals.ts` 里的 `findPackageManifest()` 向上遍历 `node_modules`，因为 Bun 不实现 `node:module` 的任何具名导出 |
-| 用户目录 | `os.homedir()` | 先看 `$HOME`（`lib/home-dir.ts` 的 `homeDir()`）——agent 目录、默认 cwd、目录浏览器的根、路径里的 `~`，以及 HTTP dispatcher 读超时所在的 agent 目录 |
+| 用户目录 | `os.homedir()` | 先看 `$HOME`，再回落到用户数据库（`lib/home-dir.ts` 的 `homeDir()`），因为 Bun 的 `os.homedir()` 会忽略 `$HOME`——agent 目录、默认 cwd、目录浏览器的根、路径里的 `~`，以及 HTTP dispatcher 读超时所在的 agent 目录。Windows 上通常没有 `$HOME`，所以那里同样走用户数据库 |
 | 技能安装 | `npx skills add …` | `bun x skills add …` |
 | 插件更新检查 | `npm view … version --json` | `bun pm view … version --json` |
 | 测试套件 | Node 运行器（`npm test`） | 两种运行器都跑、都绿：`bun test` 与 `npm test` |

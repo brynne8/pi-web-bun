@@ -274,11 +274,9 @@ function projectFolderOf(state: SessionUiState, key: string): string | null {
 
 /**
  * Whether a project's folder is gone. `lstat`, as `lib/project-trust.ts` reads
- * a folder: only "no such file" (ENOENT, or ENOTDIR, a parent that became a
- * file) says so. A dangling link, a FIFO or a folder this process may not read
- * (EACCES, ELOOP, a name too long) stays: none of those says the user deleted
- * anything, and this is the one change no undo can undo — pruning is for a
- * folder that is really not there, and an existing one keeps its slot and name.
+ * a folder: only "no such file" says so — ENOENT, or ENOTDIR, a parent that
+ * became a file. Everything else keeps its slot and name: this is the one
+ * change no undo can undo.
  */
 function projectFolderGone(path: string): boolean {
   try {
@@ -286,6 +284,8 @@ function projectFolderGone(path: string): boolean {
     return false;
   } catch (error) {
     const code = errorCode(error);
+    // A dangling link, a FIFO or a folder this process may not read (EACCES,
+    // ELOOP, a name too long): none of those says the user deleted anything.
     return code === "ENOENT" || code === "ENOTDIR";
   }
 }
@@ -312,12 +312,8 @@ function goneProjectKeys(state: SessionUiState): string[] {
 }
 
 /**
- * Removes those session entries and, with them, everything the state holds for
- * a project whose folder no longer exists: its pin, its place in `projectOrder`
- * and its display name. Without that a throwaway default directory
- * (`~/pi-cwd/YYYYMMDD`, which users delete) keeps its row in the order forever
- * and the file never shrinks.
- *
+ * Removes those session entries and, with them, the pin, the `projectOrder`
+ * place and the display name of every project whose folder no longer exists.
  * No-op — no lock, nothing created — when nothing is forgotten: no session
  * entry present and no project folder gone. The `lstat`s are all that costs.
  * A file that cannot be read throws here: the locked read could not do better.
@@ -332,6 +328,9 @@ export async function forgetSessionUiState(ids: Iterable<string>, path?: string)
   });
   const before = forgets(loadState(target));
   if (!before.ids && before.gone.length === 0) return;
+  // Without this, a throwaway default directory (`~/pi-cwd/YYYYMMDD`, which
+  // users delete) keeps its row in the order forever and the file never
+  // shrinks.
   await editState(target, (state) => {
     const now = forgets(state);
     if (!now.ids && now.gone.length === 0) return { state, changed: false };

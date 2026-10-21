@@ -704,17 +704,11 @@ export class AgentSessionWrapper {
   }
 
   /**
-   * Stop's retract. A run stopped before it said anything leaves its own prompt in the
-   * transcript with an empty aborted reply under it and no run left to answer it. Navigating to
-   * that prompt is pi's own way back: the leaf moves to the prompt's parent, so the prompt and
-   * its empty reply leave both the transcript and the model's context, and pi hands the text
-   * back the way its TUI puts it in the editor.
-   *
-   * Only the pair this Stop unwinds is retracted: the leaf must be an aborted reply with no
-   * words in it, hanging off the leaf that was current when Stop arrived. `leafAtStop` is
-   * `undefined` when that could not be read, and `null` for a session with no entries yet, whose
-   * prompt is then the file's root. Refusing is always the safe answer, so nothing here may
-   * fail the Stop that called it.
+   * Stop's retract. A run stopped before it said anything leaves its own prompt in the transcript
+   * with an empty aborted reply under it and no run left to answer it. Navigating to that prompt
+   * is pi's own way back: the leaf moves to the prompt's parent, so the pair leaves the transcript
+   * and the model's context, and pi hands the text back the way its TUI puts it in the editor.
+   * Only the pair this Stop unwinds is retracted; refusing is always the safe answer.
    */
   private async retractUnansweredPrompt(
     leafAtStop: string | null | undefined,

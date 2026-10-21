@@ -68,12 +68,11 @@ function addChild(childrenByParent: Map<string, string[]>, parentId: string, chi
 }
 
 /**
- * Every `.jsonl` under the sessions root, one project folder at a time — the
- * same walk `lib/session-list-scanner.ts` does for the catalogue (its helper
- * is private and async, so this is the synchronous twin, with the same
- * semantics: project dirs and symlinks to them, unreadable folders skipped as
- * absent, and nothing thrown at the caller). Every folder it listed goes in
- * `listedDirs`, so a later folder scan asks for a folder no twice.
+ * Every `.jsonl` under the sessions root, one project folder at a time: the
+ * synchronous twin of the walk `lib/session-list-scanner.ts` does for the
+ * catalogue (its helper is private and async), same semantics — project dirs
+ * and symlinks to them, unreadable folders skipped as absent, nothing thrown
+ * at the caller. Listed folders go in `listedDirs`, so none is read twice.
  */
 function enumerateSessionFiles(sessionsDir: string, listedDirs: Set<string>): string[] {
   let entries: Dirent[];
@@ -166,16 +165,11 @@ export async function deleteSessions(
     }
   }
   const sessionPaths = new Map(sessions.map((session) => [session.id, session.path]));
-  // Include local files even when the global catalogue is stale or incomplete
-  // — and look through the whole sessions root, not just the folders the
-  // delete names: a subagent run with `isolation` gets a git worktree as its
-  // cwd (`lib/subagent-runtime.ts`), so its file sits in the folder encoded
-  // from that worktree path, a different folder from its parent's. A
-  // folder-local scan left that child behind pointing at a deleted parent
-  // whenever the catalogue missed the folder. The folders the delete itself
-  // names stay in view on top of the root listing: a cached or transient path
-  // can name a folder outside the root, which is what the folder-local scan
-  // used to cover.
+  // Local files count even when the catalogue is stale, and the scan covers the
+  // whole sessions root: a subagent run with `isolation` gets a worktree as its
+  // cwd (`lib/subagent-runtime.ts`), so its file sits in that worktree's folder
+  // and a folder-local scan left it pointing at a deleted parent. The named
+  // folders are listed on top: a cached or transient path may sit outside.
   const sessionsRoot = join(getAgentDir(), "sessions");
   const listedDirs = new Set<string>();
   const scannedFiles = enumerateSessionFiles(sessionsRoot, listedDirs);
@@ -187,9 +181,8 @@ export async function deleteSessions(
   // The scan stays bounded: a body is read only for a file whose bounded
   // header names a parent this delete could take away — a family member by
   // the catalogue or a child the scan itself just found, so a missed child's
-  // own children, in yet another folder, are found too. The scan repeats
-  // while the family still grows; every repeat is pure memory for files
-  // already looked at, and a file's body is read at most once either way.
+  // own children, in yet another folder, are found too. It repeats while the
+  // family still grows; a body is read at most once, a repeat pure memory.
   const familyPathKeys = new Set(targetPathKeys);
   const bodyByKey = new Map<string, string[]>();
   const seededIds = new Set<string>();
@@ -291,10 +284,9 @@ export async function deleteSessions(
   if (deletedPaths.size > 0) {
     // The same enumerated listing, so a surviving child is found wherever it
     // sits: an isolated run's file lives in its worktree's folder, not its
-    // parent's. A deleted file outside the sessions root adds its own folder,
-    // as the folder-local scan did. Headers and bodies come from the scan's
-    // caches where already read, so this pass opens a given file no more than
-    // once per delete.
+    // parent's. A deleted file outside the sessions root adds its own folder.
+    // Headers and bodies come from the scan's caches where already read, so
+    // this pass opens a given file no more than once per delete.
     const reParentFiles = [...scannedFiles];
     for (const deletedPath of deletedPaths.values()) {
       const dir = dirname(deletedPath);

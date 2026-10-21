@@ -34,13 +34,11 @@ interface Props extends ReadSnapshot {
 }
 
 /**
- * The exact slice one `read` tool call returned, in a right-panel tab.
- *
- * Not the file: what the model was shown, kept from the chat. A markdown slice
- * renders as markdown with Source one click away, a delimited one as the same
- * table the file viewer uses (numbered by the file's lines, not the slice's),
- * everything else as highlighted source whose gutter continues from the read's
- * offset. The source view wraps by the file's kind, as the file viewer does.
+ * The exact slice one `read` tool call returned, in a right-panel tab: not
+ * the file, but what the model was shown, kept from the chat. A markdown
+ * slice renders as markdown with Source one click away, a delimited one as
+ * the file viewer's table numbered by the file's lines, everything else as
+ * highlighted source wrapping by kind with its gutter from the read's offset.
  */
 export function ReadSnapshotViewer({ filePath, content, offset, toolCallId, onOpenFile }: Props) {
   const { t } = useI18n();

@@ -73,11 +73,6 @@ export function isLoopbackHost(host: string | null | undefined): boolean {
 
 /**
  * Opens a directory, or reveals a file, in the OS file manager.
- *
- * On macOS, `open` launches an `.app` bundle instead of showing it, so callers
- * using the default `open` view should only pass project directories such as the
- * explorer root. A `reveal` passes `open -R`, which shows the bundle in Finder
- * without running it.
  * @param target The directory to open, or the file to reveal (the caller checks access)
  * @param platform A Node `process.platform` value
  * @param view Whether to reveal one file rather than open a folder
@@ -90,6 +85,9 @@ export function launchFileManager(
 ): Promise<void> {
   const spec = fileManagerCommand(platform, target, view);
   if (!spec) return Promise.reject(new Error(`Unsupported platform: ${platform}`));
+  // On macOS `open` launches an `.app` bundle instead of showing it, so the default
+  // `open` view is for project directories such as the explorer root; only a `reveal`
+  // passes `open -R`, which shows the bundle in Finder without running it.
   return new Promise((resolve, reject) => {
     const child = spawn(spec.command, spec.args, { detached: true, stdio: "ignore" });
     // explorer.exe can exit with code 1 even on success, so only a failed spawn counts.

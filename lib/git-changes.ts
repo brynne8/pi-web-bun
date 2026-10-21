@@ -109,12 +109,11 @@ interface UntrackedLineCount {
 
 const untrackedLineCounts = new Map<string, UntrackedLineCount>();
 const MAX_UNTRACKED_LINE_COUNTS = 2048;
-// A file is only remembered once it has been quiet for this long, and a
-// remembered file is only trusted while it is quiet for this long: a
-// filesystem with coarse timestamps (a second, or two) can leave a rewritten
-// file's times where they were, and a file's own change time is the signal,
-// because a program cannot set it back. The window is the coarsest timestamp a
-// filesystem reports, so a later change always carries a later stamp.
+// A file is only remembered, and a remembered file only trusted, while it has
+// been quiet for this long: a filesystem with coarse timestamps (a second, or
+// two) can leave a rewritten file's times where they were, and a file's own
+// change time is the signal, since a program cannot set it back. The window is
+// the coarsest stamp a filesystem reports, so a later change always shows up.
 const RECENT_FILE_MS = 2_000;
 
 function countUntrackedTextLines(filePath: string): number {
@@ -187,12 +186,11 @@ export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
   }
   if ("error" in statusResult) throw statusResult.error;
   const entries = statusResult.entries;
-  // Git names the repository by its real path, while the caller asked about a cwd that
-  // may reach it through a link (`/tmp` and `/var/folders/…` are links on macOS). Every
-  // path reported here is therefore rebased onto the cwd as given: the file tree lists
-  // what it was given, and a row can only carry its change if the two spell the path
-  // the same way. `repositoryRoot` stays what Git says, since it is the repository's own
-  // name.
+  // Git names the repository by its real path, while the caller's cwd may reach
+  // it through a link (`/tmp` and `/var/folders/…` are links on macOS). Every
+  // path reported here is therefore rebased onto the cwd as given: the file tree
+  // lists what it was given, and a row carries its change only if the two spell
+  // the path alike; `repositoryRoot` stays Git's name, the repository's own.
   const resolvedCwd = resolveExistingPath(cwd);
   const files = entries.flatMap((entry): GitFileStatus[] => {
     const relativeToCwd = path.relative(resolvedCwd, path.resolve(repositoryRoot, entry.path));

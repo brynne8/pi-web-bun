@@ -41,14 +41,11 @@ function toolResultCallId(entry: PiSessionEntry): string | undefined {
 }
 
 /**
- * The recorded result of a trailing tool call, when it sits below the cut.
- *
- * A live leaf can point at an assistant message whose calls were answered
- * later on disk (a navigated branch): the copy would then end on a request
- * with no answer, and the model reads it as one. Walks the entries below
- * `tail` while they answer its calls, so the copy stops at the batch's end.
- * Undefined when nothing was recorded (a call still running): no result is
- * invented for it.
+ * The recorded result of a trailing tool call, when the answer sits below the
+ * cut: a live leaf can point at an assistant message whose calls were answered
+ * later on disk (a navigated branch), and the copy would end on a request with
+ * no answer, which the model reads as one. Walks the entries below `tail` while
+ * they answer its calls, to the batch's end; a still-running call gets none.
  */
 function recordedToolResultId(manager: SessionManager, tail: PiSessionEntry | undefined): string | undefined {
   const pending = requestedToolCallIds(tail);

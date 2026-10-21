@@ -73,11 +73,8 @@ interface MarkdownFragmentClick {
  * A click on a `#fragment` link in rendered Markdown: brings the element it
  * names into view within the same rendered document (the closest
  * `.markdown-body`), as the Skills reader does with its headings. The browser's
- * own jump searches the whole page, where every chat message with a footnote
- * has its own `user-content-user-content-fn-1` and the file preview sits beside
- * the chat, so it could land in another message; it would also put the
- * fragment in the app's URL as a history entry. Modified clicks stay the
- * browser's.
+ * own jump searches the whole page, where ids repeat across messages, and puts
+ * the fragment in the app's URL as a history entry. Modified clicks stay the browser's.
  */
 export function jumpToMarkdownFragment(event: MarkdownFragmentClick): void {
   if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -547,19 +544,9 @@ function remarkSplitAutolinkLiterals() {
 
 // Refuses a single-`$` pair that is not a formula, during tokenization, so the
 // opening `$` never becomes a delimiter and the text after it is scanned from
-// there. Two families of refusal, both on the pair's content:
-//
-// - A price (`$20 ... $6`, `$20 and $x$`) cannot open math: a price's next
-//   dollar would otherwise swallow the words up to the next formula, which is
-//   why this has to happen before pairing rather than on the parsed tree.
-//   Balanced padding ($ x + y $) and multiline math stay supported; a
-//   one-sided space next to an amount is prose.
-// - Prose that only looks like a formula (`$HOME …`, CJK punctuation, a
-//   sentence of CJK letters): see `isProseMathText()` in
-//   `lib/markdown-prose-math.ts`.
-//
-// The upstream tokenizer and resolver stay in charge of real math, code,
-// escapes and `$$`.
+// there: a price's next dollar would otherwise swallow the words up to the
+// next formula. Prose that only looks like a formula is refused by
+// `isProseMathText()` in `lib/markdown-prose-math.ts`.
 const remarkNotMathPairs: Plugin = function () {
   remarkMath.call(this);
   const data = this.data() as { micromarkExtensions?: Extension[] };
@@ -570,6 +557,8 @@ const remarkNotMathPairs: Plugin = function () {
     const tokenize = construct.tokenize;
     construct.tokenize = function (effects, ok, nok) {
       const start = this.now();
+      // Only the pair's content is judged below; the upstream tokenizer and
+      // resolver stay in charge of real math, code, escapes and `$$`.
       return tokenize.call(this, effects, (code) => {
         const source = this.sliceSerialize({ start, end: this.now() });
         if (source.startsWith("$") && !source.startsWith("$$")) {
@@ -578,6 +567,9 @@ const remarkNotMathPairs: Plugin = function () {
           const startsWithAmount = /^\s*[+-]?(?:\d|\.\d)/.test(content);
           const closesBeforeNumber = code !== null && code >= 48 && code <= 57;
           const mismatchedPadding = /^\s/.test(content) !== /\s$/.test(content);
+          // A price refuses the pair: an amount that closes before a number, or
+          // a one-sided space next to an amount, is prose. Balanced padding
+          // ($ x + y $) and multiline math stay supported.
           if (startsWithAmount && (closesBeforeNumber || mismatchedPadding)) return nok(code);
         }
         return ok(code);
@@ -669,24 +661,11 @@ interface SanitizedNode {
 }
 
 /**
- * GitHub rewrites both sides of a content anchor. cmark-gfm prefixes rendered
- * `id`s with `user-content-` (anti-clobber) and rewrites same-document fragment
- * links to match, so a hand-written pair like `<a id="toc"></a>` with
- * `[ToC](#toc)` still lands after rendering. `rehype-sanitize` copies only the
- * `id` half of that — `defaultSchema`'s `clobber` + `clobberPrefix` — which on
- * its own breaks every in-document anchor pair: the element gains the prefix
- * and the link pointing at it does not.
- *
- * This plugin runs after sanitizing and prefixes fragment links exactly as
- * unconditionally as sanitizing prefixes ids, so an id and an href that matched
- * before sanitizing still match afterwards. Footnote references need it for the
- * same reason: `mdast-util-to-hast` generates both their sides already prefixed
- * and sanitizing prefixes the id once more, so an unprefixed href would strand
- * the footnote link behind the doubled prefix.
- *
- * Links to page elements keep being unreachable from Markdown — that is the
- * clobber protection doing its job, not this plugin. A bare `#` has no fragment
- * to pair and stays as written.
+ * Prefixes same-document fragment links with `markdownClobberPrefix` after
+ * sanitizing, as unconditionally as `rehype-sanitize` prefixes ids, so an id
+ * and an href that matched before sanitizing still match afterwards. GitHub
+ * rewrites both sides. Footnote links, a bare `#`, and links to the page's own
+ * elements: docs/agents/sessions.md, "Hand-written anchors".
  */
 function rehypeMatchClobberedIds(): (tree: unknown) => void {
   return (tree: unknown): void => {

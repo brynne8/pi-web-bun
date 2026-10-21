@@ -33,15 +33,13 @@ export function createPendingNotificationsExtension(): InlineExtension {
     name: PENDING_NOTIFICATIONS_EXTENSION_NAME,
     hidden: true,
     factory: (pi) => {
-      // The reminder. A report waits for the run to end, which is the whole run — a model ten
-      // tool calls into a refactor learns about a finished build only when it stops. So at every
-      // turn boundary, while results are still waiting, one model-only line is steered: it says
-      // how many there are and names the tool, and says nothing about what to do next.
-      //
-      // Steered rather than queued, so it lands before the next response instead of at the end of
-      // the run; `display: false` because pi's `convertToLlm` replays a custom message whatever
-      // `display` says, while the chat skips it — the model always reads it and no card appears.
+      // Message ids a reminder already covered: one reminder per batch, so a later batch is
+      // reminded again and one that reached the conversation is not reminded at all.
       const announced = new Set<string>();
+      // The reminder. A report waits for the run to end, which is the whole run — a model ten
+      // tool calls into a refactor learns about a finished build only when it stops. So at
+      // every turn boundary, while results are still waiting, one model-only line is steered:
+      // it says how many there are and names the tool, and says nothing about what to do next.
       pi.on("turn_end", (_event, ctx) => {
         const sessionId = ctx?.sessionManager?.getSessionId?.();
         if (!sessionId) return;
@@ -50,6 +48,10 @@ export function createPendingNotificationsExtension(): InlineExtension {
           .filter((entry) => !announced.has(entry.messageId));
         if (waiting.length === 0) return;
         for (const entry of waiting) announced.add(entry.messageId);
+        // Steered rather than queued, so it lands before the next response instead of at the end
+        // of the run; `display: false` because pi's `convertToLlm` replays a custom message
+        // whatever `display` says, while the chat skips it — the model always reads it and no
+        // card appears.
         pi.sendMessage({
           customType: PENDING_POINTER_CUSTOM_TYPE,
           display: false,

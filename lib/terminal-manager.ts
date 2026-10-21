@@ -109,18 +109,11 @@ function dimension(value: number, fallback: number): number {
 }
 
 /**
- * Pick the pty backend at creation time.
- *
- * node-pty's native addon cannot work under Bun: it does not keep the pty
- * master fd alive, so the fd is closed right after spawn, the child reads EOF
- * on stdin and an interactive shell exits before printing a prompt
- * (agegr/pi-web#745, cf. oven-sh/bun#7362). Bun's own PTY support holds the fd
- * for the process's lifetime, so `spawnBunPty` takes over there.
- *
- * Windows stays on node-pty for two documented reasons: its ConPTY transport
- * runs on pipes rather than the broken non-blocking fd, and Bun's Windows
- * terminal passes input `\r` through untranslated, while POSIX `ICRNL` maps
- * the web terminal's Enter key to `\n` for the shell.
+ * Picks the pty backend at creation time: `spawnBunPty` under Bun, node-pty
+ * elsewhere, Windows included. node-pty's native addon cannot keep the pty
+ * master fd alive under Bun, where Bun's own PTY holds it for the process's
+ * lifetime (agegr/pi-web#745, cf. oven-sh/bun#7362); Windows keeps node-pty
+ * for its pipe-based ConPTY and untranslated `\r` (docs/terminal.md).
  */
 function loadPtySpawn(): PtySpawn {
   if (typeof Bun !== "undefined" && process.platform !== "win32") {

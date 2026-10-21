@@ -119,9 +119,8 @@ export function isProseMathText(value: string): boolean {
  * Replaces a flow math block whose content is prose with the source text it
  * was parsed from, in place, so the `$$` come back as the author typed them.
  * `source` must be the markdown the tree came from. Inline math is not
- * examined here: `remarkNotMathPairs` already refused those pairs while
- * tokenizing, which is the only moment a refusal costs nothing to the text
- * after it.
+ * examined here: `remarkNotMathPairs` refused those pairs while tokenizing,
+ * the one moment a refusal costs nothing to the text after it.
  */
 export function demoteProseDisplayMath(tree: Root, source: string): void {
   const walk = (parent: Root | Parent): void => {

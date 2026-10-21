@@ -1,17 +1,11 @@
 import type { AgentSessionLike } from "./pi-types";
 
 /**
- * The system prompt a plugin forced for the next run, or undefined when none did.
- *
- * Pi sends the `systemPrompt` a `before_agent_start` handler returns as the provider's
- * leading system prompt for that run and keeps its own structured sections in the
- * transcript. Neither the transcript nor `agent.state.systemPrompt` therefore shows what
- * a plugin added: the panel would claim a prompt the model never saw. The session's
- * extension runner can evaluate the handlers once, with the session's own prompt
- * options, and yields the text a run sends.
- *
- * The handlers run outside a run here, so an extension that changes the tools or ends
- * the session sees them a second time. The caller caches the result.
+ * The system prompt a plugin forced for the next run, or undefined when none
+ * did. Asks the session's extension runner to evaluate the `before_agent_start`
+ * handlers once, with the session's own prompt options, and yields the text a
+ * run sends; neither the transcript nor `agent.state.systemPrompt` shows a
+ * forced prompt. The handlers run outside a run; the caller caches the result.
  */
 export async function computeForcedSystemPrompt(session: AgentSessionLike): Promise<string | undefined> {
   const runner = session.extensionRunner;

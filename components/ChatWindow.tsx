@@ -1204,12 +1204,11 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
                 const isLiveTail = (sessionBusy || isStreaming) && endIdx === messages.length && userIdx === lastAnchorIdx;
                 if (isLiveTail) {
-                  // A running turn folds exactly as it will once it is history: each run
-                  // of thinking and tool calls that a real paragraph of text has moved
-                  // past folds into its own group, and only the step in progress stays
-                  // open. A turn that writes no text keeps everything open until it
-                  // ends, then folds as a whole. The token counts, Copy and the failure
-                  // still wait for the footer at the turn's end.
+                  // A running turn folds as it will once it is history: each run of thinking
+                  // and tool calls that a paragraph of text has moved past folds into its own
+                  // group, and only the step in progress stays open. A turn with no text keeps
+                  // everything open until it ends, then folds as a whole. The token counts, Copy
+                  // and the failure wait for the footer at the turn's end.
                   const liveSegments = splitTurnSegments(messages, userIdx + 1, endIdx);
                   const lastLiveSegmentIdx = liveSegments.length - 1;
                   for (const item of planTurnRender(liveSegments, groupStartIdx, endIdx)) {

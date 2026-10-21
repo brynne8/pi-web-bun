@@ -17,8 +17,7 @@ export function getVisibleRenderWindow(totalCount: number, visibleCount: number)
  * The window counts messages, never rendered entries: one message can render as several entries
  * — a turn's words, each group of its workings, its footer — so slicing by entry count dropped
  * `entries - visibleCount` entries off the top even while every loaded message was inside the
- * window. That is how a prepended older page's own first message went missing from the DOM while
- * the page that fetched it was already on screen.
+ * window, and a prepended page lost its own first message from the DOM (sessions.md).
  */
 export function getVisibleEntryStart<T extends { messageIdx: number }>(
   entries: readonly T[],

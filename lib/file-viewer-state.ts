@@ -17,13 +17,11 @@ export function resolveInitialFileDisplayMode(
   return initialState?.displayMode ?? initialDisplayMode ?? "source";
 }
 
-// Prose: a long line is the same sentence going on, so the wrap button's job is
-// already done and a horizontal scrollbar only hides the rest of the paragraph.
-// Source code is the opposite — an editor keeps one line per row and scrolls
-// sideways, because indentation and column alignment are the reading cue.
-// `.txt` is here because it holds prose more often than structure; `.log` is not,
-// because a log line is a column: a timestamp, a level, a message, and wrapping
-// it puts the next line's timestamp where its message was.
+// Prose wraps: a long line is the same sentence going on, and a horizontal
+// scrollbar only hides the rest of the paragraph. Code keeps one line per row
+// and scrolls sideways, because indentation and column alignment are the reading
+// cue. `.txt` is here for holding prose more than structure; `.log` is not:
+// a log line is a column, and wrapping puts the next line's timestamp where its message was.
 const PROSE_EXTENSIONS = new Set(["md", "markdown", "mdx", "mdown", "mkd", "rst", "adoc", "txt"]);
 
 export function wrapsByDefault(filePath?: string): boolean {

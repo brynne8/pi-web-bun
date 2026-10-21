@@ -33,12 +33,10 @@ export const GIT_REVERT_REFUSAL_KEYS: Record<GitRevertRefusal, string> = {
 
 /**
  * `git status --porcelain` X/Y codes a revert can bring back: untouched, modified
- * or deleted — every one of them content Git already has in HEAD.
- *
- * The codes left out are the ones whose "change" is something HEAD never held:
- * an untracked or newly added file (a revert would delete it), a rename or copy
- * (a revert would delete the name the file answers to now), a conflict (both
- * sides are the reader's work), a type change (a file became a link or a socket).
+ * or deleted — every one of them content Git already has in HEAD. The codes left
+ * out are ones whose "change" is something HEAD never held, where a revert would
+ * delete something rather than restore it; the reason per code is in
+ * `docs/agents/files-and-access.md`.
  */
 const REVERTIBLE_CODES = new Set([" ", "M", "D"]);
 

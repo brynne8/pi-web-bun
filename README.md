@@ -84,7 +84,7 @@ Three kinds of difference. [Running on Bun](#running-on-bun) is what it takes to
 | Runtime | Node.js 22.19.0+ | Bun 1.4.2+ |
 | Integrated terminal | Works via `node-pty` | Works via Bun's native PTY behind a small node-pty-compatible shim (see below, and [docs/terminal.md](./docs/terminal.md)) |
 | SDK package resolution | `findPackageJSON()` from `node:module` | `findPackageManifest()` in `lib/pi-sdk-internals.ts` walks `node_modules` upward, because Bun implements none of `node:module`'s named exports |
-| Home directory | `os.homedir()` | `$HOME` first (`homeDir()` in `lib/home-dir.ts`) — the agent directory, the default cwd, the browser's root, `~` in a path, and the agent directory the HTTP dispatcher reads its timeouts from |
+| Home directory | `os.homedir()` | `$HOME` first, then the user database (`homeDir()` in `lib/home-dir.ts`), because Bun's `os.homedir()` ignores `$HOME` — the agent directory, the default cwd, the browser's root, `~` in a path, and the agent directory the HTTP dispatcher reads its timeouts from. On Windows `$HOME` is normally unset, so the database is what applies |
 | Skills install | `npx skills add …` | `bun x skills add …` |
 | Plugin update check | `npm view … version --json` | `bun pm view … version --json` |
 | Test suite | Node's runner (`npm test`) | Both runners, both green: `bun test` and `npm test` |

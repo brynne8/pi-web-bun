@@ -289,13 +289,10 @@ function packageImportEntry(manifest: unknown): string | undefined {
 
 /**
  * The package.json of a dependency, as Node's resolver finds it: the
- * `node_modules` of the importer's folder, then of every folder above it.
- *
- * `findPackageJSON()` from `node:module` is Node 22.14+ only and Bun does not
- * implement it, and importing it there fails the whole module (named exports
- * of `node:module` are checked at link time), turning every MCP feature off
- * with `internals-unavailable`. The walk is short and plain, so both runtimes
- * share it.
+ * `node_modules` of the importer's folder, then of every folder above it. The
+ * shortcut `findPackageJSON()` from `node:module` is Node 22.14+ only, and Bun
+ * checks its named exports at link time, so importing it fails the whole module
+ * and turns every MCP feature off (docs/agents/mcp-runtime.md).
  */
 function findPackageManifest(spec: string, fromFile: string): string | undefined {
   // A scoped name keeps its scope folder; anything after the package's own

@@ -83,11 +83,9 @@ function isRevertibleTargetOnDisk(filePath: string): boolean {
 /**
  * Puts one file back to HEAD: its bytes in the working tree and its entry in the
  * index, so a staged change is unstaged by the same command that writes the file.
- *
- * Refused rather than approximated when the file is untracked, newly added,
- * renamed, copied or in conflict (see lib/git-revert-rule.ts): what HEAD lacks
- * there is not a previous version to go back to, and the revert would delete
- * something Git never stored.
+ * Refused rather than approximated when HEAD holds no previous version of the
+ * change; the refusal per code, and why each would delete something, are in
+ * lib/git-revert-rule.ts and `docs/agents/files-and-access.md`.
  */
 export async function revertGitPath(cwd: string, filePath: string): Promise<GitRevertResult> {
   const status = await getGitStatus(cwd);

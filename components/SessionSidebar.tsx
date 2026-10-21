@@ -892,13 +892,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, []);
 
   /**
-   * A changed file's own action: its working change goes back to the last commit,
-   * staged or not (the server unstages in the same checkout, and refuses what has
-   * no commit to go back to — lib/git-revert-rule.ts). Nothing is kept of what it
-   * discards, so the row's menu asks first (`fileRevertBody`) and this runs only
-   * from the question's own button. The explorer and any open tab's diff are
-   * refreshed the way the refresh button refreshes them, so the row loses its
-   * badge without a second click.
+   * A changed file's own action: its working change goes back to the last commit, staged
+   * or not, the server refusing what has no commit to go back to (lib/git-revert-rule.ts).
+   * Nothing is kept of what it discards, so the row's menu asks first (`fileRevertBody`),
+   * and this runs only from the question's own button. The explorer and any open tab's
+   * diff refresh as the refresh button refreshes them, so the row loses its badge at once.
    */
   const revertRowChanges = useCallback(async (target: FileRowTarget) => {
     const cwd = selectedCwd ?? selectedCwdProp;
@@ -2524,12 +2522,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     });
   };
 
-  // What a row of the files does with itself: put its path in the chat, keep a copy
-  // of it, undo its uncommitted work, or see it where it lives on disk. These were
-  // two buttons drawn over the row's own name on hover, which covered the part of
-  // the row a reader aims at; a right-click is where they belong, since a row's
-  // actions are not the row. A directory has nothing to download, and the menu is
-  // the row's only action, so it is also why no ⋯ button sits in the row.
+  // What a row of the files does with itself: put its path in the chat, keep a copy of it,
+  // undo its uncommitted work, or see it where it lives on disk. These were two hover buttons
+  // drawn over the row's own name, covering the part a reader aims at; a row's actions are not
+  // the row, so a right-click is where they belong. A directory has nothing to download, and
+  // the menu is the row's only action — also why no ⋯ button sits in the row.
   const fileMenuItems = (target: FileRowTarget): SidebarMenuItem[] => [
     {
       type: "item",

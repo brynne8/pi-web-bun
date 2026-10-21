@@ -63,14 +63,11 @@ function countToolCalls(blocks: AssistantContentBlock[], start: number, end: num
 }
 
 /**
- * The turn's messages, in order, as segments to render. Consecutive pieces of
- * the same kind merge, so thinking and tool calls spanning several stored
- * messages — one assistant entry per tool call — form a single group, and the
- * words in between each get their own place on screen.
- *
- * A displayed custom message belongs with the workings around it, so it joins
- * the group it follows and opens one when it comes right after an answer. A
- * message with nothing to show contributes nothing.
+ * The turn's messages, in order, as segments to render. Consecutive pieces of the
+ * same kind merge, so thinking and tool calls spanning several stored messages —
+ * one assistant entry per tool call — form one group, and the words in between get
+ * their own place on screen. A displayed custom message belongs with the workings
+ * around it: it joins the group it follows, and opens one after an answer.
  */
 export function splitTurnSegments(messages: AgentMessage[], from: number, to: number): TurnSegment[] {
   const segments: TurnSegment[] = [];
@@ -154,15 +151,11 @@ export type TurnRenderItem =
   | { kind: "raw"; index: number };
 
 /**
- * The live turn's render order: its segments in turn, with the messages no
- * segment covers (the anchor, a tool result) kept in their place.
- *
- * The plan is built from the segments themselves, never by walking message
- * indices: one message can start more than one segment — a response that
- * thinks, writes and then calls a tool yields process, answer, process — so a
- * walk that advances one index per rendered thing drops every segment after
- * the first that starts on the same message. That is what hid a running turn's
- * later steps and left its foot waiting for a model with nothing above it.
+ * The live turn's render order: its segments in turn, with the messages no segment
+ * covers (the anchor, a tool result) kept in place. The plan comes from the segments
+ * themselves, never from walking message indices: one message can start two of them,
+ * so a walk advancing one index per rendered thing drops every later one on it, what
+ * hid a running turn's later steps and left its foot waiting over nothing.
  */
 export function planTurnRender(segments: TurnSegment[], from: number, to: number): TurnRenderItem[] {
   const covered = new Set<number>();

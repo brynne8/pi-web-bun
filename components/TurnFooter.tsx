@@ -10,15 +10,12 @@ import type { WrittenFile } from "@/lib/turn-written-files";
 import type { AssistantMessage } from "@/lib/types";
 
 /**
- * The turn's footer, once at its end: what the last response cost, how long the
- * turn took, what the turn changed on disk, and a Copy of everything it wrote.
+ * The turn's footer, once at its end: what the turn cost, how long it took,
+ * what it changed on disk, and a Copy of everything it wrote.
  *
- * This is deliberately not a message's footer. A turn renders as segments, so
- * whichever part happens to hold the last sentence is not where the turn ends —
- * stop a run while it is thinking and the turn ends on a folded group, and a
- * footer inside a folded group is one nobody can reach. Attached to the parts it
- * was worse still: every part showed its own copy, since pi-web saves one
- * assistant entry per tool call.
+ * Deliberately not a message's footer: a turn renders as segments, so every
+ * part would show its own copy, and a run stopped mid-thinking ends on a
+ * folded group, where a footer is one nobody can reach.
  */
 export function TurnFooter({ usage, timestamp, durationMs, text, writtenFiles = [], onOpenFile }: {
   usage?: AssistantMessage["usage"];

@@ -37,23 +37,11 @@ const TERMINAL_SUBAGENT_STATUSES = new Set<SubagentRunInfo["status"]>(["complete
 const SUBAGENT_TOOL_EXPOSURE = "model-only" satisfies ToolExposure;
 const AGENT_TOOL_NAME = SUBAGENT_CONTROL_TOOL_NAMES[0];
 /**
- * The delegation policy, in a labelled block of its own at the end of the system prompt.
- *
- * It is *not* the tool's `promptGuidelines`: pi appends those to the one flat `<rules>` list,
- * where a subagent policy reads as generic advice next to "be concise". Nor is it a `sections`
- * entry: only a `before_agent_start` handler can name a section, and pi sends a *forced* prompt
- * instead of the structured sections when any extension forces one — `pi-l` does — so a section
- * added by a handler that runs later reached neither the model nor the System panel. Appending the
- * block to the text the run would send works whatever the shape of that text is, and pi-web's
- * System panel already reports a forced prompt.
- *
- * The block carries its own tag because a forced prompt is plain text: pi adds no tags around it,
- * so the label the policy is known by has to be in the text.
- *
- * `explore` and `plan` get a rule of their own in the block, not just a line in the tool description:
- * the prompt says what each is for and why reaching for it is cheaper, because a generic "prefer a
- * read-only profile" line named no agent and left the model to connect a word to a subagent it had
- * never seen. Remaining profiles are listed by name so a custom one is still discoverable.
+ * The delegation policy's opening rule, in a `<delegation>` block of its own appended to the
+ * text of the run's system prompt — not the tool's `promptGuidelines`, which pi flattens into
+ * its one `<rules>` list, and not a `sections` entry, which any extension's forced prompt
+ * (`pi-l`'s) drops entirely. The block tags itself: pi wraps nothing around forced text. The
+ * System panel reports a forced prompt (sessions.md); the rest is in subagents.md.
  */
 const DELEGATION_INTRO = `\`${AGENT_TOOL_NAME}\` runs a whole task in a fresh session and returns only the result, so this conversation stays small. Delegate as soon as the goal is clear; a goal and known paths are enough.`;
 
@@ -84,13 +72,11 @@ export function subagentDelegationBlock(profiles: readonly SubagentProfile[]): s
 export const SUBAGENT_DELEGATION_BLOCK = subagentDelegationBlock([]);
 
 /**
- * The run's prompt with the delegation block appended.
- *
- * `event.systemPrompt` renders the options as they stand when it is read, so a prompt another
- * extension forced earlier — loaded before pi-web's inline extensions, as `pi-l` is — is already in
- * that text and is carried along rather than overwritten. A plugin that forces the prompt after us
- * reads the same text and appends to it, so the block survives either order; only an extension that
- * composes its prompt from `systemPromptOptions` rather than reading `event.systemPrompt` drops it.
+ * The run's prompt with the delegation block appended. Reads `event.systemPrompt`, which renders
+ * as the options stand when it is read, so text an earlier extension forced (`pi-l`) is carried
+ * along, and a plugin forcing after us appends to the same text, so the block survives either
+ * order; only an extension composing from `systemPromptOptions` rather than reading
+ * `event.systemPrompt` drops it.
  */
 export function withSubagentDelegationPrompt(prompt: string, profiles: readonly SubagentProfile[] = []): string {
   return `${prompt}\n\n${subagentDelegationBlock(profiles)}`;

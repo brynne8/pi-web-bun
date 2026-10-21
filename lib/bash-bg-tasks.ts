@@ -93,16 +93,11 @@ export function deleteBgLogsForSession(sessionId: string): void {
 }
 
 /**
- * A log is read again only by the report that names its path, so a task's log is worth a day.
- * The sweep keys on mtime, which a task still running keeps fresh by writing.
- *
- * Three shapes go: the flat `*.log` files left in the root by the version that had no
- * per-session directories, a session directory's stale logs, and a session directory left
- * empty. It runs from `bgLogPath()` as a task starts and once per server instance at
- * startup (`registerNodeInstrumentation()`), because the former never happens with the
- * `bgTasksEnabled` switch off — which is how one machine ended up with 337 logs / 158 MB.
- * Nothing here throws: a directory that is not there, and a file another process still
- * holds (Windows refuses the unlink), are left for the next sweep.
+ * A log is read again only by the report that names its path, so a task's log is
+ * worth a day; the sweep keys on mtime, which a task still running keeps fresh by
+ * writing. Three shapes go: the flat `*.log` files left in the root by the layout
+ * that had no per-session directories, a session directory's stale logs, and a
+ * session directory left empty. Nothing here throws.
  */
 export function pruneBgLogs(dir: string = BG_LOG_DIR): void {
   const deadline = Date.now() - BG_LOG_RETENTION_MS;

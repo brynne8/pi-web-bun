@@ -12,22 +12,17 @@ function emptyUsage(): AgentUsage {
 }
 
 /**
- * What the turn's own model requests cost, summed. The tool loop makes a request
- * per call and pi stores each as its own assistant entry, so the turn's total is
- * every one of them where the footer used to keep only the last.
- *
- * The token buckets are summed apart, as the footer prints them: `input` and the
- * two cache counts are separate figures and their sum is the prompt, so `input`
- * alone never counts a cache read. A tool result's usage is a nested call's, not
- * one of the turn's requests, and is left out.
- *
- * Undefined when the turn billed nothing: an aborted run still carries a usage
- * object of zeros, and a footer of zeros says nothing about the turn.
+ * What the turn's own model requests cost, summed, or undefined when the turn
+ * billed nothing. The tool loop makes a request per call and pi stores each as its
+ * own assistant entry, so the turn's total is every one of them. The token buckets
+ * are summed apart as the footer prints them: `input` and the two cache counts are
+ * separate figures whose sum is the prompt, so `input` never counts a cache read.
  */
 export function getTurnUsage(messages: AgentMessage[], anchorIdx: number, endIdx: number): AgentUsage | undefined {
   let total: AgentUsage | undefined;
   for (let idx = anchorIdx + 1; idx < endIdx; idx++) {
     const message = messages[idx];
+    // A tool result's usage belongs to a nested call, not to one of the turn's requests.
     if (message.role !== "assistant") continue;
     const usage = message.usage;
     if (!usage) continue;

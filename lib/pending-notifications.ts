@@ -90,12 +90,10 @@ export function recordPendingNotification(entry: PendingNotification): void {
 /**
  * The markers of the reports already present in a session's transcript.
  *
- * pi appends a custom message as a **`custom_message`** entry whose `details` sits at the entry's
- * top level (`appendCustomMessageEntry()`, `core/session-manager.js`), and `getEntries()` hands
- * back those raw entries. Reading `entry.message.details` off a `"message"`-typed entry instead
- * found nothing at all, so a delivered batch never cleared the reports it carried and the index
- * went on listing results the parent was already holding — with a count that overstated the
- * backlog, which is the one thing this index must never do.
+ * A custom message is appended as a `custom_message` entry whose `details` sits at the
+ * entry's top level (`appendCustomMessageEntry()`, `core/session-manager.js`) and
+ * `getEntries()` hands back those raw entries, so reading `entry.message.details` finds
+ * nothing and a delivered batch keeps overstating the backlog.
  */
 export function deliveredNotificationIds(entries: readonly unknown[]): Set<string> {
   const ids = new Set<string>();

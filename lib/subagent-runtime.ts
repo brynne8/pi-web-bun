@@ -157,13 +157,11 @@ function getSubagentRuns(): Map<string, StoredSubagentExecution> {
 const RESULT_COLLECTION_GRACE_MS = 2_000;
 
 /**
- * `get_subagent_result` calls currently in flight, by subagent session id.
- *
- * A background run that settles while its parent sits inside that call must not also be
- * announced: the parent is handed the same text as a tool result within the poll interval, so
- * the notification would only wake a second turn to repeat it. That single call is the one
- * thing worth waiting for. Waiting for the parent to fall idle instead — what this did before —
- * meant a parent that kept working for forty minutes got forty-minute-old reports in a burst.
+ * `get_subagent_result` calls currently in flight, by subagent session id. A background run that
+ * settles while its parent sits inside that call must not also be announced: the parent is handed
+ * the same text as a tool result within the poll interval, so the notification would only wake a
+ * second turn to repeat it. This call is the one thing worth waiting for; waiting for the parent
+ * to fall idle is what delivered forty-minute-old reports in a burst.
  */
 function getResultCollectors(): Map<string, Set<ResultCollector>> {
   if (!globalThis.__piSubagentResultCollectors) globalThis.__piSubagentResultCollectors = new Map();
@@ -315,12 +313,11 @@ function parentContextText(parent: HostSession): string {
 }
 
 /**
- * pi creates a session file only once the session holds a user or assistant message, so a run
- * that ended before its prompt reached the model (stopped while queued or connecting MCP servers,
- * a provider without credentials) kept its metadata and result in memory only. Once the idle
- * child's wrapper was released, `get_subagent_result` and `resume` answered `Subagent not found`
- * for an id the parent had been given, and the session left the sidebar. Write the file when the
- * child is dispatched; `setSessionFile()` reloads it, so pi appends every later entry to it.
+ * pi creates a session file only once a user or assistant message exists, so a run that ended
+ * before its prompt reached the model (stopped while queued or connecting MCP servers, a provider
+ * without credentials) held its metadata and result in memory only: once its idle wrapper was
+ * released, `get_subagent_result` and `resume` answered `Subagent not found` and the session left
+ * the sidebar. Write the file at dispatch; `setSessionFile()` reloads it, so pi appends every entry.
  */
 function persistChildSession(sessionManager: SessionManager): void {
   const sessionFile = sessionManager.getSessionFile();

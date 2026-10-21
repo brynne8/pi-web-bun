@@ -621,12 +621,9 @@ export function applySessionUiStateRequest(
 /**
  * Pure: a NEW state with every project-keyed entry of `keys` gone — the pin, the
  * place in `projectOrder`, the display name — and whether that changed anything.
- * Does not touch `revision`, and never mutates the state given.
- *
- * This is the only way project-keyed state leaves the state: the server drops it
- * for a project whose folder no longer exists (`forgetSessionUiState()`,
- * `lib/session-ui-state.ts`). Nothing else removes a key — a project merely not
- * shown keeps its place and its name, so it comes back to them.
+ * Does not touch `revision`, and never mutates the state given. This is the only
+ * way project-keyed state leaves the state; a project merely not shown keeps its
+ * place and its name, so it comes back to them.
  */
 export function dropProjectUiState(state: SessionUiState, keys: readonly string[]): { state: SessionUiState; changed: boolean } {
   const next = copyState(state);

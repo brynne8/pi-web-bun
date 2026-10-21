@@ -658,12 +658,10 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
 /**
  * How a response ends badly: a provider error, or an output limit that cut it off.
- *
- * A turn's failure is its outcome, not one of its workings, so ChatWindow renders
- * this once under the turn's last segment rather than leaving it inside a Process
- * details group the user has to open to find the reason it stopped (#906). It also
- * renders under a whole message, which is how the live tail and a message outside a
- * segmented turn show it.
+ * A turn's failure is its outcome, not one of its workings, so ChatWindow renders this
+ * once under the turn's last segment, not inside a Process details group the user has
+ * to open to find the reason it stopped (#906). It also renders under a whole message,
+ * which is how the live tail and a message outside a segmented turn show it.
  */
 export function AssistantNotice({ message, isStreaming, onCompact, isCompacting, compactError }: {
   message: AssistantMessage;
@@ -1254,12 +1252,11 @@ function ToolCallBlock({ block, result, duration, cwd, onOpenFile, onOpenSubagen
   // needs the card expanded to be seen.
   const shellBackground = shellInput?.run_in_background === true;
 
-  // Flat arguments read as facts instead of as a JSON blob: a read's path and
-  // span, a write's path next to its text, a subagent's profile and prompt.
-  // Tools with a view of their own keep it, and one nested value — an `edit`'s
-  // `edits[]`, an MCP argument holding an object — takes the whole card back to
-  // the JSON, since a table row that drops a subtree hides an argument.
-  // See `lib/tool-fields.ts`.
+  // Flat arguments read as facts instead of as a JSON blob: a read's path and span, a
+  // write's path next to its text, a subagent's profile and prompt. Tools with a view of
+  // their own keep it, and one nested value — an `edit`'s `edits[]`, an MCP argument
+  // holding an object — takes the whole card back to the JSON, since a row that drops a
+  // subtree hides an argument. See `lib/tool-fields.ts`.
   const toolFields =
     !isStreamingInput && codemode === null && patchFiles === null && shellCommand === null
       ? toolFieldsOfInput(block.input)
@@ -2073,13 +2070,11 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
   const detailsText = hasDetails ? safeJson(message.details) : "";
   const title = formatCustomType(message.customType);
   const isBgTaskNotification = message.customType === BG_TASK_NOTIFICATION_CUSTOM_TYPE;
-  // A batch of settled background reports is one queue element holding one text block per report,
-  // and each report's own entry in `details.reports` says which card it gets. It renders as one
-  // card per report — the card that report always had — because a report that arrives in a batch
-  // is not a different report on screen. Drawing the batch as a single card instead took every
-  // report's own header, collapse and copy away, and put a subagent report's model-only guard on
-  // the screen. The batch's own type is spelled out here because `lib/settled-report-note.ts`
-  // imports `node:crypto` and cannot be pulled into a component.
+  // A batch of settled background reports is one queue element holding one text block per report.
+  // It renders as one card per report — the card that report always had, named by its entry in
+  // `details.reports`. A single card took every report's own header, collapse and copy away and
+  // put a subagent report's model-only guard on the screen. The batch's type is spelled out here:
+  // `lib/settled-report-note.ts` imports `node:crypto` and cannot be pulled into a component.
   const batchReports = (message.details as { kind?: string; reports?: { id?: string; customType?: string; details?: unknown }[] } | undefined)?.reports;
   const isSettledReportBatch = (message.details as { kind?: string } | undefined)?.kind === "pi-web-settled-reports";
   const batchBlocks = typeof message.content === "string"

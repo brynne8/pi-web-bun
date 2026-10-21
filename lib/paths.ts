@@ -82,12 +82,11 @@ export function samePath(a: string, b: string): boolean {
 }
 
 /**
- * One path with every symlink in it that exists resolved, the missing remainder kept
- * as written. `samePath()` compares lexically and leaves symlinks to the caller, and
- * this is what that means in practice: `/tmp` and `/var/folders/…` are links on
- * macOS, so a folder reached through one is not the same *string* as what the
- * filesystem and git name it, though it is the same place. A deleted file has nothing
- * of its own to resolve, so its nearest existing ancestor is what gets resolved.
+ * One path with every symlink in it that exists resolved, the missing remainder
+ * kept as written. `samePath()` compares lexically and leaves symlinks to the
+ * caller: `/tmp` and `/var/folders/…` are links on macOS, so a folder reached
+ * through one is the same place but not the same *string* as what the
+ * filesystem and git name it. A deleted file resolves by its nearest ancestor.
  */
 export function resolveExistingPath(target: string): string {
   const absolute = resolve(target);
