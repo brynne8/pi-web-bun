@@ -948,7 +948,9 @@ export function createSubagentController(
   }
 
   return {
-    extensionRuntime: { start, resume, get, steer, notifyParent, markResultConsumed },
+    // `abort` goes to the tools as well as to the routes: the parent that started a run can end one
+    // it no longer wants, and does not need a report back telling it what it just did.
+    extensionRuntime: { start, resume, get, steer, abort, notifyParent, markResultConsumed },
     get,
     steer,
     abort,

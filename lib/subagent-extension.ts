@@ -27,12 +27,15 @@ const HOST_SUBAGENT_EXTENSION_PATH = `<inline:${HOST_SUBAGENT_EXTENSION_NAME}>`;
 const SUBAGENT_TOOL_NAMES = new Set<string>(SUBAGENT_CONTROL_TOOL_NAMES);
 const LEGACY_SUBAGENT_PACKAGE_NAME = "pi-subagents";
 const TERMINAL_SUBAGENT_STATUSES = new Set<SubagentRunInfo["status"]>(["completed", "failed", "aborted", "interrupted"]);
+/** How long an abort waits for the run to write its terminal status before answering. */
+const ABORT_SETTLE_WAIT_MS = 2_000;
+const ABORT_SETTLE_POLL_MS = 50;
 /**
  * The control tools are declared to the model and activated on registration like `direct` tools,
  * but pi never lets another tool call a `model-only` tool through `ctx.executeTool()`, so a
- * codemode script cannot start, collect, or steer a subagent. A run started from a script would
- * record the nested call id (`<codemode call>/<n>`) as its `parentToolCallId`, which no transcript
- * entry carries, so the chat would lose the link to the child session.
+ * codemode script cannot start, collect, steer, or stop a subagent. A run started from a script
+ * would record the nested call id (`<codemode call>/<n>`) as its `parentToolCallId`, which no
+ * transcript entry carries, so the chat would lose the link to the child session.
  */
 const SUBAGENT_TOOL_EXPOSURE = "model-only" satisfies ToolExposure;
 const AGENT_TOOL_NAME = SUBAGENT_CONTROL_TOOL_NAMES[0];
@@ -133,6 +136,12 @@ export interface SubagentExtensionRuntime {
   resume(request: ResumeSubagentRequest): Promise<SubagentExecution>;
   get(sessionId: string): Promise<SubagentRunInfo | null>;
   steer(sessionId: string, message: string): Promise<void>;
+  /**
+   * End a run the parent no longer wants: it takes the queued run out of the queue, ends the wait
+   * for a run still connecting its MCP servers, and aborts a running one. Throws when the session
+   * is neither queued nor running.
+   */
+  abort(sessionId: string): Promise<void>;
   notifyParent(run: SubagentRunInfo): Promise<void>;
   markResultConsumed(run: Pick<SubagentRunInfo, "sessionId" | "completedAt">): void;
   /**
@@ -222,6 +231,47 @@ export function subagentNotificationText(run: SubagentRunInfo): string {
   // `resume` reuses the session ID, so without this line a resumed run's report reads exactly like
   // the earlier run's, and the parent cannot tell a new result from a repeat of one it handled (#985).
   return `${SUBAGENT_NOTIFICATION_PREFIX}This report is from a resumed run of subagent ${run.sessionId}; it supersedes any earlier report from the same subagent.\n\n${text}`;
+}
+
+/**
+ * The run as an abort leaves it, or `null` when it is still unwinding after the wait (or gone).
+ * The stop call needs the terminal run: it is what marks the run's completion as already held, so
+ * a subagent the parent killed does not also report back that it was stopped.
+ */
+async function waitForSettledRun(
+  runtime: SubagentExtensionRuntime,
+  sessionId: string,
+): Promise<SubagentRunInfo | null> {
+  const deadline = Date.now() + ABORT_SETTLE_WAIT_MS;
+  for (;;) {
+    const run = await runtime.get(sessionId);
+    if (!run || TERMINAL_SUBAGENT_STATUSES.has(run.status)) return run;
+    if (Date.now() >= deadline) return null;
+    await new Promise<void>((resolve) => setTimeout(resolve, ABORT_SETTLE_POLL_MS));
+  }
+}
+
+/** The way back to a run's transcript, named in every answer that leaves one behind. */
+function subagentTranscriptBackText(sessionId: string): string {
+  return `What it got to stays in its session: read it with get_subagent_result("${sessionId}"), or continue it with Agent's \`resume\`.`;
+}
+
+/** The answer for a run that had nothing left to stop. */
+function subagentNothingToStopText(run: SubagentRunInfo): string {
+  return `Subagent ${run.sessionId} already ${run.status}; nothing to stop. ${subagentTranscriptBackText(run.sessionId)}`;
+}
+
+/** What a stop answers with, naming the way back to the transcript it left behind. */
+function subagentStopText(run: SubagentRunInfo): string {
+  const back = subagentTranscriptBackText(run.sessionId);
+  // The run ended on its own terms while the stop was landing, so report what it is instead of
+  // claiming the stop did it.
+  if (TERMINAL_SUBAGENT_STATUSES.has(run.status)) {
+    return run.status === "aborted"
+      ? `Subagent ${run.sessionId} stopped. ${back}`
+      : subagentFinalText(run);
+  }
+  return `Stop requested for subagent ${run.sessionId}; it is still unwinding. ${back}`;
 }
 
 export function createSubagentExtension(
@@ -393,6 +443,58 @@ export function createSubagentExtension(
             return { content: [{ type: "text", text: `Steering message sent to ${params.agent_id}.` }], details: undefined };
           } catch (error) {
             return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], details: undefined, isError: true };
+          }
+        },
+      }));
+
+      pi.registerTool(defineTool({
+        name: "abort_subagent",
+        label: "Stop agent",
+        description: "Stop a subagent session that is running, queued, or still connecting its servers. Its transcript stays, so it can be read afterwards or continued with `Agent`'s `resume`.",
+        exposure: SUBAGENT_TOOL_EXPOSURE,
+        parameters: Type.Object({
+          agent_id: Type.String({ description: "Subagent session ID." }),
+        }),
+        async execute(_toolCallId, params) {
+          const agentId = params.agent_id.trim();
+          if (!agentId) {
+            return { content: [{ type: "text", text: "Subagent session ID is required" }], details: undefined, isError: true };
+          }
+          const before = await runtime.get(agentId);
+          if (!before) {
+            return { content: [{ type: "text", text: `Subagent not found: ${agentId}` }], details: undefined, isError: true };
+          }
+          if (TERMINAL_SUBAGENT_STATUSES.has(before.status)) {
+            return {
+              content: [{ type: "text", text: subagentNothingToStopText(before) }],
+              details: subagentToolDetails(before),
+            };
+          }
+          // A run the parent stops itself has no reason to report back, so this call holds its
+          // completion the way an in-flight `get_subagent_result` does and takes the settled run as
+          // its own result: the notification then finds the parent already holding the outcome.
+          const endCollection = runtime.beginResultCollection?.(agentId);
+          try {
+            await runtime.abort(agentId);
+            const settled = await waitForSettledRun(runtime, agentId);
+            const run = settled ?? before;
+            if (settled?.runInBackground) runtime.markResultConsumed(settled);
+            return {
+              content: [{ type: "text", text: subagentStopText(run) }],
+              details: subagentToolDetails(run),
+            };
+          } catch (error) {
+            // A run that settles between the check above and the abort is not a failure to stop.
+            const run = await runtime.get(agentId).catch(() => null);
+            if (run && TERMINAL_SUBAGENT_STATUSES.has(run.status)) {
+              return {
+                content: [{ type: "text", text: subagentNothingToStopText(run) }],
+                details: subagentToolDetails(run),
+              };
+            }
+            return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], details: undefined, isError: true };
+          } finally {
+            endCollection?.();
           }
         },
       }));

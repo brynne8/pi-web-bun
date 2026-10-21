@@ -7,6 +7,7 @@ const SUBAGENT_TOOL_NAMES: ReadonlyArray<typeof SUBAGENT_CONTROL_TOOL_NAMES[numb
   "Agent",
   "get_subagent_result",
   "steer_subagent",
+  "abort_subagent",
 ];
 
 // pi's coding tools, as `CODING_TOOL_NAMES` in rpc-manager.ts lists them.
