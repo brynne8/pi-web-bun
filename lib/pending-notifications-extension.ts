@@ -66,9 +66,8 @@ export function createPendingNotificationsExtension(): InlineExtension {
         name: PENDING_TOOL_NAME,
         label: "Pending background results",
         description:
-          "List background results that finished but have not reached this conversation yet: backgrounded commands and background subagent runs. "
-          + "Returns how many are waiting and one line per result with how it ended, when it finished, and the call that fetches the whole thing. "
-          + "Takes no arguments.",
+          "List background results that finished but have not reached this conversation: backgrounded commands and background subagent runs. "
+          + "Returns the count and one line per result: outcome, finish time, and the call that fetches it.",
         exposure: PENDING_TOOL_EXPOSURE,
         parameters: Type.Object({}),
         async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
