@@ -97,7 +97,7 @@ export async function checkProjectNavigation({ browser, base, artifacts, fixture
       };
       const openTab = async (key, keyboard = false) => {
         const menu = await openMenu(key);
-        const opened = context.waitForEvent("page");
+        const opened = context.waitForEvent("page", { timeout: 60_000 });
         if (keyboard) await page.keyboard.press("t");
         else await menu.getByRole("menuitem", { name: /^Open in new tab/ }).click();
         const tab = await opened;

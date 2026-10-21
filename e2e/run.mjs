@@ -26,6 +26,13 @@ const mode = process.env.E2E_SERVER_MODE || "dev";
 assert.ok(mode === "dev" || mode === "start", "E2E_SERVER_MODE must be dev or start");
 assert.ok(mode !== "dev" || !existsSync(join(root, ".next/dev/lock")), "Use a checkout without an active dev server");
 const artifacts = join(root, "test-results/e2e");
+// Emptied first. A CI runner's workspace can carry the previous job's files, and then the
+// `e2e-failure` artifact uploaded on a failure is the other run's: on 2026-10-20 the bundle of
+// run 39385062975 held a `server.log`, a `trace.zip` and screenshots from a server on another
+// port whose browser had gone quiet five minutes before that job even started, while the
+// timeout it was collected for named the port this run chose. A failure has to carry its own
+// evidence, so nothing older than this process may sit in the directory the artifact uploads.
+rmSync(artifacts, { recursive: true, force: true });
 mkdirSync(artifacts, { recursive: true });
 const agentDir = mkdtempSync(join(tmpdir(), "pi-web-e2e-"));
 const project = join(agentDir, "project");

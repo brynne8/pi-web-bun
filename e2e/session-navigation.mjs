@@ -59,7 +59,12 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     await content[id](target).waitFor({ state: "visible" });
   };
   const newTab = async (open) => {
-    const opened = context.waitForEvent("page");
+    // An explicit timeout: a BrowserContext wait keeps the context's own 30 s default, which
+    // `page.setDefaultTimeout` does not reach. The new tab is created by the browser's own
+    // process on the modifier click, and on a loaded runner that is not a 30 s promise — the
+    // trace of run 39379800169 shows the click landing, the page polling on normally for the
+    // whole half minute after it, and no `page` event arriving in time.
+    const opened = context.waitForEvent("page", { timeout: 60_000 });
     await open();
     const tab = await opened;
     watch(tab);

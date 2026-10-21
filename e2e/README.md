@@ -28,6 +28,17 @@ the application in a clean checkout and runs the same browser tests with
 `E2E_SERVER_MODE=start` against `next start`. Do not build in a checkout used
 for development.
 
+`test-results/e2e/` is emptied before the first navigation, so the
+`e2e-failure` artifact CI uploads on a failure carries this run's evidence and
+not a previous job's leftovers in a reused runner workspace.
+
+No check waits for `networkidle`. With a session selected the page keeps that
+session's event stream open and polls `/api/agent/running` every 2.5 s, so the
+network going quiet says more about the runner's load than about the interface:
+a reload waits for the document and then for the element the check reads. A
+`BrowserContext.waitForEvent("page")` carries its own timeout for the same
+reason — `page.setDefaultTimeout` does not reach a context wait.
+
 Coverage:
 
 - A 5,000-message session opens with exactly the last 50 entries, bounded

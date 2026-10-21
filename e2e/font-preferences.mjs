@@ -40,7 +40,7 @@ export async function checkFontPreferences(page) {
   for (const selector of [".markdown-code-block code", "#settings-font-mono"]) {
     assert.match(await font(selector), /^monospace,/, selector);
   }
-  await page.reload({ waitUntil: "networkidle" });
+  await page.reload({ waitUntil: "domcontentloaded" });
   await page.locator(".markdown-code-block code").waitFor();
   assert.match(await font("body"), /^"?Times New Roman"?, serif,/);
   assert.match(await font(".markdown-code-block code"), /^monospace,/);
@@ -54,7 +54,7 @@ export async function checkFontPreferences(page) {
 
   const other = await page.context().newPage();
   try {
-    await other.goto(page.url(), { waitUntil: "networkidle" });
+    await other.goto(page.url(), { waitUntil: "domcontentloaded" });
     await ui.fill("serif");
     await other.waitForFunction(() => getComputedStyle(document.body).fontFamily.startsWith("serif,"));
     await uiWeight.fill("300");

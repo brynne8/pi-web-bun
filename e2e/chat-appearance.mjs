@@ -22,7 +22,12 @@ export async function checkChatAppearanceReset(page) {
     appliedWidth: document.documentElement.style.getPropertyValue("--chat-content-max-width"),
     appliedFontSize: document.documentElement.style.getPropertyValue("--chat-content-font-size"),
   })), { width: "820", fontSize: "14", appliedWidth: "820px", appliedFontSize: "14px" });
-  await page.reload({ waitUntil: "networkidle" });
+  // Never `networkidle`: with a session selected the page keeps its event stream open and polls
+  // /api/agent/running every 2.5 s (hooks/useAgentSession.ts, components/SessionSidebar.tsx), so
+  // the network going quiet is a fact about the runner's load and not about anything this check
+  // reads. Wait for the document, then for the app the check goes on to act on.
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.locator(".chat-input-textarea").waitFor();
   const showSidebar = page.getByRole("button", { name: "Show sidebar", exact: true });
   if (await showSidebar.isVisible()) await showSidebar.click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -73,7 +78,7 @@ export async function checkChatAppearance(page) {
   await closeSettings();
   assert.equal(await textarea.inputValue(), draft);
   assert.ok(await fittedHeight() < narrowHeight, "Widening must shrink the existing draft");
-  await page.reload({ waitUntil: "networkidle" });
+  await page.reload({ waitUntil: "domcontentloaded" });
   await page.locator(".markdown-code-block pre").waitFor();
   assert.equal(await font(textarea), "18px");
   assert.equal(await font(page.locator(".markdown-user-message")), "18px");
