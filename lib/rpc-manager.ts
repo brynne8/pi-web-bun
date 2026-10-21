@@ -1,6 +1,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, SettingsManager, Theme, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
+import { getCurrentSystemPrompt } from "@earendil-works/pi-ai";
 import { randomUUID } from "crypto";
 import { existsSync, realpathSync } from "fs";
 import { resolve } from "path";
@@ -886,7 +887,16 @@ export class AgentSessionWrapper {
    * outside a run here, so they are not asked again for every state read.
    */
   private async resolveSystemPrompt(): Promise<string> {
-    const replay = () => this.inner.agent.state?.systemPrompt || this.inner.systemPrompt || "";
+    // The transcript, not the session's own prompt options: a `before_agent_start` handler may add
+    // or patch a section for the run, and pi persists that as a system message. The options getter
+    // is rendered from the base options, so it would report the prompt from before the handler ran.
+    const replay = () => {
+      const projection = this.inner.sessionManager.buildSessionProjection?.();
+      return (projection ? getCurrentSystemPrompt(projection.messages) : "")
+        || this.inner.agent.state?.systemPrompt
+        || this.inner.systemPrompt
+        || "";
+    };
     const toolNames = this.inner.getActiveToolNames?.().join(",") ?? "";
     const cached = this.forcedSystemPrompt;
     if (cached && cached.toolNames === toolNames) return cached.prompt ?? replay();

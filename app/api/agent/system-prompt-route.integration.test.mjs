@@ -21,7 +21,7 @@ test("a plugin's forced system prompt reaches the state read (#1318)", async (t)
     else process.env.PI_CODING_AGENT_DIR = previousDir;
     await rm(dir, { recursive: true, force: true });
   });
-  // A plugin that forces the prompt for every run, as pi-caveman does.
+  // A plugin that forces the prompt for every run.
   await mkdir(join(dir, "extensions"), { recursive: true });
   await writeFile(
     join(dir, "extensions", "voice-plugin.ts"),
