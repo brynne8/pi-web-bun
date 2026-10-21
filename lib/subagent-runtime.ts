@@ -82,6 +82,16 @@ export interface SubagentController {
   get(sessionId: string): Promise<SubagentRunInfo | null>;
   steer(sessionId: string, message: string): Promise<void>;
   abort(sessionId: string): Promise<void>;
+  /**
+   * A prompt sent to a child's own chat, outside `Agent` / `resume`: adopt it as a run so its
+   * status and result are recorded and its parent is told when it finishes.
+   */
+  beginDirectPrompt(sessionId: string, task: string): DirectSubagentPromptRun | undefined;
+}
+
+export interface DirectSubagentPromptRun {
+  run: SubagentRunInfo;
+  finish(outcome: { aborted?: boolean; error?: string }): Promise<SubagentRunInfo>;
 }
 
 type StoredSubagentExecution = {
@@ -865,6 +875,73 @@ export function createSubagentController(
     return { run: stored.run, completion };
   }
 
+  function beginDirectPrompt(sessionId: string, task: string): DirectSubagentPromptRun | undefined {
+    // A live run already owns this child: the prompt joins it (steering, follow-up) and the
+    // run's own completion records the result.
+    if (getSubagentRuns().has(sessionId)) return undefined;
+    const wrapper = dependencies.getSession(sessionId);
+    if (!wrapper?.isAlive()) return undefined;
+    const manager = wrapper.inner.sessionManager;
+    const existing = readSubagentRun(
+      manager.getEntries() as unknown as SessionEntry[],
+      sessionId,
+      wrapper.sessionFile,
+    );
+    if (!existing) return undefined;
+
+    const initialRun: SubagentRunInfo = {
+      ...existing,
+      ...(task.trim() ? { task } : {}),
+      // From the parent's side nobody is waiting on this prompt: it was typed in the child's
+      // own chat, so its result is collected or announced like any background run's.
+      runInBackground: true,
+      status: "running",
+      completedAt: undefined,
+      result: undefined,
+      error: undefined,
+      worktreeCleanupError: undefined,
+      worktreeExists: undefined,
+      resumed: true,
+    };
+    let resolveCompletion!: (run: SubagentRunInfo) => void;
+    const completion = new Promise<SubagentRunInfo>((resolve) => { resolveCompletion = resolve; });
+    const stored: StoredSubagentExecution = { run: initialRun, completion, abortRequested: false };
+    getSubagentRuns().set(sessionId, stored);
+    manager.appendCustomEntry(SUBAGENT_STATUS_TYPE, { version: 1, status: "running" });
+    dependencies.invalidateSessionList();
+
+    return {
+      run: initialRun,
+      async finish(outcome) {
+        const text = wrapper.inner.getLastAssistantText()?.trim();
+        const stop = outcome.aborted || stored.abortRequested ? undefined : lastAssistantStop(manager);
+        const aborted = Boolean(outcome.aborted || stored.abortRequested || stop?.aborted);
+        const message = aborted ? undefined : stop?.error ?? outcome.error;
+        const result = recordResult(manager, {
+          ...initialRun,
+          status: aborted ? "aborted" : message ? "failed" : "completed",
+          completedAt: new Date().toISOString(),
+          ...(text ? { result: text } : {}),
+          ...(message ? { error: message } : {}),
+        });
+        stored.run = result;
+        getSubagentRuns().delete(sessionId);
+        dependencies.invalidateSessionList();
+        resolveCompletion(result);
+        // The user chatted with the child directly, so its parent was not waiting on this run
+        // and must be told when it settles. Recorded first: a slow parent must not hold the
+        // child's status back.
+        void notifyParent(result).catch((error) => {
+          console.error(
+            `[pi-web] failed to deliver subagent completion for ${sessionId}:`,
+            error instanceof Error ? error.message : error,
+          );
+        });
+        return result;
+      },
+    };
+  }
+
   async function get(sessionId: string): Promise<SubagentRunInfo | null> {
     const stored = getSubagentRuns().get(sessionId);
     if (stored) return stored.run;
@@ -960,5 +1037,6 @@ export function createSubagentController(
     get,
     steer,
     abort,
+    beginDirectPrompt,
   };
 }

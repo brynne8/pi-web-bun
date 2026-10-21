@@ -51,7 +51,7 @@ import {
   subagentToolOptions,
   SUBAGENT_CONTROL_TOOL_NAMES,
 } from "./subagents";
-import { createSubagentController, getLiveSubagentStatus } from "./subagent-runtime";
+import { createSubagentController, getLiveSubagentStatus, type DirectSubagentPromptRun } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
 import { isBgTasksEnabled } from "./bg-tasks-settings";
 import { createBgTaskNotifier, killBgTasksForSession } from "./bash-bg-tasks";
@@ -142,6 +142,11 @@ type AgentSessionWrapperOptions = {
   chatOnly?: boolean;
   onAgentRunComplete?: AgentRunCompleteListener;
   suppressCompletionNotifications?: boolean;
+  /**
+   * Called once a prompt sent through `send()` is accepted. A subagent session returns a run
+   * handle so its own chat counts as a resumed run; other sessions return undefined.
+   */
+  onPromptAccepted?: (task: string) => DirectSubagentPromptRun | undefined;
   /** Connects the session's MCP servers before a prompt starts a run, and lets go of them when it closes (lib/mcp-host.ts). */
   mcpHost?: Pick<McpHost, "prepareForPrompt" | "dispose">;
   /** Chat only: the extension-provided model the session wanted, named when a prompt finds no model. */
@@ -341,6 +346,7 @@ export class AgentSessionWrapper {
   private forcedSystemPrompt?: { toolNames: string; prompt: string | undefined };
   private readonly chatOnly: boolean;
   private readonly onAgentRunComplete?: AgentRunCompleteListener;
+  private readonly onPromptAccepted?: (task: string) => DirectSubagentPromptRun | undefined;
   private readonly suppressCompletionNotifications: boolean;
   private readonly mcpHost?: Pick<McpHost, "prepareForPrompt" | "dispose">;
   private readonly chatOnlyExtensionModel?: { provider: string; id: string };
@@ -370,6 +376,7 @@ export class AgentSessionWrapper {
     this.exactSystemPrompt = options.exactSystemPrompt;
     this.chatOnly = options.chatOnly ?? false;
     this.onAgentRunComplete = options.onAgentRunComplete;
+    this.onPromptAccepted = options.onPromptAccepted;
     this.suppressCompletionNotifications = options.suppressCompletionNotifications ?? false;
     this.mcpHost = options.mcpHost;
     this.chatOnlyExtensionModel = options.chatOnlyExtensionModel;
@@ -966,12 +973,25 @@ export class AgentSessionWrapper {
           let preflightAccepted = false;
           let preflightSettled = false;
           let promptSettled = false;
+          let directRun: DirectSubagentPromptRun | undefined;
+          let directRunResolved = false;
           let acceptPreflight!: () => void;
           let rejectPreflight!: (error: unknown) => void;
           const preflight = new Promise<void>((resolve, reject) => {
             acceptPreflight = () => {
               preflightAccepted = true;
               this.agentRunNeedsCompletion = true;
+              // A prompt on a child's own chat starts no subagent run by itself. Adopt it here,
+              // before pi starts the turn, so `get_subagent_result` sees it running; one that
+              // joins an existing run (streamingBehavior) must not start a second run.
+              if (!streamingBehavior && !directRunResolved) {
+                directRunResolved = true;
+                try {
+                  directRun = this.onPromptAccepted?.(typeof command.message === "string" ? command.message : "");
+                } catch (error) {
+                  console.error("[pi-web] could not record the direct subagent prompt:", error instanceof Error ? error.message : error);
+                }
+              }
               if (preflightSettled) return;
               preflightSettled = true;
               // A new prompt, not one queued into a run: what an earlier run's Stop said is over.
@@ -990,6 +1010,16 @@ export class AgentSessionWrapper {
             this.pendingPromptCount = Math.max(0, this.pendingPromptCount - 1);
             this.resetIdleTimer();
             this.notifyAgentRunCompleteIfIdle();
+          };
+          const finishDirectRun = async (outcome: { aborted?: boolean; error?: string }) => {
+            const run = directRun;
+            directRun = undefined;
+            if (!run) return;
+            try {
+              await run.finish(outcome);
+            } catch (error) {
+              console.error("[pi-web] could not settle the direct subagent prompt:", error instanceof Error ? error.message : error);
+            }
           };
 
           this.pendingPromptCount += 1;
@@ -1039,14 +1069,19 @@ export class AgentSessionWrapper {
             throw error;
           }
 
-          void prompt.then(() => {
+          void prompt.then(async () => {
             // Compatibility fallback if a future SDK resolves without invoking
             // the internal callback. This waits for the run, but never acks early.
             acceptPreflight();
+            await finishDirectRun({ aborted: this.lastRunAborted });
             finishPrompt();
             if (!streamingBehavior) this.emit(this.promptDoneEvent());
-          }, (error) => {
+          }, async (error) => {
             rejectPreflight(error);
+            await finishDirectRun({
+              aborted: this.lastRunAborted,
+              error: error instanceof Error ? error.message : String(error),
+            });
             finishPrompt();
             invalidateSessionListCache();
             // A preflight rejection is returned by the POST itself. Only an
@@ -2289,6 +2324,7 @@ const SUBAGENT_CONTROLLER = createSubagentController({
         : {}),
       chatOnly: options?.chatOnly,
       suppressCompletionNotifications: true,
+      onPromptAccepted: (task) => SUBAGENT_CONTROLLER.beginDirectPrompt(inner.sessionId, task),
       ...(options?.mcpHost ? { mcpHost: options.mcpHost } : {}),
     });
     registerRpcWrapper(wrapper);
@@ -2902,6 +2938,8 @@ export async function startRpcSession(
         });
       },
       suppressCompletionNotifications: Boolean(subagentResources),
+      // A prompt typed into a child's own chat is a resumed run, not an untracked prompt.
+      onPromptAccepted: (task) => SUBAGENT_CONTROLLER.beginDirectPrompt(inner.sessionId, task),
       ...(mcpHost ? { mcpHost } : {}),
       ...(chatOnlyExtensionModel ? { chatOnlyExtensionModel } : {}),
     });
