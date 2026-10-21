@@ -500,7 +500,7 @@ export async function GET(
       // driver can make it shorter than stat.size (see lib/text-preview.ts).
       const { size: readableSize, ...chunk } = readTextPreviewChunk(filePath, stat.size, offset);
       const language = getLanguage(filePath);
-      return NextResponse.json({ ...chunk, size: readableSize, language });
+      return NextResponse.json({ ...chunk, size: readableSize, language, mtime: stat.mtime.toISOString() });
     }
 
     if (type === "download") {
@@ -521,6 +521,8 @@ export async function GET(
       const documentMime = getDocumentMime(filePath);
       return NextResponse.json({
         size: stat.size,
+        // The watch's `change` events carry the same pair (lib/file-version.ts).
+        mtime: stat.mtime.toISOString(),
         language: getLanguage(filePath),
         mime: imageMime || audioMime || videoMime || documentMime || "text/plain",
         previewKind: documentPreviewKind(filePath),

@@ -151,7 +151,7 @@ test("fresh sessions use the preference while persisted and live sessions restor
     preferenceSource,
     /const existingSessionId = session\?\.id;[\s\S]*?useLayoutEffect\(\(\) => \{\s*if \(!existingSessionId && \(!isNew \|\| sessionIdRef\.current\)\) return;\s*setToolPresetState\(getPreferredToolPreset\(\)\)/,
   );
-  assert.match(source, /if \(agentState\?\.running\) \{\s*loadTools\(session\.id\)/);
+  assert.match(source, /if \(agentState\?\.running\) \{\s*loadTools\((sid|session\.id)\)/);
   assert.match(source, /d\.toolNames !== undefined \? getPresetFromToolNames\(d\.toolNames\) : CONFIGURED_TOOL_PRESET/);
   assert.match(changeSource, /setPreferredToolPreset\(preset\)/);
   assert.match(changeSource, /type: "set_tools",\s*\.\.\.\(toolNames !== undefined \? \{ toolNames \} : \{\}\),/);
@@ -466,10 +466,10 @@ test("keeps the selected session warm while idle and renews its lease", () => {
   );
   assert.match(source, /sessionPropIdRef\.current === sid/);
   assert.match(source, /SESSION_LEASE_RENEW_INTERVAL_MS = 30_000/);
-  assert.match(source, /fetch\(`\/api\/agent\/\$\{encodeURIComponent\(sid\)\}\/lease`/);
-  assert.match(source, /setInterval\(\(\) => void renewLease\(\), SESSION_LEASE_RENEW_INTERVAL_MS\)/);
-  assert.match(source, /result\.renewed === 0[\s\S]*?closeEvents\(\)[\s\S]*?maintainEventsConnected\(sid\)/);
-  assert.match(source, /if \(sessionPropIdRef\.current === sid\) \{[\s\S]*?cancelEventStreamGrace\(\);[\s\S]*?return;/);
+  assert.match(source, /`\/api\/agent\/\$\{encodeURIComponent\(sid\)\}\/lease/);
+  assert.match(source, /fetch\(sessionLeaseUrl\(sid\)/);
+  assert.match(source, /setInterval\(\(\) => void renew\(\), SESSION_LEASE_RENEW_INTERVAL_MS\)/);
+  assert.match(source, /eventStreamReleasedRef\.current = true;[\s\S]*?closeEvents\(\)/);
   assert.match(source, /maintainEventsConnected\(sid\)/);
   assert.doesNotMatch(source, /void connectEvents\(/);
   assert.match(chatWindowSource, /sessionRunning\?: boolean/);
@@ -486,10 +486,10 @@ test("opens the selected session's event stream even when Strict Mode re-runs ef
   // or shouldMaintain() refuses to open the stream on mount and on every
   // switch back to a running session.
   const warmSource = source.slice(
-    source.indexOf("  // Keep the selected session warm even while its agent is idle."),
-    source.indexOf("    const renewLease = async () => {"),
+    source.indexOf("  // Keep the selected session's stream open even while its agent is idle."),
+    source.indexOf("  // One lease request (holdSessionLivenessLease())"),
   );
-  assert.match(warmSource, /sessionHookMountedRef\.current = true;\s*maintainEventsConnected\(sid\);/);
+  assert.match(warmSource, /sessionHookMountedRef\.current = true;[\s\S]*?maintainEventsConnected\(sid\);/);
   assert.ok(
     warmSource.indexOf("sessionHookMountedRef.current = true;")
       < warmSource.indexOf("maintainEventsConnected(sid);"),
@@ -542,7 +542,13 @@ test("restoring a running session does not clear an SSE snapshot", () => {
     source.indexOf("useEffect(() => {\n    onSystemPromptChange"),
   );
 
-  assert.match(mountSource, /dispatch\(\{ type: "resume" \}\)/);
+  // The resume dispatch moved into the state reader every load shares.
+  const applyStateSource = source.slice(
+    source.indexOf("  const applyLoadedAgentState = useCallback"),
+    source.indexOf("  }, [dispatch, loadTools, waitForBashSettlement, waitForPromptSettlement]);"),
+  );
+  assert.match(applyStateSource, /dispatch\(\{ type: "resume" \}\)/);
+  assert.doesNotMatch(applyStateSource, /dispatch\(\{ type: "start" \}\)/);
   assert.doesNotMatch(mountSource, /dispatch\(\{ type: "start" \}\)/);
 });
 
@@ -601,7 +607,7 @@ test("keeps calls a tool made itself out of the running tools", () => {
     assert.notEqual(guard, -1, `${from} must skip nested tool events`);
     assert.ok(guard < caseSource.indexOf("const id = event.toolCallId"), `${from} must skip them before using the id`);
   }
-  assert.match(source, /import \{ isNestedToolExecutionEvent, isSystemMessageEvent \} from "@\/lib\/agent-event-wire";/);
+  assert.match(source, /import \{[^}]*isNestedToolExecutionEvent[^}]*isSystemMessageEvent[^}]*\} from "@\/lib\/agent-event-wire";/);
 });
 
 test("plays the enabled sound once when an extension dialog appears over an empty slot", () => {
