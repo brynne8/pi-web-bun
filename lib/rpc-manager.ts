@@ -46,11 +46,12 @@ import {
   hasSubagentResourceSnapshot,
   readSubagentRun,
   readSubagentSessionResources,
+  settleOrphanedSubagentStatus,
   subagentExtensionLoaderOptions,
   subagentToolOptions,
   SUBAGENT_CONTROL_TOOL_NAMES,
 } from "./subagents";
-import { createSubagentController } from "./subagent-runtime";
+import { createSubagentController, getLiveSubagentStatus } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
 import { isBgTasksEnabled } from "./bg-tasks-settings";
 import { createBgTaskNotifier, killBgTasksForSession } from "./bash-bg-tasks";
@@ -2508,6 +2509,10 @@ export function getRpcSessionInfos(options: { includeTransient?: boolean } = {})
     const sessionFile = manager.getSessionFile() ?? session.sessionFile;
     const persisted = Boolean(sessionFile && existsSync(sessionFile));
     const subagent = readSubagentRun(entries as unknown as SessionEntry[], header?.id ?? session.sessionId, sessionFile ?? "");
+    const runtimeSessionId = header?.id ?? session.sessionId;
+    const relationStatus = session.isRunning()
+      ? "running" as const
+      : getLiveSubagentStatus(runtimeSessionId) ?? (subagent ? settleOrphanedSubagentStatus(subagent.status) : undefined);
 
     // An ensure_session call creates an idle, empty runtime while the composer
     // loads commands. Do not leak it into history before a prompt is accepted.
@@ -2539,7 +2544,7 @@ export function getRpcSessionInfos(options: { includeTransient?: boolean } = {})
           parentSessionId: subagent.parentSessionId,
           profile: subagent.profile,
           description: subagent.description,
-          status: session.isRunning() ? "running" as const : subagent.status,
+          status: relationStatus ?? subagent.status,
         },
       } : {}),
       transient: !persisted,
