@@ -82,9 +82,13 @@ export async function GET(
       return NextResponse.json({ running: false });
     }
 
-    const state = await session.send({ type: "get_state" }) as Record<string, unknown>;
     // Status reads leave out the system prompt, most of the reply (agentStatusUrl()).
-    if (new URL(req.url).searchParams.get("systemPrompt") === "0") delete state.systemPrompt;
+    const omitSystemPrompt = new URL(req.url).searchParams.get("systemPrompt") === "0";
+    const state = await session.send({
+      type: "get_state",
+      ...(omitSystemPrompt ? { includeSystemPrompt: false } : {}),
+    }) as Record<string, unknown>;
+    if (omitSystemPrompt) delete state.systemPrompt;
     return NextResponse.json({ running: true, state });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

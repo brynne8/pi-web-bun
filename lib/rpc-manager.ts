@@ -55,6 +55,7 @@ import { createBgTaskNotifier, killBgTasksForSession } from "./bash-bg-tasks";
 import { resolveShellTools } from "./powershell-settings";
 import { CHAT_ONLY_RESOURCE_LOADER_OPTIONS, contextFilesSystemPrompt } from "./chat-only";
 import { createExactSystemPromptExtension } from "./exact-system-prompt";
+import { computeForcedSystemPrompt } from "./effective-system-prompt";
 import { createPiWebBuiltinExtensions, createSubagentCodemodeExtension, createSubagentMcpExtensions } from "./builtin-extensions";
 import type { McpHost } from "./mcp-host";
 import { mcpPromptPreparation, type McpCommandCandidate } from "./mcp-command";
@@ -333,6 +334,8 @@ export class AgentSessionWrapper {
   private extensionBindingPromise: Promise<void> | null = null;
   private extensionBindingError: unknown = null;
   private readonly exactSystemPrompt?: () => string;
+  // The prompt a plugin forced, computed from the session's extension runner.
+  private forcedSystemPrompt?: { toolNames: string; prompt: string | undefined };
   private readonly chatOnly: boolean;
   private readonly onAgentRunComplete?: AgentRunCompleteListener;
   private readonly suppressCompletionNotifications: boolean;
@@ -874,6 +877,34 @@ export class AgentSessionWrapper {
     }
   }
 
+  /**
+   * The prompt the model receives: the text a plugin forced for a run, or the
+   * transcript's own sections when none forced one.
+   *
+   * The forced prompt is read once per tool loadout: the handlers that produce it run
+   * outside a run here, so they are not asked again for every state read.
+   */
+  private async resolveSystemPrompt(): Promise<string> {
+    const replay = () => this.inner.agent.state?.systemPrompt || this.inner.systemPrompt || "";
+    const toolNames = this.inner.getActiveToolNames?.().join(",") ?? "";
+    const cached = this.forcedSystemPrompt;
+    if (cached && cached.toolNames === toolNames) return cached.prompt ?? replay();
+    // A run evaluates the handlers itself; a second evaluation beside it would run their
+    // side effects twice.
+    if (this.isRunning()) return cached?.prompt ?? replay();
+    let prompt: string | undefined;
+    try {
+      prompt = await computeForcedSystemPrompt(this.inner);
+    } catch (error) {
+      console.error(
+        "[pi-web] could not read the forced system prompt:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+    this.forcedSystemPrompt = { toolNames, prompt };
+    return prompt ?? replay();
+  }
+
   async send(command: Record<string, unknown>): Promise<unknown> {
     const type = command.type as string;
     const allowedDuringReplacement = COMMANDS_ALLOWED_DURING_SESSION_REPLACEMENT.has(type);
@@ -1080,6 +1111,11 @@ export class AgentSessionWrapper {
       case "get_state": {
         const model = this.inner.model;
         const contextUsage = this.inner.getContextUsage();
+        // A status read leaves the prompt out: reading it runs the extension handlers, and
+        // a poll must not ask a plugin for its prompt every few seconds.
+        const systemPrompt = command.includeSystemPrompt === false
+          ? undefined
+          : this.exactSystemPrompt?.() ?? await this.resolveSystemPrompt();
         return {
           sessionId: this.inner.sessionId,
           sessionFile: this.inner.sessionFile ?? "",
@@ -1100,13 +1136,16 @@ export class AgentSessionWrapper {
             ? { percent: contextUsage.percent, contextWindow: contextUsage.contextWindow, tokens: contextUsage.tokens }
             : null,
           // An exact prompt is projected onto each run by the inline extension. Every other
-          // session reports `agent.state.systemPrompt`, which replays the transcript: that is
-          // what the model actually saw, including sections a `before_agent_start` handler
-          // changed for the run. It stays empty until the first run persists a system message,
-          // so a session that has not sent anything yet falls back to the session getter, which
-          // renders the prompt from the current options. The getter alone would drop those
-          // per-run changes again once the run ends.
-          systemPrompt: this.exactSystemPrompt?.() ?? (this.inner.agent.state?.systemPrompt || this.inner.systemPrompt || ""),
+          // session reports the prompt the model receives: a plugin's `before_agent_start`
+          // handler replaces it for the run, and the transcript keeps Pi's own sections, so
+          // the replay alone never shows what the plugin added. The forced prompt is read
+          // from the session's extension runner; without one the transcript's replay is what
+          // the model saw, including sections a handler changed for the run. It stays empty
+          // until the first run persists a system message, so a session that has not sent
+          // anything yet falls back to the session getter, which renders the prompt from the
+          // current options. The getter alone would drop those per-run changes again once
+          // the run ends.
+          ...(systemPrompt !== undefined ? { systemPrompt } : {}),
           thinkingLevel: this.inner.agent.state?.thinkingLevel ?? "off",
           extensionStatuses: this.getExtensionStatuses(),
           extensionWidgets: this.getExtensionWidgets(),

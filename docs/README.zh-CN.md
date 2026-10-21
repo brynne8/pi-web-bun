@@ -139,6 +139,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **改动清单不用再看一遍目录树。** 侧边栏的 Git 清单每次刷新都重新从 Git 读，所以它显示的就是此刻的目录树。问 Git 的三个问题——仓库根目录、状态、改动行数——是一起发出的，不是一个接一个；未跟踪文件的行数只数一遍，文件没变就留着这个结果，所以未跟踪文件很多的仓库也能很快作答。原版把同样的问题一个接一个地问，并且每次刷新都把所有未跟踪文件重数一遍。（[说明](./docs/agents/files-and-access.md#when-the-file-tree-reloads)）
 
+**「系统」面板显示模型拿到的那份提示词。** 「系统」面板列出完整的系统提示词，改写过它的插件也属于这份文本：pi-caveman 的说话规则会出现在模型读到它们的地方，而不是只留在插件自己的文件里。原版从记录里重放 pi 自己的那些段落，插件强制的那份提示词在那里从不出现——pi 在这次运行里送出它，记录里仍留着 pi 自己的段落。（[说明](./docs/agents/sessions.md#the-system-panel-shows-the-prompt-the-model-receives)）
+
 ### 不算 fork 差异的部分
 
 下面这些来自上游，本仓库有它们只是因为上游写了它们：让「停止」不落在「压缩」接手的格子里、以免误双击（`0a38de9`，[#1131](https://github.com/agegr/pi-web/pull/1131)）；从标题折叠自定义消息（`574cbba`，[#1133](https://github.com/agegr/pi-web/pull/1133)）；已删除的子代理 worktree 改从它分叉出来的仓库回答（`f9a370e`，[#1137](https://github.com/agegr/pi-web/pull/1137)）；由 profile 决定子代理的启动参数（`fb6df88`，[#1138](https://github.com/agegr/pi-web/pull/1138)）；以及文件预览里的 CSV/TSV 表格（`f87afbb`，[#1150](https://github.com/agegr/pi-web/pull/1150)）。本 README 的早期版本把这些算成了 fork 的工作，现在不再这样写。

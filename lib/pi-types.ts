@@ -1,6 +1,7 @@
 import type {
   AgentSessionEvent,
   BashOperations,
+  BuildSystemPromptOptions,
   SessionManager,
   SettingsManager,
   SlashCommandInfo,
@@ -85,6 +86,15 @@ interface ExtensionRunnerLike {
   }>;
   emit?(event: { type: "session_shutdown"; reason: "quit" }): Promise<unknown>;
   setUIContext?(uiContext?: unknown, mode?: "tui" | "rpc" | "json" | "print"): void;
+  /** The prompt options a run starts from; pi-web reads them to preview a prompt. */
+  createCommandContext?(): {
+    getSystemPromptOptions?(): BuildSystemPromptOptions;
+  };
+  /** Evaluate the `before_agent_start` handlers, as a run does. */
+  emitBeforeAgentStart?(
+    trigger: { messageType: "user"; prompt: string },
+    systemPromptOptions: BuildSystemPromptOptions,
+  ): Promise<{ systemPromptOptions?: { forceSystemPrompt?: string } }>;
 }
 
 type DialogOptionsLike = {

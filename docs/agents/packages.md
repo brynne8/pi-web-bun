@@ -7,7 +7,7 @@
 ## What a package can change
 Standard pi package — the mechanism is entirely pi's, and a package behaves identically under the `pi` CLI and pi-web. An extension default-exports a factory receiving pi's `ExtensionAPI`; there is no build step (pi loads `.ts` through jiti). The core levers:
 
-- **Prompt** — `before_agent_start` forces the system prompt; `context` / `context_with_system` edit what the model sees.
+- **Prompt** — `before_agent_start` forces the system prompt; `context` / `context_with_system` edit what the model sees. The **System** panel shows that forced prompt, so a package's text is visible where the model reads it ([sessions.md](sessions.md#the-system-panel-shows-the-prompt-the-model-receives)).
 - **Lifecycle** — `session_start` / `session_shutdown`, `agent_start` / `agent_end`, `turn_start` / `turn_end`, and the compaction and fork/switch guards.
 - **Model request** — `before_provider_request` / `before_provider_headers` / `after_provider_response` / `provider_stream_event`; `model_select` / `thinking_level_select` veto or rewrite choices.
 - **Tools and messages** — `registerTool`, `registerCommand`, `tool_call` / `tool_result`, `tool_execution_*`, `user_bash`, `input`.
