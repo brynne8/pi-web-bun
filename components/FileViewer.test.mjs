@@ -120,6 +120,45 @@ test("partly loaded HTML previews up to the HTML cap; partly loaded markdown doe
   assert.equal(hasPreview({ ...partial, size: cap + 1 }, false, false, true, cap), true);
 });
 
+test("the code column is the real sideways scroller, beside the numbers", async () => {
+  // A scroller's horizontal scrollbar spans its whole box, so it would run under
+  // the line numbers. The source view instead makes the code its own scroller and
+  // keeps the numbers in a column beside it: no fake bar, no hidden scrollbar.
+  const width = source.match(/export const FILE_LINE_NUMBER_WIDTH = (\d+);/)?.[1];
+  assert.equal(Number(width), 48);
+  assert.match(source, /width: FILE_LINE_NUMBER_WIDTH,\s*minWidth: FILE_LINE_NUMBER_WIDTH/);
+
+  // The gutter renders one absolutely positioned cell per rendered line, at that
+  // line's own offset and height, so a wrapped line's number stays on its row.
+  assert.match(source, /export const FILE_GUTTER_NUMBER_STYLE/);
+  assert.match(source, /height: Math\.max\(0, \(offsets\[line \+ 1\] \?\? 0\) - \(offsets\[line\] \?\? 0\)\),/);
+  assert.match(source, /export const FILE_LINE_NUMBER_STYLE/);
+
+  // The column pair is sticky at the top of the scrollable space, so its height
+  // is the scroller's visible one and it never scrolls away.
+  assert.match(source, /position: "sticky",\s*top: 0,\s*width: "100%",\s*height: Math\.max\(1, sourceVirtual\.viewportHeight\),/);
+  // Both layers ride the scroll with a transform, written straight to the nodes
+  // so a scroll lands in the same frame and React never resets it.
+  assert.match(source, /applySourceScroll\(scrollTop, codeInnerRef\.current, gutterInnerRef\.current\)/);
+  assert.match(source, /applySourceScroll\(viewerStateRef\.current\.scrollTop, codeInnerRef\.current, gutterInnerRef\.current\)/);
+  assert.match(source, /if \(code\) code\.style\.transform = transform;/);
+  assert.match(source, /if \(gutter\) gutter\.style\.transform = transform;/);
+  // Neither layer carries the transform in its style prop.
+  assert.doesNotMatch(source, /transform: `translateY/);
+
+  // The code column is the scroller: sideways in it, never in the outer box.
+  assert.match(source, /overflowX: "auto",\s*overflowY: "hidden",/);
+  assert.match(source, /flex: "1 1 auto",\s*minWidth: 0,/);
+  // Rows carry no inline number cell any more; the column owns them.
+  assert.match(source, /showLineNumbers=\{false\}/);
+  assert.doesNotMatch(source, /lineNumberStyle=\{\{\s*\.\.\.FILE_LINE_NUMBER_STYLE/);
+  // No fake scrollbar, no hidden native one, no per-browser escape hatch.
+  assert.doesNotMatch(source, /file-hscroll|file-viewer-content-gutter/);
+
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.doesNotMatch(css, /file-hscroll|file-viewer-content-gutter/);
+});
+
 test("the line-number gutter is pinned in every view", () => {
   // Evaluate the module's own style constants (the numbers in the highlighted,
   // diff and snapshot views all come from these), then check the Diff view's
@@ -140,10 +179,12 @@ test("the line-number gutter is pinned in every view", () => {
     const { outputText } = ts.transpileModule(`${statements.join("\n")}\nreturn [${names.join(", ")}];`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } });
     return new Function(outputText)();
   };
-  const [codeStyle, gutterStyle, maxRows] = constants("FILE_CODE_STYLE", "FILE_LINE_NUMBER_STYLE", "SOURCE_HIGHLIGHT_MAX_LINES");
+  const [gutterWidth, codeStyle, gutterStyle, maxRows] = constants("FILE_LINE_NUMBER_WIDTH", "FILE_CODE_STYLE", "FILE_LINE_NUMBER_STYLE", "SOURCE_HIGHLIGHT_MAX_LINES");
+  assert.equal(gutterWidth, 48);
 
-  // The source block hands the gutter style to the highlighter it owns.
-  assert.match(source, /lineNumberStyle=\{\{\s*\.\.\.FILE_LINE_NUMBER_STYLE/);
+  // The diff view still numbers its rows inline, so its gutter is the same
+  // column the source view used to draw (the source view moved it out; see the
+  // code-column test above).
 
   // The Diff view's first row number, with every row an added line.
   const diffView = file.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "DiffView");

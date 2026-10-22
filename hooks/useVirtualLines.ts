@@ -26,6 +26,8 @@ interface UseVirtualLinesOptions {
 
 export interface VirtualLines {
   range: LineWindow;
+  /** The scroller's visible height, for a column that is pinned beside it. */
+  viewportHeight: number;
   /** `offsets[i]` is the top of line `i`, `offsets[totalLines]` the full height. */
   offsets: Float64Array;
   totalHeight: number;
@@ -180,5 +182,11 @@ export function useVirtualLines({
     setViewport({ scrollTop: element.scrollTop, height: element.clientHeight });
   }, [scrollRef]);
 
-  return { range, offsets, totalHeight: offsets[totalLines] ?? 0, scrollToLine };
+  return {
+    range,
+    offsets,
+    totalHeight: offsets[totalLines] ?? 0,
+    viewportHeight: viewport.height,
+    scrollToLine,
+  };
 }

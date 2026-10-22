@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useState, useRef, useCallback, useMemo, type CSSProperties, type MouseEvent } from "react";
+import { memo, useEffect, useState, useRef, useCallback, useMemo, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import type { SyntaxHighlighterProps } from "react-syntax-highlighter";
 import SyntaxHighlighter from "react-syntax-highlighter/dist/esm/prism-light";
 import renderSyntaxNode from "react-syntax-highlighter/dist/esm/create-element";
@@ -177,12 +177,34 @@ delete fileViewerDarkTheme['pre[class*="language-"]'].background;
 // row spans the widest line (the <pre> or wrapper is `width: max-content` and a
 // row is `min-width: 100%`), so no line's number scrolls away behind its text.
 // `lineHeight` is FILE_CODE_STYLE's 12px * 1.6 so both columns share one line box.
+export const FILE_LINE_NUMBER_WIDTH = 48;
+
+/**
+ * The source view's line numbers in their own column, beside the code scroller
+ * (see the source branch of `TextFileViewer`): one absolutely positioned cell
+ * per rendered line, at the line's own offset and with its measured height, so
+ * a wrapped line's number sits on that line's first row.
+ */
+export const FILE_GUTTER_NUMBER_STYLE: CSSProperties = {
+  padding: "0 10px",
+  boxSizing: "border-box",
+  textAlign: "right",
+  color: "var(--text-dim)",
+  fontFamily: "var(--font-mono)",
+  fontWeight: "var(--font-mono-weight)",
+  fontSize: 11,
+  fontStyle: "normal",
+  fontVariantNumeric: "tabular-nums",
+  lineHeight: "19.2px",
+  userSelect: "none",
+};
+
 export const FILE_LINE_NUMBER_STYLE: CSSProperties = {
   position: "sticky",
   left: 0,
   zIndex: 1,
-  width: 48,
-  minWidth: 48,
+  width: FILE_LINE_NUMBER_WIDTH,
+  minWidth: FILE_LINE_NUMBER_WIDTH,
   padding: "0 10px",
   textAlign: "right",
   color: "var(--text-dim)",
@@ -367,11 +389,8 @@ const SourceBlock = memo(function SourceBlock({
       className={wrapLines ? "file-source-view is-wrapped" : "file-source-view"}
       language={language === "text" || !prismReady ? "plaintext" : language}
       style={isDark ? fileViewerDarkTheme : vs}
-      showLineNumbers
+      showLineNumbers={false}
       startingLineNumber={start + 1}
-      lineNumberStyle={{
-        ...FILE_LINE_NUMBER_STYLE,
-      }}
       customStyle={{
         margin: 0,
         padding: 0,
@@ -403,6 +422,16 @@ const SourceBlock = memo(function SourceBlock({
     </SyntaxHighlighter>
   );
 });
+
+// The source view scrolls vertically in the outer box, but its lines live in a
+// viewport-tall column pair, so the two layers ride the scroll with a transform:
+// one write per scroll event, on the compositor, and never through the style
+// prop (React would reset it on the next render).
+function applySourceScroll(scrollTop: number, code: HTMLDivElement | null, gutter: HTMLDivElement | null): void {
+  const transform = `translateY(${-scrollTop}px)`;
+  if (code) code.style.transform = transform;
+  if (gutter) gutter.style.transform = transform;
+}
 
 function getFileApiUrl(
   filePath: string,
@@ -1668,6 +1697,40 @@ function TextFileViewer({
     () => blockSpacerHeights(sourceVirtual.offsets, sourceBlocks),
     [sourceBlocks, sourceVirtual.offsets],
   );
+  // The source view's two columns: the numbers beside the code, which is itself
+  // the horizontal scroller. The pair is sticky at the top of the scrollable
+  // space, so the code column's own scrollbar sits under the code only and never
+  // under the numbers, and the two layers ride the scroll with a transform.
+  const codeScrollRef = useRef<HTMLDivElement | null>(null);
+  const codeInnerRef = useRef<HTMLDivElement | null>(null);
+  const gutterInnerRef = useRef<HTMLDivElement | null>(null);
+  // Room below the last line: the code column's horizontal scrollbar overlays
+  // the bottom of the viewport, and a partly loaded file needs Load more's row.
+  const sourceScrollPadding = showLoadMore ? 48 : 12;
+  const gutterNumbers = useMemo(() => {
+    const offsets = sourceVirtual.offsets;
+    const numbers: ReactNode[] = [];
+    sourceBlocks.forEach((block) => {
+      for (let line = block.start; line < block.end; line += 1) {
+        numbers.push((
+          <span
+            key={line}
+            style={{
+              position: "absolute",
+              top: offsets[line] ?? 0,
+              left: 0,
+              right: 0,
+              height: Math.max(0, (offsets[line + 1] ?? 0) - (offsets[line] ?? 0)),
+              ...FILE_GUTTER_NUMBER_STYLE,
+            }}
+          >
+            {line + 1}
+          </span>
+        ));
+      }
+    });
+    return numbers;
+  }, [sourceBlocks, sourceVirtual.offsets]);
 
   // Find in the whole loaded text, not in the rendered window: the source list
   // only holds the lines around the viewport, so the browser's own find cannot
@@ -1921,6 +1984,9 @@ function TextFileViewer({
 
     content.scrollTop = viewerStateRef.current.scrollTop;
     content.scrollLeft = viewerStateRef.current.scrollLeft;
+    // The source view scrolls sideways in the code column, not in this box.
+    if (codeScrollRef.current) codeScrollRef.current.scrollLeft = viewerStateRef.current.scrollLeft;
+    applySourceScroll(viewerStateRef.current.scrollTop, codeInnerRef.current, gutterInnerRef.current);
     scrollRestorePendingRef.current = false;
   }, [
     data?.content,
@@ -2174,10 +2240,17 @@ function TextFileViewer({
         ref={contentRef}
         className="file-viewer-content"
         onScroll={(event) => {
-          viewerStateRef.current.scrollTop = event.currentTarget.scrollTop;
-          viewerStateRef.current.scrollLeft = event.currentTarget.scrollLeft;
+          const scrollTop = event.currentTarget.scrollTop;
+          viewerStateRef.current.scrollTop = scrollTop;
+          viewerStateRef.current.scrollLeft = codeScrollRef.current?.scrollLeft ?? event.currentTarget.scrollLeft;
+          applySourceScroll(scrollTop, codeInnerRef.current, gutterInnerRef.current);
         }}
-        style={{ flex: 1, overflow: "auto", background: "var(--bg)", paddingBottom: showLoadMore ? 48 : undefined }}
+        style={{
+          flex: 1,
+          overflow: "auto",
+          background: "var(--bg)",
+          paddingBottom: showingSource ? undefined : (showLoadMore ? 48 : undefined),
+        }}
       >
         {effectiveDisplayMode === "diff" && hasGitDiff ? (
           <DiffView patch={gitDiff.patch!} wrapLines={wrapLines} />
@@ -2269,35 +2342,97 @@ function TextFileViewer({
             scrollRef={contentRef}
           />
         ) : (
-          <div
-            className="file-source-view is-windowed"
-            style={{
-              position: "relative",
-              width: wrapLines ? "100%" : "max-content",
-              minWidth: "100%",
-              minHeight: "100%",
-              background: "var(--bg)",
-              ...FILE_CODE_STYLE,
-            }}
-          >
-            {/* The space above the rendered blocks, then the blocks themselves in
-                flow (so their width still sets the horizontal scrollbar), then the
-                rest. Row heights the browser reports replace the estimates. */}
-            <div aria-hidden="true" style={{ height: spacers.top }} />
-            {sourceBlocks.map((block) => (
-              <SourceBlock
-                key={`${language}:${block.start}:${block.end}`}
-                lines={sourceLines}
-                start={block.start}
-                end={block.end}
-                contextStart={block.contextStart}
-                language={language}
-                prismReady={prismReady}
-                isDark={isDark}
-                wrapLines={wrapLines}
-              />
-            ))}
-            <div aria-hidden="true" style={{ height: spacers.bottom }} />
+          <div style={{ position: "relative", height: sourceVirtual.totalHeight + sourceScrollPadding, width: "100%" }}>
+            <div
+              className="file-source-columns"
+              style={{
+                position: "sticky",
+                top: 0,
+                width: "100%",
+                height: Math.max(1, sourceVirtual.viewportHeight),
+                display: "flex",
+                alignItems: "stretch",
+              }}
+            >
+              {/* Line numbers in their own column: they never scroll sideways and
+                  never sit under a scrollbar. One cell per rendered line, placed
+                  at the line's own offset. */}
+              <div
+                className="file-source-gutter"
+                aria-hidden="true"
+                style={{
+                  flex: `0 0 ${FILE_LINE_NUMBER_WIDTH}px`,
+                  width: FILE_LINE_NUMBER_WIDTH,
+                  position: "relative",
+                  overflow: "hidden",
+                  background: "var(--bg-panel)",
+                  borderRight: "1px solid var(--border)",
+                  zIndex: 1,
+                }}
+              >
+                <div
+                  ref={gutterInnerRef}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: sourceVirtual.totalHeight,
+                    willChange: "transform",
+                  }}
+                >
+                  {gutterNumbers}
+                </div>
+              </div>
+              {/* The code is the real horizontal scroller: its native scrollbar
+                  spans this column only. */}
+              <div
+                ref={codeScrollRef}
+                className="file-source-code"
+                style={{
+                  flex: "1 1 auto",
+                  minWidth: 0,
+                  position: "relative",
+                  overflowX: "auto",
+                  overflowY: "hidden",
+                  background: "var(--bg)",
+                }}
+              >
+                <div
+                  ref={codeInnerRef}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: wrapLines ? "100%" : "max-content",
+                    minWidth: "100%",
+                    height: sourceVirtual.totalHeight,
+                    background: "var(--bg)",
+                    willChange: "transform",
+                    ...FILE_CODE_STYLE,
+                  }}
+                >
+                  {/* The space above the rendered blocks, the blocks themselves in
+                      flow (their width sets the scroller's range), then the rest.
+                      Row heights the browser reports replace the estimates. */}
+                  <div aria-hidden="true" style={{ height: spacers.top }} />
+                  {sourceBlocks.map((block) => (
+                    <SourceBlock
+                      key={`${language}:${block.start}:${block.end}`}
+                      lines={sourceLines}
+                      start={block.start}
+                      end={block.end}
+                      contextStart={block.contextStart}
+                      language={language}
+                      prismReady={prismReady}
+                      isDark={isDark}
+                      wrapLines={wrapLines}
+                    />
+                  ))}
+                  <div aria-hidden="true" style={{ height: spacers.bottom }} />
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>
