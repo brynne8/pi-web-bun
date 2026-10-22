@@ -33,6 +33,7 @@ import type {
   SessionEntry,
   SessionInfo,
   SessionMessageEntry,
+  TextContent,
 } from "./types";
 import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS, type HeadlessCustomUiTui } from "./custom-ui-terminal";
 import { createSettledReportSink } from "./settled-report-note";
@@ -702,6 +703,52 @@ export class AgentSessionWrapper {
     return { cancelled: false, editorText: result.editorText };
   }
 
+  /**
+   * The custom messages pi still holds in its queues. `clearQueue()` returns only user texts, so
+   * without this Stop would drop a settled report or an extension's message that was waiting
+   * behind the run. They are put back once the run is idle.
+   */
+  private takeQueuedCustomMessages(): Array<{ customType: string; content: string | TextContent[]; display: boolean; details?: unknown }> {
+    const agent = this.inner.agent as unknown as {
+      steeringQueue?: { messages?: unknown[] };
+      followUpQueue?: { messages?: unknown[] };
+    } | undefined;
+    const seen = new Set<unknown>();
+    const taken: Array<{ customType: string; content: string | TextContent[]; display: boolean; details?: unknown }> = [];
+    for (const raw of [...(agent?.steeringQueue?.messages ?? []), ...(agent?.followUpQueue?.messages ?? [])]) {
+      if (!raw || typeof raw !== "object" || seen.has(raw)) continue;
+      seen.add(raw);
+      const message = raw as { role?: unknown; customType?: unknown; content?: unknown; display?: unknown; details?: unknown };
+      if (message.role !== "custom" || typeof message.customType !== "string") continue;
+      taken.push({
+        customType: message.customType,
+        content: (message.content ?? "") as string | TextContent[],
+        display: message.display === true,
+        details: message.details,
+      });
+    }
+    return taken;
+  }
+
+  /** Put custom messages taken from pi's queue back once Stop has unwound the run. */
+  private async restoreQueuedCustomMessages(
+    messages: ReadonlyArray<{ customType: string; content: string | TextContent[]; display: boolean; details?: unknown }>,
+    startTurn: boolean,
+  ): Promise<void> {
+    let first = true;
+    for (const message of messages) {
+      try {
+        await this.inner.sendCustomMessage(message, { deliverAs: "followUp", triggerTurn: startTurn && first });
+      } catch (error) {
+        console.error(
+          "[pi-web] failed to restore a queued custom message after Stop:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+      first = false;
+    }
+  }
+
   /** The session's current leaf, or `undefined` when this wrapper cannot read it. */
   private currentLeafId(): string | null | undefined {
     try {
@@ -1119,7 +1166,10 @@ export class AgentSessionWrapper {
         // steering after the aborted tool calls and appends the message before it notices the
         // signal — which leaves a user message in the transcript with no answer and no run to
         // answer it. Queued images are lost with it: pi keeps only the text.
+        const queuedCustomMessages = this.takeQueuedCustomMessages();
         const queuedAtStop = this.inner.clearQueue();
+        // clearQueue returns only the user texts. Custom messages (a settled report, an
+        // extension's notice) are restored below, after the run is idle.
         // Stop must unwind extension commands that have not started the agent yet.
         this.extensionUiAbortController.abort(new DOMException("Extension UI cancelled by Stop", "AbortError"));
         // A prompt still waiting for MCP servers is withdrawn before it starts a run.
@@ -1133,6 +1183,7 @@ export class AgentSessionWrapper {
           // pi's CLI puts these texts in the editor; pi-web hands them back so the client
           // can send them to a run of their own (see `handleAbort`).
           if (queuedAtStop.steering.length > 0 || queuedAtStop.followUp.length > 0) {
+            await this.restoreQueuedCustomMessages(queuedCustomMessages, false);
             return { queuedMessages: queuedAtStop };
           }
           // Nothing was queued, so Stop's target is the prompt of the run just stopped: an
@@ -1140,6 +1191,10 @@ export class AgentSessionWrapper {
           // transcript). A queued message keeps its prompt where it is, since its author meant a
           // further run and that prompt was answered as far as it was going to be.
           const retractedPrompt = await this.retractUnansweredPrompt(leafAtStop).catch(() => null);
+          await this.restoreQueuedCustomMessages(
+            queuedCustomMessages,
+            queuedAtStop.steering.length === 0 && queuedAtStop.followUp.length === 0,
+          );
           return {
             queuedMessages: queuedAtStop,
             ...(retractedPrompt ? { retractedPrompt } : {}),

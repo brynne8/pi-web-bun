@@ -201,13 +201,11 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
    * busy parent that never clears, is dead-lettered; the error is rethrown so the caller logs it.
    */
   async function deliverBatch(parent: SettledReportParent, sessionId: string, note: SettledReportNote): Promise<void> {
-    let lastError: unknown;
     for (let attempt = 1; attempt <= DELIVERY_MAX_ATTEMPTS; attempt++) {
       try {
         await sendNote(parent, note, attempt > 1);
         return;
       } catch (error) {
-        lastError = error;
         if (!isBusy(error) || attempt === DELIVERY_MAX_ATTEMPTS) {
           writeDeadLetter(sessionId, note, attempt, error);
           throw error;
@@ -272,14 +270,10 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
         note.blocks.splice(index, 1);
       }
       if (note.reports.length > 0) return;
-      // A batch with nothing left must not wake the parent to read nothing. When pi already took
-      // it, the note stays so a later report rides the same (empty) message instead of opening a
-      // second one; `consumed` then clears it as usual.
-      if (note.consumed) {
-        notes.delete(sessionId);
-        return;
-      }
-      if (!dropQueuedNote(note)) return;
+      // Nothing left to wake the parent for. Take the empty message out if pi still holds it, and
+      // drop the note either way: a note kept because the queue lookup is weak would swallow the
+      // next report exactly as the lost batch did.
+      if (!note.consumed) dropQueuedNote(note);
       note.stopWatching();
       notes.delete(sessionId);
     },
