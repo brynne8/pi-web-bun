@@ -49,14 +49,7 @@ export const PENDING_POINTER_CUSTOM_TYPE = "pi-web:pending-pointer";
  * results waiting" under the user's goals and constraints.
  */
 export const PENDING_POINTER_PREFIX =
-  "The following is Pi Web's own reminder about background results, not a message from the user. It carries no new task: it says results exist, and it is for you to decide whether to look now or finish what you are doing.\n\n";
-
-/**
- * The sentence both report prefixes carry: the report is the model's first hint that other
- * results may exist, so the pointer belongs there rather than in a second message.
- */
-export const PENDING_HINT_SENTENCE =
-  "Other background results may have finished in the meantime; call pending_notifications to list the ones still outside this conversation.";
+  "The following is not a message from the user: a reminder that background results exist. Look now or finish what you are doing.\n\n";
 
 /** Reports kept per parent session, oldest dropped first. An index, not an archive. */
 const PENDING_PER_PARENT_LIMIT = 12;
@@ -156,7 +149,8 @@ export function formatPendingNotifications(
   pending: readonly PendingNotification[],
   nowMs: number = Date.now(),
 ): string {
-  if (pending.length === 0) return "No pending background results.";
+  // An empty answer must not invite another call: only the reminder names a new batch.
+  if (pending.length === 0) return "No pending background results. Do not call this again until a reminder says results are waiting.";
   const bash = pending.filter((entry) => entry.kind === "bash").length;
   const counts = [
     bash > 0 ? `${bash} ${bash === 1 ? "command" : "commands"}` : "",
@@ -185,5 +179,5 @@ export function formatPendingPointer(pending: readonly PendingNotification[]): s
     bash > 0 ? `${bash} 个 bash 命令` : "",
     agents > 0 ? `${agents} 个子代理` : "",
   ].filter(Boolean).join("、");
-  return `${PENDING_POINTER_PREFIX}您有 ${pending.length} 条未处理的后台通知（${kinds}），使用 ${PENDING_TOOL_NAME} 可以查看列表。`;
+  return `${PENDING_POINTER_PREFIX}您有 ${pending.length} 条未处理的后台通知（${kinds}）。现在可以调用 ${PENDING_TOOL_NAME} 查看；没有这条提醒时不要调用。`;
 }

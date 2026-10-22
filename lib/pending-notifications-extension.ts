@@ -39,7 +39,7 @@ export function createPendingNotificationsExtension(): InlineExtension {
       // The reminder. A report waits for the run to end, which is the whole run — a model ten
       // tool calls into a refactor learns about a finished build only when it stops. So at
       // every turn boundary, while results are still waiting, one model-only line is steered:
-      // it says how many there are and names the tool, and says nothing about what to do next.
+      // it says how many there are, names the tool, and says this reminder is when to call it.
       pi.on("turn_end", (_event, ctx) => {
         const sessionId = ctx?.sessionManager?.getSessionId?.();
         if (!sessionId) return;
@@ -66,7 +66,8 @@ export function createPendingNotificationsExtension(): InlineExtension {
         name: PENDING_TOOL_NAME,
         label: "Pending background results",
         description:
-          "List background results that finished but have not reached this conversation: backgrounded commands and background subagent runs. "
+          "Read background results a reminder has just announced: commands and subagent runs that finished but have not reached this conversation. "
+          + "They arrive on their own, so never call this to poll a run — stop, and its report arrives. "
           + "Returns the count and one line per result: outcome, finish time, and the call that fetches it.",
         exposure: PENDING_TOOL_EXPOSURE,
         parameters: Type.Object({}),
