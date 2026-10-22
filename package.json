@@ -100,5 +100,8 @@
     "remark-math": "^6.0.0",
     "tailwindcss": "^4.2.2",
     "typescript": "^5"
+  },
+  "overrides": {
+    "lightningcss": "1.33.0"
   }
 }
