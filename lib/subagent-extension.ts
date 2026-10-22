@@ -143,7 +143,7 @@ export interface SubagentExtensionRuntime {
    */
   abort(sessionId: string): Promise<void>;
   notifyParent(run: SubagentRunInfo): Promise<void>;
-  markResultConsumed(run: Pick<SubagentRunInfo, "sessionId" | "completedAt">): void;
+  markResultConsumed(run: SubagentRunInfo): void;
   /**
    * Mark a `get_subagent_result` for `sessionId` as in flight and return the fn that ends it.
    * Optional so a fake runtime without it still runs; nothing is suppressed for it then.

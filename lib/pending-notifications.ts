@@ -88,6 +88,19 @@ export function recordPendingNotification(entry: PendingNotification): void {
 }
 
 /**
+ * Drop a report the parent has collected: reading the result is seeing it, so the index must not
+ * keep listing it and the turn-boundary reminder must stop naming it.
+ */
+export function removePendingNotification(parentSessionId: string, kind: PendingNotificationKind, id: string): void {
+  const registry = getPendingRegistry();
+  const list = registry.get(parentSessionId);
+  if (!list) return;
+  const remaining = list.filter((entry) => entry.kind !== kind || entry.id !== id);
+  if (remaining.length === 0) registry.delete(parentSessionId);
+  else if (remaining.length !== list.length) registry.set(parentSessionId, remaining);
+}
+
+/**
  * The markers of the reports already present in a session's transcript.
  *
  * A custom message is appended as a `custom_message` entry whose `details` sits at the

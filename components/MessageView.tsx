@@ -2116,6 +2116,9 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
     );
   }
 
+  // A withdrawn batch is still one custom message; with no report left it has nothing to show.
+  if (isSettledReportBatch && batchBlocks.length === 0) return null;
+
   return (
     <div style={{ marginBottom: 16 }}>
       <div

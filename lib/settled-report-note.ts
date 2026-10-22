@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TextContent } from "./types";
-import { recordPendingNotification, type PendingNotification } from "./pending-notifications";
+import { recordPendingNotification, removePendingNotification, type PendingNotification, type PendingNotificationKind } from "./pending-notifications";
 
 /**
  * One settled background report: what the model reads, and what its card renders.
@@ -65,6 +65,8 @@ const SETTLED_REPORT_DEAD_LETTER_DIR = join(tmpdir(), "pi-web-dead-letters");
  */
 type SettledReportNote = {
   notificationId: string;
+  /** The parent this batch was queued on; its queue is where a withdrawn batch is taken back. */
+  parent: SettledReportParent;
   blocks: TextContent[];
   reports: SettledReport[];
   queued: boolean;
@@ -97,6 +99,11 @@ export interface SettledReportSinkDependencies {
 export interface SettledReportSink {
   /** Hand a settled report to its parent, appending it to the batch already in the queue. */
   deliver(sessionId: string, report: SettledReport): Promise<void>;
+  /**
+   * Take a report back because its parent already collected the result: it leaves the batch and
+   * the pending index, and a batch left empty is taken out of pi's queue.
+   */
+  withdraw(sessionId: string, kind: PendingNotificationKind, id: string): void;
 }
 
 export function createSettledReportSink(deps: SettledReportSinkDependencies): SettledReportSink {
@@ -144,6 +151,23 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
   /** A run started between the state check and the send; the parent is streaming, not broken. */
   function isBusy(error: unknown): boolean {
     return /already processing/i.test(error instanceof Error ? error.message : String(error));
+  }
+
+  /**
+   * Take the note's place back out of pi's follow-up queue. pi stores the content array it was
+   * handed by reference and drains that same array, which is why a batch grows in place; removing
+   * the element by that identity is the same property used the other way. A queue this weak on
+   * internals only answers false: the empty batch is harmless on the wire (every provider drops an
+   * empty user message) and the next report opens a fresh note.
+   */
+  function dropQueuedNote(note: SettledReportNote): boolean {
+    const queue = (note.parent.inner as { agent?: { followUpQueue?: { messages?: unknown[] } } })
+      .agent?.followUpQueue?.messages;
+    if (!Array.isArray(queue)) return false;
+    const index = queue.findIndex((message) => (message as { content?: unknown } | null)?.content === note.blocks);
+    if (index === -1) return false;
+    queue.splice(index, 1);
+    return true;
   }
 
   function retryDelayMs(attempt: number): number {
@@ -199,7 +223,7 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
       if (!parent) return;
       let note = notes.get(sessionId);
       if (!note || note.consumed) {
-        note = { notificationId: randomUUID().slice(0, 8), blocks: [], reports: [], queued: false, consumed: false, stopWatching: () => {} };
+        note = { notificationId: randomUUID().slice(0, 8), parent, blocks: [], reports: [], queued: false, consumed: false, stopWatching: () => {} };
         notes.set(sessionId, note);
         note.stopWatching = watchForConsume(parent, sessionId, note);
       }
@@ -234,6 +258,30 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
         notes.delete(sessionId);
         throw error;
       }
+    },
+
+    withdraw(sessionId, kind, id) {
+      // The index is the parent's own record of what it has not seen, and collecting the result
+      // is exactly seeing it.
+      removePendingNotification(sessionId, kind, id);
+      const note = notes.get(sessionId);
+      if (!note) return;
+      for (let index = note.reports.length - 1; index >= 0; index--) {
+        if (note.reports[index].kind !== kind || note.reports[index].id !== id) continue;
+        note.reports.splice(index, 1);
+        note.blocks.splice(index, 1);
+      }
+      if (note.reports.length > 0) return;
+      // A batch with nothing left must not wake the parent to read nothing. When pi already took
+      // it, the note stays so a later report rides the same (empty) message instead of opening a
+      // second one; `consumed` then clears it as usual.
+      if (note.consumed) {
+        notes.delete(sessionId);
+        return;
+      }
+      if (!dropQueuedNote(note)) return;
+      note.stopWatching();
+      notes.delete(sessionId);
     },
   };
 }

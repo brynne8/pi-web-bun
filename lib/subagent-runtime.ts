@@ -264,7 +264,7 @@ function getConsumedSubagentResults(): Map<string, string> {
   return globalThis.__piSubagentConsumedResults;
 }
 
-function markResultConsumed(run: SubagentRunIdentity): void {
+function recordResultConsumed(run: SubagentRunIdentity): void {
   // A terminal run without `completedAt` (interrupted) never notifies, so there is nothing to drop.
   if (!run.completedAt) return;
   getConsumedSubagentResults().set(run.sessionId, run.completedAt);
@@ -978,6 +978,18 @@ export function createSubagentController(
     } finally {
       getParentNotifications().delete(pending);
     }
+  }
+
+  /**
+   * The parent collected this run's result: the mark stops a notification still on its way, and the
+   * batch a settled run already queued loses its report. Both matter — the mark alone only decides
+   * delivery that has not happened yet, while a parent that polls after the run settled would
+   * otherwise read the same result twice, once as a tool result and once as its notification.
+   */
+  function markResultConsumed(run: SubagentRunInfo): void {
+    recordResultConsumed(run);
+    if (!run.completedAt) return;
+    dependencies.settledReports.withdraw(run.parentSessionId, "subagent", run.sessionId);
   }
 
   async function deliverParentNotification(run: SubagentRunInfo): Promise<void> {
