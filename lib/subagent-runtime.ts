@@ -962,9 +962,16 @@ export function createSubagentController(
     return run && settleOrphanedRun(run);
   }
 
+  /** A live turn is the only thing a steer can join; a settled child continues through resume. */
+  async function steerRefusal(sessionId: string): Promise<string> {
+    const run = await get(sessionId);
+    if (!run) return `Subagent not found: ${sessionId}`;
+    return `Subagent ${sessionId} is not running (${run.status}). Continue it with Agent: { resume: "${sessionId}", prompt: "<instruction>", description: "<label>" }.`;
+  }
+
   async function steer(sessionId: string, message: string): Promise<void> {
     const wrapper = dependencies.getSession(sessionId);
-    if (!wrapper?.isAlive() || !wrapper.isRunning()) throw new Error("Subagent is not running");
+    if (!wrapper?.isAlive() || !wrapper.isRunning()) throw new Error(await steerRefusal(sessionId));
     if (getSubagentRuns().get(sessionId)?.turnLimitReached) throw new Error("Subagent reached its turn limit and is stopping; resume it to continue");
     if (!message.trim()) throw new Error("Steering message is required");
     await wrapper.inner.steer(message.trim());
