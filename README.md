@@ -12,6 +12,7 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 
 ## Features
 
+- **A look of its own**: one amber accent and one glass material across the app, a full-bleed console instead of a card on one, and a serif wordmark with the mono kept for data.
 - **Session workspace**: browse, resume, rename, export, and delete conversations grouped by project, with running state, context usage, cost, and compaction details.
 - **Two ways to branch**: **New session** creates an independent session file from an earlier message; **Edit from here** creates a branch inside the current session.
 - **Background bash tasks** (off by default): a long-running or over-long-output command hands off to a background task and comes back as a settled card instead of holding the turn open.
@@ -101,6 +102,8 @@ Three kinds of difference. [Running on Bun](#running-on-bun) is what it takes to
 ### Features this fork adds
 
 Useful on the first run; none of it needs configuring unless the entry says otherwise. Each entry ends with what upstream does instead, for anyone comparing the two.
+
+**A look of its own, under every palette.** Pi Web opens in one world: amber on obsidian, one glass material for whatever floats, a serif wordmark, a grotesk interface and a mono for data. The console is the page, a tool call is a ruled log row with a status dot, your own turn is a warm gradient bubble, and Settings' sections sit in a left rail. The light and dark themes are this design's own; the other palettes keep their accent, their bubble and their syntax colours, and share its surfaces and type. Type comes from Google Fonts. Upstream ships stock chrome that every palette repaints. ([Note](./docs/agents/design.md))
 
 **Long-running commands in the background.** A shell command that passes two minutes hands off to a background task: the agent keeps working, and the command comes back as a finished card with its log file when it ends. It also hands off when it prints more lines than the model allowed for. Turn it on in **Settings → General → Background bash tasks**; it is off by default, and with the switch off the tool is upstream's bash tool exactly. The model is offered both controls only while the switch is on. Upstream would take background execution from pi itself rather than from the web wrapper ([#1132](https://github.com/agegr/pi-web/pull/1132)). ([How the hand-off works](./docs/agents/background-bash.md#two-ways-into-the-background))
 
