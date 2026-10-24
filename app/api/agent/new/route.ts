@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { existsSync } from "fs";
 import { randomUUID } from "crypto";

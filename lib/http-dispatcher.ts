@@ -12,7 +12,6 @@ type DispatcherGlobal = typeof globalThis & {
 };
 
 const dispatcherGlobal = globalThis as DispatcherGlobal;
-const originalGlobalFetch = globalThis.fetch;
 const ignoreUndiciDispatcherError = (): void => {};
 
 function parseHttpIdleTimeoutMs(value: unknown): number | undefined {
@@ -167,11 +166,12 @@ export function configureHttpDispatcher(
   );
   undici.setGlobalDispatcher(dispatcher);
 
-  // Keep fetch and the dispatcher on the same undici implementation. Preserve
-  // an intentional fetch override installed after this module was loaded.
-  if (globalThis.fetch === originalGlobalFetch) {
-    undici.install?.();
-  }
-
+  // `undici.install()` is deliberately not called: it would swap the global
+  // fetch/Request/Response classes for undici's own copies, and a server that
+  // has already bound the built-in ones rejects the requests the swapped
+  // classes create ("Failed to parse URL from [object Request]"). The
+  // dispatcher itself needs no install: `setGlobalDispatcher()` writes the
+  // well-known symbol Node's built-in fetch reads, so the built-in classes keep
+  // serving and use this dispatcher.
   dispatcherGlobal.__piWebHttpDispatcherConfigured = true;
 }

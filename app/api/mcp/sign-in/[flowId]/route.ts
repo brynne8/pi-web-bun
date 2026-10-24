@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import type { McpErrorResponse, McpRefusalReason, McpSignInFlowInfo } from "@/lib/api-types";
 import { cancelMcpSignIn, pasteMcpSignInRedirect, readMcpSignIn } from "@/lib/mcp-sign-in";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";

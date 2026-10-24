@@ -120,7 +120,7 @@ async function runUpdate({
   log(`pi-web ${latest} is available (installed: ${currentVersion}).`);
   if (check) return 0;
 
-  // A running `next start` has .next/ open; never replace it underneath.
+  // A running server has its build output open; never replace it underneath.
   const running = await listRecords();
   if (running.length > 0) {
     error(`pi-web is running:\n${running.map(formatRecord).join("\n")}\nRun \`pi-web stop\` first, then update.`);

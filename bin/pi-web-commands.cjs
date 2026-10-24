@@ -5,11 +5,11 @@ const { spawnSync } = require("child_process");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const path = require("path");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { openInBrowser } = require("./browser-opener");
+const { openInBrowser } = require("./browser-opener.cjs");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { runUpdate } = require("./pi-web-update");
+const { runUpdate } = require("./pi-web-update.cjs");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const records = require("./run-records");
+const records = require("./run-records.cjs");
 
 const STOP_TIMEOUT_MS = 10_000;
 const STOP_POLL_MS = 200;
@@ -37,11 +37,11 @@ async function stopServer(record, {
   log = console.log,
   error = console.error,
 } = {}) {
-  // The launcher, or the Next.js server a killed launcher left serving.
+  // The launcher, or the vinext server a killed launcher left serving.
   const pid = record.stopPid ?? record.pid;
   try {
-    // The launcher forwards SIGTERM to Next.js and exits after it. Windows has
-    // no SIGTERM: process.kill() would end the launcher alone and leave Next.js
+    // The launcher forwards SIGTERM to vinext and exits after it. Windows has
+    // no SIGTERM: process.kill() would end the launcher alone and leave vinext
     // serving the port, so end the whole process tree there.
     if (platform === "win32") killTree(pid);
     else kill(pid, "SIGTERM");

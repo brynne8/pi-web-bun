@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "vinext/shims/server";
 import {
   getAuthRetryAfterMs,
   recordAuthFailure,

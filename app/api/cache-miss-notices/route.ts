@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import { getGlobalSettingsPath, readGlobalSettings, updateGlobalSettings } from "@/lib/global-settings-file";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import { tmpdir } from "node:os";
 import { Readable } from "node:stream";
 import {

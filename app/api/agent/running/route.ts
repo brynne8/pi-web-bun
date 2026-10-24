@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import { getSessionListVersion } from "@/lib/session-reader";
 import {
   getAwaitingInputRpcSessionIds,

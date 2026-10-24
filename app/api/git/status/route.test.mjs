@@ -20,7 +20,7 @@ const jiti = createJiti(import.meta.url, {
 });
 const { GET } = await jiti.import("./route.ts");
 const { allowFileRoot } = await jiti.import("../../../../lib/file-access.ts");
-const { NextRequest } = await jiti.import("next/server");
+const { NextRequest } = await jiti.import("vinext/shims/server");
 
 test.after(() => {
   if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;

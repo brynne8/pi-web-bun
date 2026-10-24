@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import { homeDir } from "@/lib/home-dir";
 
 export async function GET() {

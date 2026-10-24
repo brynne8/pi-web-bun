@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import { abortSubagent, getSubagentRun, steerSubagent } from "@/lib/rpc-manager";
 
 export const dynamic = "force-dynamic";

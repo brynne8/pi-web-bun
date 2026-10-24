@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import type { McpErrorResponse, McpSignInFlowInfo } from "@/lib/api-types";
 import { isMcpDisabledByOperator } from "@/lib/builtin-extensions";
 import { isMcpEntryRefusal, mcpProjectTrustRefusal, readConnectableMcpEntry } from "@/lib/mcp-entry-request";

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import { getAgentDir, type McpExposure } from "@earendil-works/pi-coding-agent";
 import type {
   McpActionItemResult,

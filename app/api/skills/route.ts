@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { homeDir } from "@/lib/home-dir";
 import path from "path";

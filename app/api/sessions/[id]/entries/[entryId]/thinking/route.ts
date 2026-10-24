@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import { getSessionEntries, resolveSessionPath } from "@/lib/session-reader";
 
 export async function GET(

@@ -27,7 +27,7 @@ const jiti = createJiti(import.meta.url, {
 });
 const { GET } = await jiti.import("./route.ts");
 const { allowFileRoot } = await jiti.import("../../../../lib/file-access.ts");
-const { NextRequest } = await jiti.import("next/server");
+const { NextRequest } = await jiti.import("vinext/shims/server");
 
 function git(cwd, ...args) {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" });

@@ -254,7 +254,7 @@ function isClass(value: unknown): boolean {
 async function importFile(path: string): Promise<Record<string, unknown>> {
   // Loaded at runtime from the SDK's own files, never bundled: a bundled copy
   // would be a second module instance with its own classes.
-  return await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ pathToFileURL(path).href);
+  return await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ /* @vite-ignore */ pathToFileURL(path).href);
 }
 
 // The conditions Node's resolver enables for an `import` by default.

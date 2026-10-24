@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import {
   readSessionUiState,

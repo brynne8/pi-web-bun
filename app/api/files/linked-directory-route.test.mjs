@@ -27,7 +27,7 @@ const { GET, POST } = await jiti.import("./[...path]/route.ts");
 const { GET: getFileIndex } = await jiti.import("../file-index/route.ts");
 const { allowFileRoot } = await jiti.import("../../../lib/file-access.ts");
 const { encodeFilePathForApi } = await jiti.import("../../../lib/file-paths.ts");
-const { NextRequest } = await jiti.import("next/server");
+const { NextRequest } = await jiti.import("vinext/shims/server");
 
 function request(method, filePath, type, body, contentType = "application/json") {
   const encoded = encodeFilePathForApi(filePath);

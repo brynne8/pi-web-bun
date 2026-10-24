@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import type { McpErrorResponse, McpRefusalReason, ToolSettingsResponse } from "@/lib/api-types";
 import {
   CODEMODE_INLINE_BUDGET_MAX,

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { after, before, beforeEach } from "node:test";
 import { createJiti } from "jiti";
-import { NextRequest } from "next/server.js";
+import { NextRequest } from "vinext/shims/server";
 
 const originalPassword = process.env.PI_WEB_PASSWORD;
 const jiti = createJiti(import.meta.url, {

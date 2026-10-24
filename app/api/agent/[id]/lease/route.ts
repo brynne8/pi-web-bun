@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import { getRpcSession } from "@/lib/rpc-manager";
 import { holdSessionLivenessLease } from "@/lib/session-liveness";
 import { hasUnsettledSubagentRun } from "@/lib/subagent-runtime";

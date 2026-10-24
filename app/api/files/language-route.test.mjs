@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { NextRequest } from "next/server.js";
+import { NextRequest } from "vinext/shims/server";
 import { createJiti } from "jiti";
 import { refractor } from "refractor/all";
 import ts from "typescript";

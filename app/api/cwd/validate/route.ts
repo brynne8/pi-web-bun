@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import { statSync, type Stats } from "fs";
 import { homeDir } from "@/lib/home-dir";
 import { isAbsolute, resolve } from "path";

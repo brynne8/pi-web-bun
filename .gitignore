@@ -15,7 +15,9 @@ bun.lock
 /coverage
 /test-results/
 
-# next.js
+# vinext / next.js
+/dist/
+/.vinext/
 /.next/
 /.next-dev/
 /out/

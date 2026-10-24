@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import { mkdirSync } from "fs";
 import { defaultCwdPath } from "@/lib/default-cwd";
 

@@ -1,7 +1,7 @@
 "use strict";
 
 // Records of running pi-web servers: one <agentDir>/pi-web-run/<launcher pid>.json
-// per server, written by the launcher once Next.js is ready and removed when it
+// per server, written by the launcher once server is ready and removed when it
 // exits. pi-web keeps all its state in pi's agent directory, so this does too.
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -70,15 +70,15 @@ function readProcessCommand(pid, { platform = process.platform, run = spawnSync,
   return match && match[2] === String(pid) ? match[1] : "";
 }
 
-// Whether pid still is the launcher or the Next.js server of a record. After a
+// Whether pid still is the launcher or the vinext server of a record. After a
 // crash or a reboot the pid may belong to an unrelated process, which stop must
-// never signal. Next.js renames its process to "next-server (vX)". Windows only
-// gives the image name. When nothing can tell, the URL check alone decides.
+// never signal. The server runs vinext's CLI. Windows only gives the image
+// name. When nothing can tell, the URL check alone decides.
 function isRecordProcess(pid, role, { platform = process.platform, readCommand = readProcessCommand } = {}) {
   const command = readCommand(pid, { platform });
   if (command === null) return true;
   if (platform === "win32") return /^node/i.test(command);
-  return role === "launcher" ? command.includes("pi-web") : command.includes("next");
+  return role === "launcher" ? command.includes("pi-web") : command.includes("vinext");
 }
 
 function recordPath(dir, pid) {
@@ -116,7 +116,7 @@ function isValidPid(pid) {
 }
 
 // Running servers sorted by port, each with `stopPid`: the launcher, or the
-// Next.js server when the launcher was killed and left it serving (`orphaned`).
+// vinext server when the launcher was killed and left it serving (`orphaned`).
 // A record none of whose processes is still ours, or that cannot be read, is
 // deleted. One whose process is ours but whose URL does not answer is skipped,
 // not deleted.
@@ -142,9 +142,9 @@ async function listRunRecords(dir, {
       record = null;
     }
     const launcherRuns = record && isValidPid(record.pid) && isAlive(record.pid) && isOurs(record.pid, "launcher");
-    const nextRuns = !launcherRuns && record && isValidPid(record.nextPid) && isAlive(record.nextPid) && isOurs(record.nextPid, "next");
-    if (launcherRuns || nextRuns) {
-      candidates.push({ ...record, stopPid: launcherRuns ? record.pid : record.nextPid, orphaned: !launcherRuns });
+    const serverRuns = !launcherRuns && record && isValidPid(record.serverPid) && isAlive(record.serverPid) && isOurs(record.serverPid, "server");
+    if (launcherRuns || serverRuns) {
+      candidates.push({ ...record, stopPid: launcherRuns ? record.pid : record.serverPid, orphaned: !launcherRuns });
     } else {
       fs.rmSync(file, { force: true });
     }
@@ -169,7 +169,7 @@ function selectRunRecord(records, port) {
 }
 
 function formatRunRecord(record) {
-  const pid = record.orphaned ? `Next.js pid ${record.stopPid} (launcher gone)` : `pid ${record.pid}`;
+  const pid = record.orphaned ? `server pid ${record.stopPid} (launcher gone)` : `pid ${record.pid}`;
   return `  ${record.url}  ${pid}  v${record.version}  started ${record.startedAt}`;
 }
 

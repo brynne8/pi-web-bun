@@ -1,5 +1,5 @@
 import fs from "fs";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "vinext/shims/server";
 import { getAllowedFileRoots, isExistingFilePathAllowed, isFilePathAllowed, isWindowsAbsolutePath } from "@/lib/file-access";
 import { getGitStatus } from "@/lib/git-changes";
 

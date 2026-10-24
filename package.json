@@ -11,6 +11,7 @@
     "url": "https://github.com/agegr/pi-web/issues"
   },
   "license": "MIT",
+  "type": "module",
   "engines": {
     "node": ">=22.19.0"
   },
@@ -22,25 +23,21 @@
     "ios_saf 16.2"
   ],
   "bin": {
-    "pi-web": "bin/pi-web.js"
+    "pi-web": "bin/pi-web.cjs"
   },
   "files": [
     "bin",
-    ".next",
-    "!.next/cache",
-    "!.next/dev",
-    "!.next/**/*.js.map",
+    "dist",
     "public",
-    "next.config.ts",
     "package.json"
   ],
   "scripts": {
-    "postinstall": "node bin/prepare-terminal.js",
-    "dev": "PI_WEB_DIST_DIR=.next-dev next dev -H 127.0.0.1 -p 30141",
-    "dev:lan": "PI_WEB_DIST_DIR=.next-dev next dev -H 0.0.0.0 -p 30141",
-    "build": "next build --webpack",
-    "start": "next start -H 127.0.0.1 -p 30141",
-    "start:lan": "next start -H 0.0.0.0 -p 30141",
+    "postinstall": "node bin/prepare-terminal.cjs",
+    "dev": "vite dev --host 127.0.0.1 --port 30141",
+    "dev:lan": "vite dev --host 0.0.0.0 --port 30141",
+    "build": "vite build",
+    "start": "vinext start -H 127.0.0.1 -p 30141",
+    "start:lan": "vinext start -H 0.0.0.0 -p 30141",
     "lint": "eslint .",
     "test:terminal": "node e2e/terminal.mjs",
     "test:e2e": "node e2e/run.mjs",
@@ -59,13 +56,14 @@
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
     "js-yaml": "^5.2.3",
-    "next": "16.3.8",
     "node-pty": "1.2.0-beta.15",
     "proper-lockfile": "4.1.2",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-server-dom-webpack": "19.3.1",
     "semver": "7.8.5",
     "undici": "8.11.0",
+    "vinext": "1.3.0",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
@@ -79,10 +77,18 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "@types/semver": "7.8.0",
     "@types/web-push": "^3.6.4",
+    "@vitejs/plugin-react": "^6.0.0",
+    "@vitejs/plugin-rsc": "^0.5.38",
     "ansi_up": "^6.0.6",
     "bun-types": "^1.4.2",
     "eslint": "^9",
-    "eslint-config-next": "16.3.8",
+    "@next/eslint-plugin-next": "^16.3.8",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "globals": "^16.4.0",
+    "typescript-eslint": "^8.57.1",
     "jiti": "^2.7.0",
     "katex": "^0.16.47",
     "mammoth": "^1.12.0",
@@ -99,7 +105,8 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "tailwindcss": "^4.2.2",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vite": "^8.3.5"
   },
   "overrides": {
     "lightningcss": "1.33.0"

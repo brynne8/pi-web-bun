@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "vinext/shims/server";
 import { jsonResponse } from "@/lib/json-response";
 import {
   attachSessionProjectInfo,
