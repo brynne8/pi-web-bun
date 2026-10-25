@@ -125,7 +125,7 @@ node_modules/.bin/tsc --noEmit
 npm run lint
 ```
 
-通常の開発中は `next build` または `npm run build` を実行しないでください。`.next/` に書き込まれ、開発サーバーに影響する可能性があります。ビルドはリリース作業時にのみ実行してください。
+通常の開発中は `npm run build` を実行しないでください。ビルドはリリース作業時にのみ実行してください。
 
 新機能に取りかかる前に、[Contributing](../CONTRIBUTING.md) で対象範囲とプルリクエスト前のチェック項目を確認してください。
 
@@ -134,7 +134,7 @@ npm run lint
 ## リポジトリ構成
 
 ```text
-app/             Next.js UI と API ルート
+app/             App Router の UI と API ルート（vinext が Vite 上で提供）
 components/      React UI コンポーネント
 hooks/           クライアントの状態と操作に関する hooks
 lib/             セッション、エージェント、モデル、ファイル、Git、セキュリティのロジック

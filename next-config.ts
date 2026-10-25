@@ -26,6 +26,10 @@ export const nextConfig: NextConfig = {
     "node-pty",
     "undici",
     "web-push",
+    // proper-lockfile is CJS and calls `fs.mkdir` on the `graceful-fs` module
+    // it requires; Vite's module runner hands out its own `fs` object to the
+    // dev server's environments, which lacks it. Node loads it directly.
+    "proper-lockfile",
     // graceful-fs (via proper-lockfile) patches `fs` when it is imported, and
     // Vite's module runner hands out a frozen fs object to the dev server's
     // environments, which turns that patch into a 500. Node loads it directly.

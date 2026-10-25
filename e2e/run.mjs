@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { appendFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -22,9 +23,11 @@ import { checkSessionNavigation } from "./session-navigation.mjs";
 import { checkProjectNavigation, createProjectNavigationFixtures } from "./project-navigation.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const require = createRequire(import.meta.url);
+const { findVinextCli } = require("../bin/vinext-cli.cjs");
 const mode = process.env.E2E_SERVER_MODE || "dev";
 assert.ok(mode === "dev" || mode === "start", "E2E_SERVER_MODE must be dev or start");
-assert.ok(mode !== "dev" || !existsSync(join(root, ".next/dev/lock")), "Use a checkout without an active dev server");
+assert.ok(mode !== "dev" || !existsSync(join(root, ".vinext/dev/lock.json")), "Use a checkout without an active dev server");
 const artifacts = join(root, "test-results/e2e");
 // Emptied first. A CI runner's workspace can carry the previous job's files, and then the
 // `e2e-failure` artifact uploaded on a failure is the other run's: on 2026-10-20 the bundle of
@@ -203,9 +206,17 @@ try {
   const port = probe.address().port;
   await new Promise((resolve, reject) => probe.close((error) => error ? reject(error) : resolve()));
   const base = `http://127.0.0.1:${port}`;
-  server = spawn(process.execPath, [join(root, "node_modules/next/dist/bin/next"), mode, "-H", "127.0.0.1", "-p", String(port)], {
+  const vinextCli = findVinextCli(root);
+  assert.ok(vinextCli, "vinext is not installed in this checkout");
+  // `vinext dev` proxies to the project's Vite CLI, whose flags differ from
+  // `vinext start`'s. Both are spawned through the vinext entry rather than a
+  // .bin symlink, which may not exist when installed from a tarball.
+  const serverArgs = mode === "dev"
+    ? ["dev", "--host", "127.0.0.1", "--port", String(port)]
+    : ["start", "-H", "127.0.0.1", "-p", String(port)];
+  server = spawn(process.execPath, [vinextCli, ...serverArgs], {
     cwd: root,
-    env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_WEB_PASSWORD: "", NEXT_TELEMETRY_DISABLED: "1" },
+    env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_WEB_PASSWORD: "" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   server.once("error", (error) => { serverError = error; });

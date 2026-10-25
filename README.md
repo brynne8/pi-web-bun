@@ -42,7 +42,7 @@ bun install
 bun run dev
 ```
 
-The development server starts at [http://127.0.0.1:30141](http://127.0.0.1:30141).
+The development server starts at [http://127.0.0.1:30141](http://127.0.0.1:30141). The production server (`bun run start`) and the build (`bun run build`) run on Bun or Node.js alike. The dev server does not, yet: `bun run dev` puts Bun under Vite, and Bun 1.4.4 drops the method of a write request there ([oven-sh/bun#42759](https://github.com/oven-sh/bun/issues/42759)), so every `POST` arrives as a `GET`. Until a Bun release carries the fix, run `npm run dev` on Node.js, or install the fixed build with `bunx bun-pr 46528`.
 
 There is no npm-published package for this fork; run it from a clone as above. `bun.lock` is gitignored, so `bun install` resolves fresh each time — and it stays out of the repository. The tracked `package-lock.json` is what upstream's CI installs from, so a dependency change is recorded with `bun x npm install --package-lock-only` and committed.
 
@@ -54,6 +54,8 @@ If no model provider is configured yet, open the **Models** panel to sign in or 
 bun install                            # install dependencies
 bun run dev                            # dev server on 127.0.0.1:30141
 bun run dev:lan                        # dev server on 0.0.0.0:30141
+bun run build                          # production build into dist/
+bun run start                          # serve dist/ on 127.0.0.1:30141
 bun test                               # run the test suite
 bun x tsc --noEmit                     # typecheck
 bun run lint                           # lint
@@ -91,7 +93,7 @@ Three kinds of difference. [Running on Bun](#running-on-bun) is what it takes to
 | Plugin update check | `npm view … version --json` | `bun pm view … version --json` |
 | Test suite | Node's runner (`npm test`) | Both runners, both green: `bun test` and `npm test` |
 | Browser regression tests | Playwright Chromium (`npx playwright install --with-deps chromium`) | Playwright's Apple WebKit build: `npm run test:e2e:install` fetches it and CI installs `--with-deps webkit`; no Chromium binary is installed or launched here ([docs/agents/tests.md](./docs/agents/tests.md#e2e-playwright)) |
-| Dev build output | The dev server and `next build` share `.next/` | `PI_WEB_DIST_DIR` points the dev script at `.next-dev/`, so a build or `next start` no longer pollutes the dev server's directory |
+| Build toolchain | Next.js 16 (Turbopack; dev state and build output in `.next/`) | vinext on Vite 8/Rolldown, configured by `vite.config.ts` and `next-config.ts`: `bun run dev` keeps state in `.vinext/`, `bun run build` writes `dist/`, and `bun run start` serves it |
 | Lockfiles | `package-lock.json` | `bun.lock` is gitignored; `bun-types` is recorded in the tracked `package-lock.json`, because CI's `npm ci` refuses a `package.json` the lock does not match |
 | CI | `.github/workflows/ci.yml` on Node.js | the same `ci.yml`, with the browser it installs switched to `--with-deps webkit` — this fork adds no Bun job, so the Bun checks above are run locally |
 
@@ -329,7 +331,7 @@ node_modules/.bin/tsc --noEmit
 npm run lint
 ```
 
-Do not run `next build` or `npm run build` during normal development. Upstream's dev server and build share `.next/`, so a build can interfere with a running dev server; leave builds for release work. Here the dev script sets `PI_WEB_DIST_DIR=.next-dev`, which parts them, so a build no longer disturbs the dev server — but builds still belong to release work.
+Do not run `npm run build` during normal development; leave builds for release work. A build writes `dist/` and leaves the dev server's `.vinext/dev/` state alone, so a build no longer disturbs a running dev server — but it still belongs to release work.
 
 Before starting on a feature, read [Contributing](./CONTRIBUTING.md) for what is in scope and the pull request checklist.
 
@@ -338,7 +340,7 @@ Contributor guides: [Internationalization](./docs/i18n.md) and [Release process]
 ## Repository Layout
 
 ```text
-app/             Next.js UI and API routes
+app/             App Router UI and API routes, served by vinext on Vite
 components/      React UI components
 hooks/           Client state and interaction hooks
 lib/             Session, agent, model, file, Git, and security logic

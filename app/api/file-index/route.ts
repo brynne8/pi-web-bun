@@ -38,9 +38,9 @@ interface CacheEntry {
   expiresAt: number;
 }
 
-// Per-cwd cache on globalThis so it survives Next.js hot-reload; the @ menu
-// re-requests on every open and searches on every keystroke, so listings must
-// not be recomputed within a short window.
+// Per-cwd cache on globalThis so it survives the dev server's hot-reload; the
+// @ menu re-requests on every open and searches on every keystroke, so listings
+// must not be recomputed within a short window.
 declare global {
   var __piFileIndexCache: Map<string, CacheEntry> | undefined;
 }

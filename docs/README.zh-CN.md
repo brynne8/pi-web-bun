@@ -44,7 +44,7 @@ bun install
 bun run dev
 ```
 
-开发服务器启动在 [http://127.0.0.1:30141](http://127.0.0.1:30141)。
+开发服务器启动在 [http://127.0.0.1:30141](http://127.0.0.1:30141)。生产服务器（`bun run start`）和构建（`bun run build`）在 Bun 与 Node.js 上都能跑；开发服务器目前还不行：`bun run dev` 让 Vite 跑在 Bun 上，而 Bun 1.4.4 在那里会丢掉写请求的方法（[oven-sh/bun#42759](https://github.com/oven-sh/bun/issues/42759)），每个 `POST` 到达时都成了 `GET`。在带修复的 Bun 发布之前，请用 Node.js 跑 `npm run dev`，或者用 `bunx bun-pr 46528` 装上修复后的构建。
 
 本分支不发布 npm 包，按上面的方式从仓库运行即可。`bun.lock` 已加入忽略列表，每次 `bun install` 都会重新解析依赖，也不要把它提交。真正被跟踪的是 `package-lock.json`：上游 CI 靠它 `npm ci`，以改依赖后用 `bun x npm install --package-lock-only` 记录并提交结果。
 
@@ -56,6 +56,8 @@ bun run dev
 bun install                            # 安装依赖
 bun run dev                            # 开发服务器，监听 127.0.0.1:30141
 bun run dev:lan                        # 开发服务器，监听 0.0.0.0:30141
+bun run build                          # 生产构建，输出到 dist/
+bun run start                          # 在 127.0.0.1:30141 上提供 dist/
 bun test                               # 运行测试
 bun x tsc --noEmit                     # 类型检查
 bun run lint                           # 代码检查
@@ -93,7 +95,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 | 插件更新检查 | `npm view … version --json` | `bun pm view … version --json` |
 | 测试套件 | Node 运行器（`npm test`） | 两种运行器都跑、都绿：`bun test` 与 `npm test` |
 | 浏览器回归测试 | Playwright Chromium（`npx playwright install --with-deps chromium`） | 用 Playwright 自带的 Apple WebKit：`npm run test:e2e:install` 拉取，CI 装 `--with-deps webkit`；本分支不安装也不启动任何 Chromium 二进制（见 [docs/agents/tests.md](./docs/agents/tests.md#e2e-playwright)） |
-| 开发构建产物 | 开发服务器和 `next build` 共用 `.next/` | `PI_WEB_DIST_DIR` 把开发脚本指向 `.next-dev/`，构建或 `next start` 不再污染开发服务器的目录 |
+| 构建工具链 | Next.js 16（Turbopack；开发状态与构建产物都在 `.next/`） | vinext 跑在 Vite 8/Rolldown 上，由 `vite.config.ts` 与 `next-config.ts` 配置：`bun run dev` 的状态在 `.vinext/`，`bun run build` 输出到 `dist/`，`bun run start` 提供 `dist/` |
 | 锁文件 | `package-lock.json` | `bun.lock` 已加入忽略列表；`bun-types` 则写进被跟踪的 `package-lock.json`，因为 CI 的 `npm ci` 不接受与它对不上的 `package.json` |
 | CI | Node.js 上跑 `.github/workflows/ci.yml` | 同一个 `ci.yml`，只把它要装的浏览器换成 `--with-deps webkit`——本分支不加 Bun 的 job，所以上面那些 Bun 检查在本地跑 |
 
@@ -276,7 +278,7 @@ node_modules/.bin/tsc --noEmit
 npm run lint
 ```
 
-日常开发时不要运行 `next build` 或 `npm run build`。原版的开发服务器与构建共用 `.next/`，构建可能干扰开发服务器；仅在发布流程中执行构建。本分支的开发脚本设了 `PI_WEB_DIST_DIR=.next-dev`，两者已经分开，构建不再打扰开发服务器——但构建仍属于发布流程。
+日常开发时不要运行 `npm run build`；构建属于发布流程。构建写入 `dist/`，开发服务器只用 `.vinext/dev/` 里的状态，两者不再互相打扰——但构建仍属于发布流程。
 
 开始做新功能之前，请先阅读[参与贡献](./CONTRIBUTING.zh-CN.md)，了解哪些改动在范围内以及提交 PR 前的检查项。
 
@@ -285,7 +287,7 @@ npm run lint
 ## 仓库结构
 
 ```text
-app/             Next.js 界面和 API 路由
+app/             App Router 界面和 API 路由，由 vinext 跑在 Vite 上
 components/      React 界面组件
 hooks/           客户端状态和交互 hooks
 lib/             会话、智能体、模型、文件、Git 和安全逻辑

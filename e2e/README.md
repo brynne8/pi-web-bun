@@ -16,16 +16,16 @@ On Linux the browser needs system libraries too, so run
 `sudo npx playwright install --with-deps webkit` once. Windows (win64), WSL and the
 Ubuntu x64/arm64 builds all exist; nothing here is macOS-only.
 
-The script starts and stops its own Turbopack dev server on an available
-loopback port. Run it in a checkout without an active dev server; Next.js
-shares `.next/dev/lock` within a checkout. All fixtures are created before
-startup in a temporary `PI_CODING_AGENT_DIR` and removed on completion.
+The script starts and stops its own Vite dev server (through the vinext CLI) on
+an available loopback port. Run it in a checkout without an active dev server;
+vinext shares `.vinext/dev/lock.json` within a checkout. All fixtures are created
+before startup in a temporary `PI_CODING_AGENT_DIR` and removed on completion.
 No model credentials or existing Pi sessions are needed. Git is required for
 the linked-worktree fixture.
 
 CI runs lint, type checking, and unit tests in one job. A separate job builds
 the application in a clean checkout and runs the same browser tests with
-`E2E_SERVER_MODE=start` against `next start`. Do not build in a checkout used
+`E2E_SERVER_MODE=start` against `vinext start`. Do not build in a checkout used
 for development.
 
 `test-results/e2e/` is emptied before the first navigation, so the

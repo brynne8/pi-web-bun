@@ -17,11 +17,11 @@ Bun is the target runtime: `bun x tsc` because the `node_modules/.bin` shims car
 
 ### Dev server troubleshooting
 
-- First run `lsof -nP -iTCP:30141 -sTCP:LISTEN` and reuse a healthy Pi Web process. A second `next dev` on another port is no workaround: both contend for `.next-dev/dev/lock`.
-- A browser-only `Module ... factory is not available` overlay usually means that tab has a stale Turbopack/HMR graph, not a broken server or source. Use the browser's explicit reload, then compare the server log and a direct HTTP/API request.
-- Restart only when the failure reproduces from a fresh page and the server-side checks fail too: stop that exact dev process gracefully, move `.next-dev` into a `mktemp -d` backup, restart with `bun run dev`.
-- Never fall back to `next dev --webpack`: the dev graph can fail on `undici` imports such as `node:console`. Development uses Turbopack.
-- `next dev` may append a generated `BEGIN:nextjs-agent-rules` block to `AGENTS.md`. It is tooling output: check `git status` and keep it out of unrelated commits.
+- First run `lsof -nP -iTCP:30141 -sTCP:LISTEN` and reuse a healthy Pi Web process. A second `vinext dev` on another port is no workaround: both contend for `.vinext/dev/lock.json`.
+- A browser-only `Module ... factory is not available` overlay usually means that tab has a stale Vite HMR graph, not a broken server or source. Use the browser's explicit reload, then compare the server log and a direct HTTP/API request.
+- Restart only when the failure reproduces from a fresh page and the server-side checks fail too: stop that exact dev process gracefully, move `.vinext` into a `mktemp -d` backup, restart with `bun run dev`.
+- There is no webpack fallback to reach for: Vite 8's Rolldown pipeline is the only build, and `vinext dev` has no bundler switch.
+- A write (`POST`, `PUT`, `DELETE`) that reaches a route as a `GET` is stock Bun 1.4.4's bug, not the app's: `new Request(requestLike, init)` drops `method` when `init` has no `method` ([oven-sh/bun#42759](https://github.com/oven-sh/bun/issues/42759)), which is how vinext's Node adapter rebuilds the request under Bun. `bun run dev` puts Bun under Vite, so on a Bun without the fix run `npm run dev` on Node.js, or install the fixed build with `bunx bun-pr 46528`. Production (`vinext start`) is unaffected.
 
 ### Upgrading pi
 
@@ -309,8 +309,8 @@ Design decisions and traps live in `docs/agents/`, one note per area. Read every
 
 ## Old Safari (iOS 16.2)
 
-- `/` renders entirely on the client, so one script chunk the browser cannot parse is a blank page. Next 16 targets Safari 16.4+; the `browserslist` in `package.json` lowers Safari and iOS to 16.2 so SWC turns class `static {}` blocks into private static fields. That covers Next's client runtime; other node_modules keep their syntax unless listed in `transpilePackages` (mermaid and `@mermaid-js/parser` are, for their lazy diagram chunks). Keep the other browserslist entries at Next's defaults.
-- Never write a RegExp lookbehind (`(?<=`, `(?<!`) in client code: SWC cannot downlevel it and Safari parses it only from 16.4. `lib/markdown.ts` emulates its leading lookbehinds with `replaceNotPrecededBy()`. A lookbehind built at runtime (`new RegExp("(?<=…)")` in `try`) fails only when run; that is how `lib/gfm-autolink-email-loader.cjs` fixes `mdast-util-gfm-autolink-literal`'s email regex. The loader is registered for webpack and Turbopack in `next.config.ts` and fails the build if that regex changes upstream.
+- `/` renders entirely on the client, so one script chunk the browser cannot parse is a blank page. Vite 8's baseline is newer than Safari 16.2, so `vite.config.ts` sets `build.target: "safari16.2"`, which lowers class `static {}` blocks and the rest of the client graph for it. A dependency's pre-bundled code skips that lowering unless `transpilePackages` in `next-config.ts` names it: mermaid and `@mermaid-js/parser` are listed for their lazy diagram chunks. The `browserslist` entries in `package.json` stay as they are; `build.target` is what Vite compiles for.
+- Never write a RegExp lookbehind (`(?<=`, `(?<!`) in client code: Vite's transform does not downlevel it and Safari parses it only from 16.4. `lib/markdown.ts` emulates its leading lookbehinds with `replaceNotPrecededBy()`. A lookbehind built at runtime (`new RegExp("(?<=…)")` in `try`) fails only when run; that is how `lib/gfm-autolink-email-loader.cjs` fixes `mdast-util-gfm-autolink-literal`'s email regex. The plugin in `vite.config.ts` applies that rewrite to the dependency's source (`optimizeDeps.exclude` keeps it out of the pre-bundle) and fails the build if the regex changes upstream.
 
 ## Pi Session File Format
 
@@ -337,12 +337,3 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
 --font-mono
 ```
 
-<!-- BEGIN:nextjs-agent-rules -->
-
-# This is NOT the Next.js you know
-
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
-
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
-
-<!-- END:nextjs-agent-rules -->

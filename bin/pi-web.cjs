@@ -24,6 +24,8 @@ const { wireChildProcessLifecycle } = require("./process-lifecycle.cjs");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { stripPrerenderSecret, getStripWarning } = require("./vinext-secrets.cjs");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
+const { findVinextCli } = require("./vinext-cli.cjs");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { openInBrowser } = require("./browser-opener.cjs");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { createRunRecordTracker, getOpenUrl, getRunDir, isServerAnswering } = require("./run-records.cjs");
@@ -70,24 +72,10 @@ function exitWhenIdle(code) {
   setTimeout(() => process.exit(code), 2_000).unref();
 }
 
-function findVinextCli(pkgDir) {
-  let dir = pkgDir;
-  for (;;) {
-    const candidate = path.join(dir, "node_modules", "vinext", "dist", "cli.js");
-    if (fs.existsSync(candidate)) return candidate;
-    const parent = path.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-
 function startServer({ port, hostname, openBrowser }) {
   const pkgDir = path.join(__dirname, "..");
   const distDir = path.join(pkgDir, "dist");
 
-  // vinext is ESM-only, so `require.resolve` cannot see it. Walk up to its CLI
-  // entry instead: that avoids relying on .bin symlinks (which may not exist
-  // when installed via npx) and works whether the package is hoisted or nested.
   const vinextBin = findVinextCli(pkgDir);
   if (!vinextBin) {
     console.error("Could not find vinext. Please report this issue.");

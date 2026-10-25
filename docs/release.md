@@ -18,7 +18,6 @@ gh auth status
 npm whoami
 node -e "const p=require('./package.json'); console.log(p.version)"
 lsof -nP -iTCP:30141 -sTCP:LISTEN
-ls .next/server/route-cache
 ```
 
 Expected:
@@ -27,8 +26,7 @@ Expected:
 - `main` and `origin/main` are aligned (`0	0`).
 - GitHub is authenticated as an account that can push and create releases.
 - npm is authenticated as an account that can publish `@agegr/pi-web`.
-- No dev server is listening on 30141: the production build rewrites `.next/` and breaks a running `npm run dev`. Stop it first.
-- `.next/server/route-cache/` does not exist. An e2e run in `start` mode writes it (`next start` does, the build does not), and it would be published. Delete it if present.
+- No server is listening on 30141: `vinext start` binds that port, and the build being published must be the one you just made. Stop it first.
 
 Before bumping, confirm the next version is free (replace `<version>`):
 
@@ -64,7 +62,7 @@ Choosing the bump: look at `git log --oneline v<previous>..HEAD`. A batch of `fe
 Notes:
 
 - This bumps `package.json` and `package-lock.json`.
-- It intentionally runs a production build. Do not run `next build` during normal development; release work is the exception.
+- It intentionally runs a production build. Do not run `npm run build` during normal development; release work is the exception.
 - A newly published version may take a few minutes to show up. `npm view @agegr/pi-web@<version> version` can return E404 and `npm view @agegr/pi-web version` can show the previous version even though the publish printed `+ @agegr/pi-web@<version>`. This is registry propagation, not a failed publish: do not publish again. Poll the registry until the version appears:
 
 ```bash
