@@ -1,14 +1,20 @@
-// First import on purpose. It patches `fs.promises.realpath`, and a named
-// builtin import only takes a patch that was already there when the module was
-// evaluated, so this has to precede anything that may load `node:fs/promises`
-// (including the pi SDK preimport at the bottom). `lib/dlp-realpath-compat.ts`
-// holds the driver story and what its one start-up log line means.
-import "@/lib/dlp-realpath-compat";
+// First import on purpose. It patches `fs.promises.realpath` and registers an
+// ESM loader hook, and a named builtin import only takes a patch that was
+// already there when the module was evaluated, so this has to precede anything
+// that may load `node:fs/promises` (including the pi SDK preimport at the
+// bottom). `lib/dlp-realpath-compat.ts` holds the driver story and what its one
+// start-up log line means.
+import { reportRealpathCoverage } from "@/lib/dlp-realpath-compat";
 import { configureHttpDispatcher, readHttpIdleTimeoutMs } from "@/lib/http-dispatcher";
 import { closeAllAgentEventStreams } from "@/lib/agent-event-stream";
 import { pruneBgLogs } from "@/lib/bash-bg-tasks";
 
 export function registerNodeInstrumentation(): void {
+  // Which of the shim's two ways in a consumer of `node:fs/promises` actually
+  // got, on the first line of the server's log. The patch and the hook are both
+  // already installed by the import above; this only reports them.
+  reportRealpathCoverage();
+
   // The pi CLI applies settings' `httpIdleTimeoutMs` to the same undici
   // body/header timeouts, so a Web UI session gets the timeout the user
   // configured. Without it the built-in five minutes aborts a provider stream
