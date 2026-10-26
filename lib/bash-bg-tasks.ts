@@ -236,6 +236,12 @@ export function trackBgTask(sessionId: string, controller: AbortController): voi
   set.add(controller);
 }
 
+/** Whether this session still has a background command running, so a wait for one has a reason. */
+export function hasLiveBgTasks(sessionId: string): boolean {
+  const set = sessionBgControllers.get(sessionId);
+  return set !== undefined && set.size > 0;
+}
+
 export function untrackBgTask(sessionId: string, controller: AbortController): void {
   const set = sessionBgControllers.get(sessionId);
   if (!set) return;

@@ -4,7 +4,7 @@
  * A background command or subagent run can settle while its parent session is deep in a run.
  * The report itself arrives when that run ends (pi drains its follow-up queue there), so between
  * those two moments the parent has no way to know a result exists. This registry is that missing
- * index: one entry per settled report, read back by the `pending_notifications` tool, and nothing
+ * index: one entry per settled report, read back by the `await_notifications` tool, and nothing
  * else. It holds no output — only what the model needs to decide whether to go and fetch it.
  *
  * "Delivered" is read off the parent's own transcript rather than tracked here: a batch message
@@ -37,8 +37,8 @@ export interface PendingNotification {
   fetchHint: string;
 }
 
-/** The tool the model calls to read this registry. Named in the model-only report prefixes. */
-export const PENDING_TOOL_NAME = "pending_notifications";
+/** The tool the model calls to read this registry: it waits for one, and the reminder names it. */
+export const PENDING_TOOL_NAME = "await_notifications";
 
 /** The custom message type the reminder is steered under. */
 export const PENDING_POINTER_CUSTOM_TYPE = "pi-web:pending-pointer";
@@ -149,8 +149,9 @@ export function formatPendingNotifications(
   pending: readonly PendingNotification[],
   nowMs: number = Date.now(),
 ): string {
-  // An empty answer must not invite another call: only the reminder names a new batch.
-  if (pending.length === 0) return "No pending background results. Do not call this again until a reminder says results are waiting.";
+  // The tool waits while work is still running, so an empty answer means nothing was left that
+  // could have produced a result; there is no reason to tell the model to hold off.
+  if (pending.length === 0) return "No pending background results.";
   const bash = pending.filter((entry) => entry.kind === "bash").length;
   const counts = [
     bash > 0 ? `${bash} ${bash === 1 ? "command" : "commands"}` : "",

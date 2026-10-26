@@ -52,11 +52,12 @@ import {
   subagentToolOptions,
   SUBAGENT_CONTROL_TOOL_NAMES,
 } from "./subagents";
-import { createSubagentController, getLiveSubagentStatus, type DirectSubagentPromptRun } from "./subagent-runtime";
+import { createSubagentController, getLiveSubagentStatus, hasUnsettledSubagentRun, type DirectSubagentPromptRun } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
 import { isBgTasksEnabled } from "./bg-tasks-settings";
-import { createBgTaskNotifier, killBgTasksForSession } from "./bash-bg-tasks";
+import { createBgTaskNotifier, hasLiveBgTasks, killBgTasksForSession } from "./bash-bg-tasks";
 import { resolveShellTools } from "./powershell-settings";
+import { withCodemodeDefault } from "./codemode-settings";
 import { CHAT_ONLY_RESOURCE_LOADER_OPTIONS, contextFilesSystemPrompt } from "./chat-only";
 import { createExactSystemPromptExtension } from "./exact-system-prompt";
 import { computeForcedSystemPrompt } from "./effective-system-prompt";
@@ -2788,7 +2789,9 @@ export async function startRpcSession(
       : chatOnly
         ? undefined
         : projectTrustReloadOptions(sessionCwd, agentDir);
-    const settingsManager = SettingsManager.create(sessionCwd, agentDir);
+    // Code mode is on unless the settings say otherwise (ADR 0006): the session's
+    // manager supplies that default where pi reads `defaultTools` at startup.
+    const settingsManager = withCodemodeDefault(SettingsManager.create(sessionCwd, agentDir));
     // Chat-only sessions and subagents that replace Pi's prompt send an exact
     // system prompt. The prompt is resolved at prompt time through this inline
     // extension: it may read the session's context files, which exist only
@@ -2859,7 +2862,10 @@ export async function startRpcSession(
                 settings: settingsManager,
                 ...(isBgTasksEnabled() ? { bgTasks: { notify: BG_TASK_NOTIFIER.notify } } : {}),
               }),
-              createPendingNotificationsExtension(),
+              createPendingNotificationsExtension({
+                hasLiveBackgroundWork: (sessionId) =>
+                  hasLiveBgTasks(sessionId) || hasUnsettledSubagentRun(sessionId),
+              }),
               createSubagentExtension(
                 SUBAGENT_CONTROLLER.extensionRuntime,
                 () => listSubagentProfiles(sessionCwd),
