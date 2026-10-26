@@ -29,6 +29,12 @@ pi's packages depend on each other with `^` ranges, and the published pi-web's d
 
 ---
 
+## Making a change
+
+- **A changed default gets no comment.** When a diff only moves a default — a value a settings layer, a project file or a caller can still set — the diff says what changed and the tests pin it. Do not write a comment above the literal explaining the new default, why it is the default, or what upstream does instead: that belongs in the `docs/agents` note that owns the behaviour and in the README's *Differences from upstream* entry, not in the code. The same goes for a test assertion whose expectation the assertion already names. A comment is for a constraint a reader cannot see in the diff, never for the change itself.
+
+---
+
 ## Architecture
 
 - **Browsing** (read-only, no AgentSession): `GET /api/sessions` lists `~/.pi/agent/sessions/`; `GET /api/sessions/[id]` reads the `.jsonl` through SDK `SessionManager` helpers and `lib/session-reader.ts`, or an open wrapper's in-memory `SessionManager`. `GET /api/agent/running` snapshots the running ids.

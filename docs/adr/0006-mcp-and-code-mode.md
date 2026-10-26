@@ -70,7 +70,10 @@ Normal sessions add the three factories to `extensionFactories` as
 extension that registers `/mcp`, `codemode`, or `tool_search` all behave as in
 the CLI. Chat-only sessions do not load them. Subagent profiles can now select
 `codemode: inherit | on | off` (missing means `off`): they load only the Code mode factory, retain their
-profile tool allow-list, and save the resolved choice in their resource snapshot.
+profile tool allow-list, and save the resolved choice in their resource snapshot. This fork
+ships the three built-in profiles as `inherit`, where upstream ships them `off`: with Code mode
+on by default, a child that fell back to direct tool calls would be the one session ignoring
+what its parent runs under.
 Profiles can also select `mcp: on | off` (missing means `off`): the child then
 loads `tool-search` and `mcp` with an MCP host of its own, so it connects the
 servers in `mcp.json` under the same trust rules. A child whose built-in tools are
