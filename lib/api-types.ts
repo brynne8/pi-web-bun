@@ -11,8 +11,8 @@ export interface SubagentSettingsResponse {
   maxConcurrent: number;
 }
 
-/** Code mode's one choice (ADR 0006): Automatic writes nothing, Always on adds `+codemode` to the global defaultTools. */
-export type McpCodemodePreference = "automatic" | "always";
+/** Code mode's one choice (ADR 0006): Always on is the default; Automatic writes `-codemode` to say so. */
+export type CodemodePreference = "automatic" | "always";
 
 /** One settings layer's `codemode.inlineBudget`, as the codemode extension reads it. */
 export interface CodemodeInlineBudgetSetting {
@@ -41,14 +41,13 @@ export interface CodemodeModeSetting {
 export interface ToolSettingsResponse {
   isWindows: boolean;
   powerShellEnabled: boolean;
-  /** "always" when the global defaultTools starts sessions with codemode active (ADR 0006). */
-  codemode: McpCodemodePreference;
-  /** The global `codemode.mode`. */
-  codemodeMode: CodemodeModeSetting;
-  /** The global `codemode.inlineBudget`. */
-  codemodeInlineBudget: CodemodeInlineBudgetSetting;
   /** Whether the background bash extension is enabled for new sessions. */
   bgTasksEnabled: boolean;
+  /**
+   * Code mode as Settings › Tools shows it: the global choice, mode and budget,
+   * and with `?cwd=` the project's own, its sandbox and the built-in switch.
+   */
+  codemode: CodemodeInfo;
 }
 
 export interface SkillSearchResult {
@@ -467,9 +466,10 @@ export type CodemodeSandboxStatus =
   | { state: "available" }
   | { state: "unavailable"; error: string };
 
-export interface McpCodemodeInfo {
+/** Code mode as a session would get it; Settings › Tools edits it and MCP's exposure notices read it. */
+export interface CodemodeInfo {
   /** Absent when the global settings file cannot be read; see `preferenceError`. */
-  preference?: McpCodemodePreference;
+  preference?: CodemodePreference;
   preferenceError?: string;
   sandbox: CodemodeSandboxStatus;
   /** `-builtin:codemode` (or a pattern matching it) in the global or a trusted project's `extensions`. */
@@ -488,24 +488,24 @@ export interface McpCodemodeInfo {
    * `+codemode` / `-codemode` modifier): `preference` is what its sessions get.
    * Only read with a cwd whose project settings sessions load.
    */
-  projectOverride?: McpCodemodeProjectOverride;
+  projectOverride?: CodemodeProjectOverride;
   /**
    * `codemode.mode`: whether active built-in and extension tools stay
    * declared while Code mode is on, or are reached only from scripts. Absent
    * when the global settings file cannot be read; see `modeError`.
    */
-  mode?: McpCodemodeMode;
+  mode?: CodemodeModeInfo;
   modeError?: string;
   /**
    * `codemode.inlineBudget`: the estimated tokens (characters / 4) the
    * codemode tool's description may spend on tool declarations. Absent when
    * the global settings file cannot be read; see `inlineBudgetError`.
    */
-  inlineBudget?: McpCodemodeInlineBudget;
+  inlineBudget?: CodemodeInlineBudgetInfo;
   inlineBudgetError?: string;
 }
 
-export interface McpCodemodeMode extends CodemodeModeSetting {
+export interface CodemodeModeInfo extends CodemodeModeSetting {
   /** The global settings file the mode is read from and saved to. */
   settingsPath: string;
   /**
@@ -516,7 +516,7 @@ export interface McpCodemodeMode extends CodemodeModeSetting {
   projectOverride?: CodemodeModeSetting & { settingsPath: string };
 }
 
-export interface McpCodemodeInlineBudget extends CodemodeInlineBudgetSetting {
+export interface CodemodeInlineBudgetInfo extends CodemodeInlineBudgetSetting {
   /** The global settings file the value is read from and saved to. */
   settingsPath: string;
   /** pi's default, which sessions use while nothing usable is set. */
@@ -531,11 +531,11 @@ export interface McpCodemodeInlineBudget extends CodemodeInlineBudgetSetting {
   projectOverride?: CodemodeInlineBudgetSetting & { settingsPath: string };
 }
 
-export interface McpCodemodeProjectOverride {
+export interface CodemodeProjectOverride {
   /** The project's `.pi/settings.json`. */
   settingsPath: string;
   /** "always" when its sessions start with `codemode` active, "automatic" when they start without it. */
-  preference: McpCodemodePreference;
+  preference: CodemodePreference;
 }
 
 export interface McpProjectInfo {
@@ -553,7 +553,11 @@ export interface McpProjectInfo {
 
 export interface McpResponse {
   mcp: McpAvailability;
-  codemode: McpCodemodeInfo;
+  /**
+   * Read-only here, for the notice on a server whose exposure needs Code mode:
+   * Settings › Tools is where the choice, mode and budget are changed.
+   */
+  codemode: CodemodeInfo;
   /**
    * Present when `-builtin:tool-search` (or a pattern matching it), in the
    * global or a trusted project's `extensions`, turns tool search off, so

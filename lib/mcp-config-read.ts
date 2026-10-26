@@ -2,9 +2,7 @@ import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readF
 import { join, resolve } from "node:path";
 import { CONFIG_DIR_NAME, type McpServerConfig } from "@earendil-works/pi-coding-agent";
 import type {
-  CodemodeSandboxStatus,
   McpAvailability,
-  McpCodemodeInfo,
   McpConfigFieldRef,
   McpConfigFileInfo,
   McpConfigFileProblem,
@@ -18,21 +16,11 @@ import type {
 import {
   isMcpDisabledByOperator,
   MCP_DISABLE_VARIABLE,
-  peekCodemodeSandbox,
   readBuiltinExtensionSwitches,
   type BuiltinExtensionName,
   type BuiltinExtensionSwitch,
 } from "./builtin-extensions";
-import {
-  CODEMODE_INLINE_BUDGET_DEFAULT,
-  CODEMODE_INLINE_BUDGET_MAX,
-  readCodemodePreference,
-  readCodemodeSettings,
-  readProjectCodemodeInlineBudget,
-  readProjectCodemodeMode,
-  readProjectCodemodeOverride,
-} from "./codemode-settings";
-import { getGlobalSettingsPath } from "./global-settings-file";
+import { readCodemodeInfo } from "./codemode-info";
 import { mcpConfigKey, mcpEntryConfigKey } from "./mcp-config-key";
 import { jsonErrorMessage } from "./mcp-json-error";
 import { isMcpOverrideEntry, MCP_OVERRIDE_KEYS, mcpOverrideRefusal } from "./mcp-override";
@@ -801,55 +789,6 @@ function mcpAvailability(
   return { available: true };
 }
 
-/**
- * Code mode as a session would get it: the global preference, mode and inline
- * budget, the sandbox self-test and `-builtin:codemode` (both as the project's
- * sessions see it and as the global settings alone say), and, given
- * `trustedCwd`, the project settings that decide any of them there whatever
- * the global value.
- */
-async function codemodeInfo(
-  agentDir: string,
-  codemodeSwitch: BuiltinExtensionSwitch | undefined,
-  trustedCwd: string | undefined,
-): Promise<McpCodemodeInfo> {
-  const peek = await peekCodemodeSandbox();
-  const sandbox: CodemodeSandboxStatus = !peek.checked
-    ? { state: "not-checked" }
-    : peek.available
-      ? { state: "available" }
-      : { state: "unavailable", error: peek.reason };
-  const info: McpCodemodeInfo = { sandbox, builtinDisabled: codemodeSwitch?.enabled === false };
-  if (codemodeSwitch?.settingsPath) info.builtinSettingsPath = codemodeSwitch.settingsPath;
-  // What the global `extensions` alone say, which is what Always on, a global setting, depends on.
-  const globalSwitch = codemodeSwitch?.global ?? codemodeSwitch;
-  if (globalSwitch?.enabled === false) {
-    info.globalBuiltinSettingsPath = globalSwitch.settingsPath ?? getGlobalSettingsPath(agentDir);
-  }
-  try {
-    info.preference = await readCodemodePreference(getGlobalSettingsPath(agentDir));
-  } catch (error) {
-    info.preferenceError = errorMessage(error);
-  }
-  const projectOverride = trustedCwd === undefined ? undefined : readProjectCodemodeOverride(trustedCwd);
-  if (projectOverride) info.projectOverride = projectOverride;
-  // Read on its own: a malformed defaultTools leaves the codemode object readable, and the other way round.
-  try {
-    const settingsPath = getGlobalSettingsPath(agentDir);
-    const { mode, inlineBudget } = await readCodemodeSettings(settingsPath);
-    info.mode = { ...mode, settingsPath };
-    const projectMode = trustedCwd === undefined ? undefined : readProjectCodemodeMode(trustedCwd);
-    if (projectMode) info.mode.projectOverride = projectMode;
-    info.inlineBudget = { ...inlineBudget, settingsPath, default: CODEMODE_INLINE_BUDGET_DEFAULT, max: CODEMODE_INLINE_BUDGET_MAX };
-    const projectBudget = trustedCwd === undefined ? undefined : readProjectCodemodeInlineBudget(trustedCwd);
-    if (projectBudget) info.inlineBudget.projectOverride = projectBudget;
-  } catch (error) {
-    info.modeError = errorMessage(error);
-    info.inlineBudgetError = info.modeError;
-  }
-  return info;
-}
-
 function withHostInactive(cwd: string | undefined): Pick<McpResponse, "hostInactive"> {
   const hostInactive = readMcpHostInactive(cwd);
   return hostInactive ? { hostInactive } : {};
@@ -920,7 +859,7 @@ export async function readMcpOverview(options: McpOverviewOptions): Promise<McpR
   const listedFiles = files.filter((file) => !file.problems.some((item) => item.reason !== "auto-enable-codemode-invalid"));
   return {
     mcp: mcpAvailability(environment, internals, switches?.mcp),
-    codemode: await codemodeInfo(agentDir, switches?.codemode, project && projectSettingsLoad ? project.cwd : undefined),
+    codemode: await readCodemodeInfo({ agentDir, builtinSwitch: switches?.codemode, trustedCwd: project && projectSettingsLoad ? project.cwd : undefined }),
     files,
     servers: withMcpStatuses(servers, listedFiles),
     ...(switches?.["tool-search"].enabled === false

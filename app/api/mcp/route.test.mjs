@@ -211,11 +211,15 @@ test("Code mode reports the global preference and a self-test nobody has run yet
   assert.deepEqual(body.codemode, {
     sandbox: { state: "not-checked" },
     builtinDisabled: false,
-    preference: "automatic",
+    // Nothing configured means Code mode is on: it is the application's default, not a setting.
+    preference: "always",
     mode: { settingsPath, value: "on" },
     inlineBudget: { settingsPath, default: 3000, max: 1_000_000 },
   });
 
+  await writeFile(settingsPath, JSON.stringify({ defaultTools: ["-codemode"] }));
+  ({ body } = await get());
+  assert.equal(body.codemode.preference, "automatic");
   await writeFile(settingsPath, JSON.stringify({ defaultTools: ["+codemode"] }));
   ({ body } = await get());
   assert.equal(body.codemode.preference, "always");
@@ -341,7 +345,7 @@ test("a trusted project whose own defaultTools decides Code mode there is report
   assert.deepEqual((await codemode()).projectOverride, { settingsPath: projectSettings, preference: "automatic" });
 
   // A project can turn it on too, whatever the global choice.
-  await rm(settingsPath, { force: true });
+  await writeFile(settingsPath, JSON.stringify({ defaultTools: ["-codemode"] }));
   await writeFile(projectSettings, JSON.stringify({ defaultTools: ["read", "codemode"] }));
   info = await codemode();
   assert.equal(info.preference, "automatic");

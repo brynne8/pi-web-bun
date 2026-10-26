@@ -1,29 +1,32 @@
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, SettingsManager } from "@earendil-works/pi-coding-agent";
-import type { CodemodeInlineBudgetSetting, CodemodeMode, CodemodeModeSetting } from "./api-types";
+import type { CodemodeInlineBudgetSetting, CodemodeMode, CodemodeModeSetting, CodemodePreference } from "./api-types";
 import {
   defaultToolEntries,
   getGlobalSettingsPath,
   readGlobalSettings,
   updateGlobalSettings,
 } from "./global-settings-file";
-import { resolveDefaultToolEntries } from "./powershell-settings";
+import { DEFAULT_SESSION_TOOLS, resolveDefaultToolEntries } from "./powershell-settings";
 import { PROJECT_SETTINGS_MAX_BYTES, readRegularFileText } from "./regular-file";
 
 // Code mode offers one choice (ADR 0006, "Code mode"):
-// - "automatic" writes nothing: `codemode` registers inactive, and the MCP
-//   extension activates it when a server with `codemode` exposure connects.
-// - "always" adds `+codemode` to the global `defaultTools`, so every new
-//   session starts with it active.
+// - "always", the default: a session starts with `codemode` active. Nothing
+//   needs to be written while no settings layer sets `defaultTools`
+//   (`withCodemodeDefault()` supplies it at session start); once one does, the
+//   choice is `+codemode` in that list.
+// - "automatic": `codemode` registers inactive, and the MCP extension activates
+//   it when a server with `codemode` exposure connects. It writes `-codemode`,
+//   which a plain `defaultTools` list without that name already says.
 // There is no "never": MCP tools with `codemode` exposure cannot be called
-// without it. Beside it, Settings › MCP edits the global `codemode` object
+// without it. Beside it, Settings › Tools edits the global `codemode` object
 // (below): `codemode.mode` and `codemode.inlineBudget`. `autoEnableCodemode`
 // stays file-only.
 
-export const CODEMODE_PREFERENCES = ["automatic", "always"] as const;
-export type CodemodePreference = typeof CODEMODE_PREFERENCES[number];
+export const CODEMODE_PREFERENCES = ["automatic", "always"] as const satisfies readonly CodemodePreference[];
 
 const CODEMODE = "codemode";
+
 
 export function isCodemodePreference(value: unknown): value is CodemodePreference {
   return typeof value === "string" && (CODEMODE_PREFERENCES as readonly string[]).includes(value);
@@ -37,27 +40,43 @@ function namesCodemode(entry: string): boolean {
   return (isToolModifier(entry) ? entry.slice(1) : entry) === CODEMODE;
 }
 
-/** "always" when the resolved `defaultTools` list starts sessions with `codemode` active. */
+/** "always" unless a settings layer names `codemode` out of the resolved `defaultTools` list. */
 export function codemodePreferenceOf(entries: readonly string[] | undefined): CodemodePreference {
-  return entries !== undefined && resolveDefaultToolEntries(entries).includes(CODEMODE) ? "always" : "automatic";
+  return entries === undefined || resolveDefaultToolEntries(entries).includes(CODEMODE) ? "always" : "automatic";
 }
 
 /**
- * The `defaultTools` entries for `preference`, edited minimally: every entry
- * naming `codemode` is dropped, and "always" appends `+codemode`, which adds it
- * to a plain list and to pi's defaults alike. Undefined means "remove the key":
- * a list that held only modifiers and ends up empty would otherwise read as
- * "no tools at all" instead of pi's defaults.
+ * The `defaultTools` entries for `preference`, or undefined to remove the key.
+ * "always" appends `+codemode`, and leaves an absent key absent: a session
+ * starts with Code mode on without it (`withCodemodeDefault()`). "automatic"
+ * strips every entry naming `codemode`, and writes `-codemode` where that would
+ * leave nothing to say so, since undefined now means "always".
  */
 export function withCodemodePreference(
   entries: readonly string[] | undefined,
   preference: CodemodePreference,
 ): string[] | undefined {
   const kept = (entries ?? []).filter((entry) => !namesCodemode(entry));
-  if (preference === "always") return [...kept, `+${CODEMODE}`];
+  if (preference === "always") return entries === undefined ? undefined : [...kept, `+${CODEMODE}`];
+  if (entries === undefined) return [`-${CODEMODE}`];
+  // No codemode left is already Automatic. A list that held only codemode
+  // modifiers would read as "pi's defaults" anyway, so it keeps them without it.
   if (kept.length > 0) return kept;
-  return entries !== undefined && entries.some((entry) => !isToolModifier(entry)) ? [] : undefined;
+  return entries.length > 0 && entries.every(isToolModifier) ? [`-${CODEMODE}`] : [];
 }
+
+/**
+ * A session's settings manager, with Code mode on when no settings layer sets
+ * `defaultTools`: pi resolves that list itself at session start, so the default
+ * is supplied where it reads it, and a `defaultTools` list — plain names,
+ * `+codemode` or `-codemode` — keeps the last word.
+ */
+export function withCodemodeDefault<T extends Pick<SettingsManager, "getDefaultTools">>(settingsManager: T): T {
+  const readDefaultTools = settingsManager.getDefaultTools.bind(settingsManager);
+  settingsManager.getDefaultTools = () => readDefaultTools() ?? [...DEFAULT_SESSION_TOOLS];
+  return settingsManager;
+}
+
 
 export async function readCodemodePreference(settingsPath = getGlobalSettingsPath()): Promise<CodemodePreference> {
   return readGlobalSettings(settingsPath, (settings) => codemodePreferenceOf(defaultToolEntries(settings)));
@@ -90,7 +109,7 @@ export interface ProjectCodemodeOverride {
 
 /** Global settings for each choice, reduced to what decides Code mode: other entries never do. */
 const GLOBAL_SETTINGS_FOR: Record<CodemodePreference, string | undefined> = {
-  automatic: undefined,
+  automatic: JSON.stringify({ defaultTools: [`-${CODEMODE}`] }),
   always: JSON.stringify({ defaultTools: [`+${CODEMODE}`] }),
 };
 

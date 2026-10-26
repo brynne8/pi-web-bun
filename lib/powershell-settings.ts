@@ -6,7 +6,15 @@ import {
 } from "./global-settings-file";
 
 const DEFAULT_TOOLS = ["read", "bash", "edit", "write"];
+/**
+ * The tools a session starts with when no settings layer sets `defaultTools`:
+ * pi's list plus `codemode`, which a Pi Web session turns on unless something
+ * says otherwise (ADR 0006, Code mode). A plain `defaultTools` list replaces it,
+ * and `-codemode` removes it, as pi's modifiers read.
+ */
+export const DEFAULT_SESSION_TOOLS: string[] = [...DEFAULT_TOOLS, "codemode"];
 const SHELL_TOOLS = new Set(["bash", "powershell"]);
+
 
 export function isPowerShellToolEnabled(
   defaultTools: readonly string[] | undefined,
@@ -87,7 +95,8 @@ export async function writePowerShellToolEnabled(
   if (platform !== "win32") throw new Error("PowerShell tool settings are only available on Windows");
 
   await updateGlobalSettings(settingsPath, (settings) => {
-    const currentTools = configuredTools(settings) ?? DEFAULT_TOOLS;
+    // No `defaultTools`: freeze what the session was starting with, Code mode included.
+    const currentTools = configuredTools(settings) ?? DEFAULT_SESSION_TOOLS;
     const nextTools = replaceShellTool(currentTools, enabled);
     if (!currentTools.some((name) => SHELL_TOOLS.has(name))) {
       nextTools.push(enabled ? "powershell" : "bash");

@@ -6,7 +6,8 @@ Accepted. Implemented in phases (see "Rollout"); P0, P1, and P2 are in place.
 Normal sessions load pi's built-in `codemode`, `tool-search`, and `mcp`
 extensions and connect the servers in the global `mcp.json` and in a trusted
 project's `.pi/mcp.json`. Settings › MCP lists, adds, switches, removes,
-tests, and signs in to those servers, and holds the Code mode choice.
+tests, and signs in to those servers. Code mode's settings have a page of
+their own, Settings › Tools.
 Per-entry approval of project servers was dropped after P1 in favor of the
 CLI's project trust (see "Safety"). Statements that building P2 proved wrong
 are corrected in place below.
@@ -141,8 +142,8 @@ panel reports that as a name conflict naming the extension.
 ### Settings › MCP, without a session
 
 A new Settings section sits next to Plugins and is built from the same
-`SettingsUi` primitives: a Code mode row, then servers grouped by Project and
-Global with a group switch and an `n/m` count, a status dot per row, a detail
+`SettingsUi` primitives: servers grouped by Project and Global with a group
+switch and an `n/m` count, a status dot per row, a detail
 pane with Sign in, Test, Remove, a switch, and the server's exposure, and an
 "Add MCP" action. It needs no project either: without one it lists the global
 `mcp.json` alone.
@@ -258,21 +259,25 @@ pane with Sign in, Test, Remove, a switch, and the server's exposure, and an
 
 ### Code mode
 
-The panel offers one choice, **Automatic** or **Always on**:
+Settings › Tools offers one choice, **Always on** or **Automatic**:
 
-- **Automatic** (default) writes nothing. `codemode` registers inactive, and
-  the MCP extension activates it when a server with `codemode` exposure
-  connects, unless `autoEnableCodemode` is false, which the panel then says.
-- **Always on** adds `+codemode` to the global `defaultTools` through
-  `/api/tools/settings`, which stays the only writer of that key and shares its
-  lock with the PowerShell switch. It applies to sessions started afterwards
-  and reloads none. It does not reach every project: a trusted project's
-  `.pi/settings.json` decides Code mode for its own sessions when its
-  `defaultTools` holds a plain name (that list replaces the global one,
-  `+codemode` included) or a `+codemode` / `-codemode` modifier (which has the
-  last word), and the panel names that file. Always on is unavailable, with
-  the reason shown, while the sandbox has failed its self-test or the global
-  `extensions` set `-builtin:codemode`.
+- **Always on** (the default) needs nothing written while no settings layer
+  sets `defaultTools`: `withCodemodeDefault()` wraps the session's
+  `SettingsManager.getDefaultTools()` at session start and supplies pi's
+  default list plus `codemode`. Once a list is there, the choice is
+  `+codemode` in it, written through `/api/tools/settings`, which stays the
+  only writer of that key and shares its lock with the PowerShell switch. It
+  applies to sessions started afterwards and reloads none. It does not reach
+  every project: a trusted project's `.pi/settings.json` decides Code mode for
+  its own sessions when its `defaultTools` holds a plain name (that list
+  replaces the global one, `+codemode` included) or a `+codemode` /
+  `-codemode` modifier (which has the last word), and the page names that file.
+  Always on is unavailable, with the reason shown, while the sandbox has
+  failed its self-test or the global `extensions` set `-builtin:codemode`.
+- **Automatic** writes `-codemode`; a plain list without that name already
+  says it. `codemode` registers inactive, and the MCP extension activates it
+  when a server with `codemode` exposure connects, unless
+  `autoEnableCodemode` is false, which the server rows then say.
 - There is no **Never**: MCP tools with `codemode` or `deferred` exposure cannot
   be called without `codemode` or `tool_search`.
 
@@ -280,10 +285,10 @@ Before the first normal session, Pi Web runs one script through the SDK's
 codemode tool. If the sandbox cannot run (its worker and wasm are resolved from
 the SDK's files at run time), no session offers `codemode`: the
 `builtin:codemode` entry stays, so settings that name it keep their meaning,
-but registers nothing. The panel shows the result, and "not checked yet"
-until a normal session has run the test.
+but registers nothing. Settings › Tools shows the result, and "not checked
+yet" until a normal session has run the test.
 
-The pane also edits two global `codemode` settings through the same route
+The same page edits two global `codemode` settings through the same route
 and lock, and names a trusted project whose settings set their own. An
 earlier version of this decision kept both file-only.
 
@@ -300,8 +305,9 @@ earlier version of this decision kept both file-only.
   still bounds them, since a `direct` tool is callable only while active.
 
 `autoEnableCodemode` and the `±builtin:*` entries stay file-only; they keep
-working as in the CLI. The panel reports the ones that change what it offers
-(`-builtin:mcp`, `-builtin:codemode`, `autoEnableCodemode: false`).
+working as in the CLI. Settings › MCP reports the ones that change what a
+server's tools reach (`-builtin:mcp`, `-builtin:codemode`,
+`autoEnableCodemode: false`); Settings › Tools reports `-builtin:codemode`.
 
 `resolveActiveToolNames()` replaces `withExtensionTools()`. It respects
 `defaultActive: false`, carries extension tools that were activated at runtime
@@ -368,8 +374,9 @@ restores the branch's tool set from its transcript.
 - **Operators.** `PI_WEB_DISABLE_MCP=1` turns MCP off for the whole server.
   Nothing in the browser can override it, and the server list in Settings ›
   MCP becomes read-only: switches, Remove, Undo, Add, Test, sign-in and
-  sign-out answer 409 `mcp-off`. The Code mode choice, which belongs to the
-  separate codemode built-in, stays editable.
+  sign-out answer 409 `mcp-off`. Code mode's settings, which belong to the
+  separate codemode built-in, are not on this route: Settings › Tools keeps
+  them editable.
 
 ### Transport, rendering, and lifecycle
 

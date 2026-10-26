@@ -421,14 +421,9 @@ export function AppShell() {
     if (isMobile && isNarrowMobile && keepMobileToolbarOpen) setMobileToolbarMoreOpen(true);
   }, [isMobile, isNarrowMobile]);
 
-  const handleSystemInfoToggle = useCallback((
-    panel: "system" | "tools",
-    keepMobileToolbarOpen = false,
-  ) => {
-    const opening = activeTopPanel !== panel;
-    toggleTopPanel(panel, keepMobileToolbarOpen);
-    if (!opening || systemInfoLoading) return;
-
+  // Read once, by whichever panel needs it: the System and Tools panels above the
+  // chat, and Settings › Tools' list of the session's tools.
+  const requestSystemInfo = useCallback(() => {
     const load = systemInfoLoaderRef.current;
     if (!load) return;
     const loadId = ++systemInfoLoadIdRef.current;
@@ -440,7 +435,17 @@ export function AppShell() {
         setSystemInfoLoading(false);
       }
     });
-  }, [activeTopPanel, systemInfoLoading, toggleTopPanel]);
+  }, []);
+
+  const handleSystemInfoToggle = useCallback((
+    panel: "system" | "tools",
+    keepMobileToolbarOpen = false,
+  ) => {
+    const opening = activeTopPanel !== panel;
+    toggleTopPanel(panel, keepMobileToolbarOpen);
+    if (!opening || systemInfoLoading) return;
+    requestSystemInfo();
+  }, [activeTopPanel, requestSystemInfo, systemInfoLoading, toggleTopPanel]);
 
   const openSessionStatsPanel = useCallback(() => {
     if (isMobile) setSidebarOpen(false);
@@ -2863,6 +2868,9 @@ export function AppShell() {
         projectTrust={projectTrust}
         onOpenTrustDialog={openProjectTrustDialog}
         onProjectTrustChanged={handleProjectTrustChanged}
+        tools={systemTools}
+        toolsLoading={systemInfoLoading}
+        onRequestTools={requestSystemInfo}
       />
     )}
     {/* After Settings, so it opens above it (z-index 1100 over 1000) when Settings › MCP asks for it. */}

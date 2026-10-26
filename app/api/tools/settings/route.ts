@@ -1,30 +1,36 @@
 import { NextResponse } from "vinext/shims/server";
-import type { McpErrorResponse, McpRefusalReason, ToolSettingsResponse } from "@/lib/api-types";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import type { CodemodeInfo, McpErrorResponse, McpRefusalReason, ToolSettingsResponse } from "@/lib/api-types";
 import {
   CODEMODE_INLINE_BUDGET_MAX,
   isCodemodeInlineBudget,
   isCodemodeMode,
   isCodemodePreference,
-  readCodemodePreference,
-  readCodemodeSettings,
   writeCodemodeInlineBudget,
   writeCodemodeMode,
   writeCodemodePreference,
 } from "@/lib/codemode-settings";
+import { readCodemodeInfo } from "@/lib/codemode-info";
+import { readBuiltinExtensionSwitches, type BuiltinExtensionSwitch } from "@/lib/builtin-extensions";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { readBgTasksEnabled, writeBgTasksEnabled } from "@/lib/bg-tasks-settings";
+import { isMcpEntryRefusal, validateMcpProject } from "@/lib/mcp-entry-request";
 import {
   readPowerShellToolEnabled,
   writePowerShellToolEnabled,
 } from "@/lib/powershell-settings";
+import { getProjectTrustStatus } from "@/lib/project-trust";
 
 export const dynamic = "force-dynamic";
 
-// The only writer of the global `defaultTools` key: the PowerShell switch
-// (Windows) and the Code mode choice (ADR 0006, chosen in Settings › MCP) both
-// edit it, under the lock pi's SettingsManager takes on the same file. Settings
-// › MCP saves the global `codemode.mode` and `codemode.inlineBudget` here too,
-// under the same lock.
+// Settings › Tools, and the only writer of the global `defaultTools` key: the
+// PowerShell switch (Windows) and the Code mode choice (ADR 0006) both edit it,
+// under the lock pi's SettingsManager takes on the same file. The global
+// `codemode.mode` and `codemode.inlineBudget` are saved here too, under the
+// same lock. `?cwd=` names the project the page describes: its `.pi/settings.json`
+// may decide Code mode for its own sessions, and that is read only when the
+// project's settings load (a trusted folder).
+//
 // Every refusal carries a `reason` code the panel translates, beside the
 // English `error` it shows only as the diagnostic of an `internal` failure.
 
@@ -38,19 +44,55 @@ function errorResponse(error: unknown) {
   return refusal(500, "internal", error instanceof Error ? error.message : String(error));
 }
 
-async function readToolSettings(): Promise<ToolSettingsResponse> {
+/** Whether sessions in `cwd` load its `.pi/settings.json`; an unreadable trust store trusts nothing. */
+function projectSettingsLoad(cwd: string, agentDir: string): boolean {
+  try {
+    return getProjectTrustStatus(cwd, agentDir).trusted === true;
+  } catch {
+    return false;
+  }
+}
+
+async function readCodemode(cwd: string | undefined, agentDir: string): Promise<CodemodeInfo> {
+  const trustedCwd = cwd !== undefined && projectSettingsLoad(cwd, agentDir) ? cwd : undefined;
+  let builtinSwitch: BuiltinExtensionSwitch | undefined;
+  try {
+    ({ codemode: builtinSwitch } = await readBuiltinExtensionSwitches({
+      agentDir,
+      cwd,
+      projectTrusted: trustedCwd !== undefined,
+    }));
+  } catch (error) {
+    // A settings file that cannot be read leaves the built-in as the session would find it: on.
+    console.warn(`[pi-web] cannot read the extensions settings for Settings › Tools: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return readCodemodeInfo({ agentDir, builtinSwitch, trustedCwd });
+}
+
+async function readToolSettings(cwd: string | undefined): Promise<ToolSettingsResponse> {
+  const agentDir = getAgentDir();
   // One after the other: each takes the file lock, and a reader that finds it
   // held backs off for about a second.
   const powerShellEnabled = await readPowerShellToolEnabled();
-  const codemode = await readCodemodePreference();
-  const { mode: codemodeMode, inlineBudget: codemodeInlineBudget } = await readCodemodeSettings();
   const bgTasksEnabled = await readBgTasksEnabled();
-  return { isWindows: process.platform === "win32", powerShellEnabled, codemode, codemodeMode, codemodeInlineBudget, bgTasksEnabled };
+  const codemode = await readCodemode(cwd, agentDir);
+  return { isWindows: process.platform === "win32", powerShellEnabled, bgTasksEnabled, codemode };
 }
 
-export async function GET() {
+/** The `?cwd=` project, checked as Settings › MCP checks it, or a refusal to answer with. */
+async function requestCwd(req: Request): Promise<{ cwd?: string; refused?: NextResponse }> {
+  const value = new URL(req.url).searchParams.get("cwd");
+  if (value === null) return {};
+  const result = await validateMcpProject(value);
+  if (isMcpEntryRefusal(result)) return { refused: NextResponse.json(result.body, { status: result.status }) };
+  return { cwd: result.cwd };
+}
+
+export async function GET(req: Request) {
   try {
-    return NextResponse.json(await readToolSettings());
+    const { cwd, refused } = await requestCwd(req);
+    if (refused) return refused;
+    return NextResponse.json(await readToolSettings(cwd));
   } catch (error) {
     return errorResponse(error);
   }
@@ -78,13 +120,22 @@ export async function PUT(req: Request) {
     return refusal(400, "invalid-request", "Send one of enabled (PowerShell), codemode, codemodeMode, codemodeInlineBudget or bgTasksEnabled");
   }
 
+  let cwd: string | undefined;
+  try {
+    const requested = await requestCwd(req);
+    if (requested.refused) return requested.refused;
+    cwd = requested.cwd;
+  } catch (error) {
+    return errorResponse(error);
+  }
+
   if ("bgTasksEnabled" in changes) {
     if (typeof changes.bgTasksEnabled !== "boolean") {
       return refusal(400, "invalid-request", "bgTasksEnabled must be a boolean");
     }
     try {
       await writeBgTasksEnabled(changes.bgTasksEnabled);
-      return NextResponse.json(await readToolSettings());
+      return NextResponse.json(await readToolSettings(cwd));
     } catch (error) {
       return errorResponse(error);
     }
@@ -97,7 +148,7 @@ export async function PUT(req: Request) {
     }
     try {
       await writeCodemodeMode(changes.codemodeMode);
-      return NextResponse.json(await readToolSettings());
+      return NextResponse.json(await readToolSettings(cwd));
     } catch (error) {
       return errorResponse(error);
     }
@@ -111,7 +162,7 @@ export async function PUT(req: Request) {
     }
     try {
       await writeCodemodeInlineBudget(budget ?? undefined);
-      return NextResponse.json(await readToolSettings());
+      return NextResponse.json(await readToolSettings(cwd));
     } catch (error) {
       return errorResponse(error);
     }
@@ -123,7 +174,7 @@ export async function PUT(req: Request) {
     }
     try {
       await writeCodemodePreference(changes.codemode);
-      return NextResponse.json(await readToolSettings());
+      return NextResponse.json(await readToolSettings(cwd));
     } catch (error) {
       return errorResponse(error);
     }
@@ -137,7 +188,7 @@ export async function PUT(req: Request) {
   }
   try {
     await writePowerShellToolEnabled(changes.enabled);
-    return NextResponse.json(await readToolSettings());
+    return NextResponse.json(await readToolSettings(cwd));
   } catch (error) {
     return errorResponse(error);
   }

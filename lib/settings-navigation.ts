@@ -1,6 +1,7 @@
 export const SETTINGS_SECTION_VALUES = [
   "general",
   "models",
+  "tools",
   "skills",
   "agents",
   "plugins",

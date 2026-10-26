@@ -1962,6 +1962,101 @@
   font-size: 11px;
 }
 
+/* Settings › Tools: the Code mode settings as rows, their notices under each
+   row, and the tools the open session offers as a wrapping list of names. */
+.settings-codemode-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 420px;
+}
+
+/* These rows carry a control that cannot shrink to nothing beside its label. */
+.settings-codemode-row {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.settings-codemode-warning {
+  margin: 0;
+  color: #d97706;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.settings-codemode-chip {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--bg-selected);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+/* The budget field: a short number, its unit and Save on one line. */
+.settings-codemode-budget {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-codemode-budget-input {
+  width: 96px;
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  outline: none;
+}
+
+.settings-codemode-unit {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.settings-tool-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 420px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-tool-name {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* A tool the model cannot call as it is: turned off, or reachable only from scripts. */
+.settings-tool-name[data-off] {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.settings-tool-note {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
 @media (max-width: 640px) {
   .config-add-source-example.has-label {
     grid-template-columns: minmax(0, 1fr);
@@ -2224,22 +2319,6 @@
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
-}
-
-/* The Code mode pane's budget field: a short number field, its unit and Save
-   on one line, wrapping in the narrow phone pane. */
-.mcp-codemode-budget {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-/* Two classes: it reuses .mcp-add-input, which comes later and takes the pane's width. */
-.mcp-add-input.mcp-codemode-budget-input {
-  width: 96px;
-  flex-shrink: 0;
 }
 
 /* A server's exposure dropdown, sized to its longest option, with its Saving… beside it. */
