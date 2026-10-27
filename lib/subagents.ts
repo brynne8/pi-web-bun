@@ -225,7 +225,7 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
   {
     name: "explore",
     displayName: "Explore",
-    description: "Use when finding files or code, or explaining existing code; read-only",
+    description: "Use when mapping an unfamiliar codebase or investigating a question deeply; read-only",
     systemPrompt: "Explore the codebase to answer the delegated question. Do not modify files. Report concrete findings with file paths and relevant symbols.",
     tools: [...PRESET_READ_ONLY],
     loadSkills: false,
@@ -241,7 +241,7 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
   {
     name: "plan",
     displayName: "Plan",
-    description: "Use before a multi-step change: steps, files, risks, verification; read-only",
+    description: "Use for a large, complex task that needs its steps broken down; read-only",
     systemPrompt: "Produce an implementation-ready plan for the delegated task. Inspect the repository as needed, do not modify files, and call out dependencies, risks, and verification steps.",
     tools: [...PRESET_READ_ONLY],
     loadSkills: false,

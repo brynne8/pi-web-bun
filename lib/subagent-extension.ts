@@ -59,10 +59,10 @@ export function subagentDelegationBlock(profiles: readonly SubagentProfile[]): s
   const named = new Set(available.map((profile) => profile.name));
   const rules = [DELEGATION_INTRO];
   if (named.has("explore")) {
-    rules.push("`explore` for any question about existing code: where a symbol lives, how a flow works, which files touch a feature. It reads and reports paths, so ask it first instead of reading the neighbourhood yourself.");
+    rules.push("Use `explore` when you need to map an unfamiliar codebase, or when a change ripples through code you have not mapped and must be handled carefully. It only reads. Never use it for a file, symbol or call site you already know; read those yourself.");
   }
   if (named.has("plan")) {
-    rules.push("`plan` before an edit that spans several files or steps: it reads the repo and returns steps, files, risks and verification, without changing anything.");
+    rules.push("Use `plan` for a large, complex task whose steps need thought before work starts. Never use it for a change a few steps already describe, however many files it touches. Never set `run_in_background` for it, and never run it alongside the work it plans.");
   }
   rules.push(...DELEGATION_RULES);
   const others = available.filter((profile) => profile.name !== "explore" && profile.name !== "plan");
@@ -305,7 +305,7 @@ export function createSubagentExtension(
           prompt: Type.String({ description: "The complete task for the subagent." }),
           resume: Type.Optional(Type.String({ description: "Existing session ID to continue with its current profile, model, thinking, and context. Omit new-session options." })),
           description: Type.String({ description: "Short activity label shown in the UI." }),
-          run_in_background: Type.Optional(Type.Boolean({ description: "Return immediately and notify this session when complete." })),
+          run_in_background: Type.Optional(Type.Boolean({ description: "Return immediately and notify this session when complete. `plan` should always run in the foreground." })),
           model: Type.Optional(Type.String({ description: 'Optional provider/modelId override. Append ":<level>" (off, minimal, low, medium, high, xhigh, max) to also set the thinking level for this run, e.g. "provider/model:high".' })),
           isolation: Type.Optional(Type.String({ description: 'Set to "worktree" to run the subagent in an isolated git worktree.' })),
         }),

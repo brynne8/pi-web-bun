@@ -140,7 +140,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **思考过程按 Markdown 渲染。** 展开的思考块走的是和回复同一套 Markdown 流水线：标题、列表、表格和围栏代码都渲染出来，不再把标记符号直接摆给你看，写成链接的路径也能在应用里打开。字号仍是这张卡片一贯的那一号。原版的处理是把整段思考当成一串保留换行的纯文本。（[说明](./docs/agents/sessions.md#thinking-renders-as-markdown-at-the-cards-own-size-thinkingblock-componentsmessageviewtsx)）
 
-**委派规则自己成块。** 目标一清楚就该委派——这句话现在单独成块，作为 `<delegation>` 出现在系统提示的末尾，不再混在所有工具共用的那一串规则里，于是它读起来是 `Agent` 的策略，不是又一条泛泛的建议。它给 `explore` 和 `plan` 各写了规则——要了解现有代码就交给 `explore`，它只读不改；要改好几处就先让 `plan` 给出步骤、文件、风险和验证方式——其余启用的子代理只列名字。它随每一次运行的提示发出，**系统提示**面板也能看到，包括被插件改写了提示的会话。原版把委派建议放在工具的 prompt guidelines 里，由 Pi 追加到扁平的 `<rules>` 列表。（[说明](./docs/agents/subagents.md#delegation-policy)）
+**委派规则自己成块。** 目标一清楚就该委派——这句话现在单独成块，作为 `<delegation>` 出现在系统提示的末尾，不再混在所有工具共用的那一串规则里，于是它读起来是 `Agent` 的策略，不是又一条泛泛的建议。它给 `explore` 和 `plan` 各写了规则——面对陌生的代码库要建立理解，或一处改动波及尚未摸清、必须小心处理的代码，就用 `explore`；需要先想清楚步骤的大型复杂任务，就用 `plan`，而且绝不和它所规划的工作同时进行，plan 也应该始终在前台运行——其余启用的子代理只列名字。它随每一次运行的提示发出，**系统提示**面板也能看到，包括被插件改写了提示的会话。原版把委派建议放在工具的 prompt guidelines 里，由 Pi 追加到扁平的 `<rules>` 列表。（[说明](./docs/agents/subagents.md#delegation-policy)）
 
 **子代理由 profile 配置，不由模型猜。** 子代理的思考档位、轮次上限、是否继承这段对话，都由它的 profile 决定，于是一次运行可以从产出它的那份 profile 复现。`model` 是调用方唯一还能指定的参数，因为换某个模型跑一次是常见且明确的需求，而工具描述里列着每个 profile 自己的模型。要让子代理看哪些文件，就写在 `prompt` 里，它用自己的 `read` 去打开，被委派出去的会话因此只占它真正需要的上下文。原版另外接受调用上的 `input_files` 列表（[#1138](https://github.com/agegr/pi-web/pull/1138)）。（[说明](./docs/agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）
 
