@@ -2,7 +2,7 @@
 
 [中文文档](./docs/README.zh-CN.md) | [日本語](./docs/README.ja.md) | [Русский](./docs/README.ru.md)
 
-> **This is a Bun-focused fork of [agegr/pi-web](https://github.com/agegr/pi-web).** It runs on [Bun](https://bun.sh) with no Node.js, `npm` or `npx` installed, and it has its own opinion about how a coding agent should read in a browser: a long command hands off instead of holding the turn open, a `read` call opens the exact slice it returned, the composer never changes what is under your finger, and a relay dropping its HTTP/2 stream no longer costs you the run. [Differences from upstream](#differences-from-upstream) says what still differs — and what upstream has since taken over; [Bun setup](#bun-setup) gets it running. Everything else below is upstream's documentation.
+> **This is a Bun-focused fork of [agegr/pi-web](https://github.com/agegr/pi-web).** It runs on [Bun](https://bun.sh) with no Node.js, `npm` or `npx` installed, and it has its own opinion about how a coding agent should read in a browser: a long command hands off instead of holding the turn open, a `read` call opens the exact slice it returned, the composer never changes what is under your finger, and a relay dropping its HTTP/2 stream no longer costs you the run. [Differences from upstream](#differences-from-upstream) says what still differs; [Bun setup](#bun-setup) gets it running. Everything else below is upstream's documentation.
 
 Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi). Pi Web uses the same local configuration and session files as pi, so you can browse and resume conversations, run agent turns, configure models and resources, and inspect project files from a browser.
 
@@ -80,7 +80,7 @@ The pi SDK reads it and adapts its install arguments per package manager (`npm`,
 
 ## Differences from upstream
 
-Three kinds of difference. [Running on Bun](#running-on-bun) is what it takes to run without a Node.js toolchain. [Features this fork adds](#features-this-fork-adds) is the behaviour it ships on top of upstream, with one line on what upstream does where the two differ. [Not fork differences](#not-fork-differences) lists what upstream wrote and this checkout merely carries.
+Two kinds of difference. [Running on Bun](#running-on-bun) is what it takes to run without a Node.js toolchain. [Features this fork adds](#features-this-fork-adds) is the behaviour it ships on top of upstream, with one line on what upstream does where the two differ.
 
 ### Running on Bun
 
@@ -168,14 +168,6 @@ Useful on the first run; none of it needs configuring unless the entry says othe
 **The changed-file list arrives without a second look at the tree.** The sidebar's Git list is read from Git on every reload, so it shows the tree as it is now. The three questions Git is asked — the repository root, the status, and the line counts — go out together rather than one after the other, and an untracked file's lines are counted once and kept while the file is unchanged, so a repository with many untracked files answers in a fraction of the time. Upstream asks the same questions one after the other, and counts every untracked file's lines again on every reload. ([Note](./docs/agents/files-and-access.md#when-the-file-tree-reloads))
 
 **The System panel shows the prompt the model gets.** The **System** panel lists the whole system prompt, and a plugin that rewrites it is part of that text: the plugin's own words show up where the model reads them, not only in the plugin's file. Upstream replays Pi's own sections from the transcript, where a plugin's forced prompt never appears — pi sends it for the run and keeps its own sections in the transcript. ([Note](./docs/agents/sessions.md#the-system-panel-shows-the-prompt-the-model-receives))
-
-### Not fork differences
-
-These came from upstream, and this checkout has them because upstream wrote them: keeping Stop clear of the slot compaction lands in after a stray double click (`0a38de9`, [#1131](https://github.com/agegr/pi-web/pull/1131)), collapsing a custom message from its header (`574cbba`, [#1133](https://github.com/agegr/pi-web/pull/1133)), answering a removed subagent worktree from the repository it branched from (`f9a370e`, [#1137](https://github.com/agegr/pi-web/pull/1137)), letting the profile decide a subagent's spawn parameters (`fb6df88`, [#1138](https://github.com/agegr/pi-web/pull/1138)), the file viewer's delimited CSV/TSV table (`f87afbb`, [#1150](https://github.com/agegr/pi-web/pull/1150)), and telling the parent where an isolated subagent run's worktree went, or refusing to resume one whose worktree is gone (`d92eb83`, `341ada5`, [#1202](https://github.com/agegr/pi-web/pull/1202)). An earlier version of this README listed some of these as fork work; this one does not.
-
-Upstream has since taken over three more of this fork's: a patch that opens as one column on a phone instead of two (`408230c`, [#1325](https://github.com/agegr/pi-web/pull/1325)), a tool call's flat arguments as rows (`083fd11`, [#1324](https://github.com/agegr/pi-web/pull/1324)), and an in-page fragment link that lands inside the document it belongs to (`2cefb72`, [#1323](https://github.com/agegr/pi-web/pull/1323)). The rest of what upstream wrote since the last sync is carried the same way: the browser suite settling the sidebar toggle after a breakpoint change (`a26d85f`, [#1326](https://github.com/agegr/pi-web/pull/1326)), session search over renamed and generated titles (`7c0778a`, [#1318](https://github.com/agegr/pi-web/pull/1318)), the steer and follow-up buttons on their own row on a phone (`628d6ac`, [#1330](https://github.com/agegr/pi-web/pull/1330)), the caret at the quote's end (`bc762a3`, [#1319](https://github.com/agegr/pi-web/pull/1319)), and the fresh composer taking the caret on a desktop (`12b157d`, [#1313](https://github.com/agegr/pi-web/pull/1313)).
-
-Everything else — sessions, files, Git, worktrees, models, MCP, extensions — is upstream code and behaves as upstream describes it. So is the sidebar's layout, which moved under this branch's feet: the files below the sessions on a desktop or in a tab of their own, section-style project headers, a foldable and resizable files section, 28px rows with the files keys in the tab's order (`3fe257f`, `4fa6799`, `02532c3`, `0066d5f`, `51dda7c`, `cae6201`), and the brand above the project and worktree picker on the empty new-session page (`e2fe4fb`).
 
 ## Quick Start (upstream, Node.js)
 

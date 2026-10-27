@@ -13,7 +13,7 @@
   ```
 
 - **No implementation numbers.** px, line height, milliseconds, byte sizes, line counts, CSS-variable counts, `!important`. A number stays only where the user meets it as behaviour — the two-minute hand-off, the 120 s auto-background. A type change is "a step smaller than upstream's"; the exact pair of sizes belongs to the note that owns the CSS.
-- **No bare commit hashes in an entry.** PR and issue links stay, because the rule that each entry ends with what upstream does needs something to point at. Bare hashes belong in *Not fork differences*, where they answer "who wrote this", and nowhere else.
+- **No bare commit hashes in an entry.** PR and issue links stay, because the rule that each entry ends with what upstream does needs something to point at. A bare hash answers "who wrote this", which is git's to answer and the note's to record, not the README's.
 - **No reasons, defences, or codas.** "because a file you are scanning reads at a glance", "it adds no syntax-highlighting dependency: 245 lines of scanner plus a renderer, six CSS variables", "so the fix cannot die quietly" — three shapes the same paragraph grows back. Each explains or defends a decision instead of naming the behaviour; the note is where the explanation lives.
 - **One mention per fact.** A thinking card's font size appeared in the entry's title, in its body, and in the *Features* bullet. The bullet is the entry's short form, not a third copy of its caveat.
 - **The detail is moved, not deleted.** Before a number or a mechanism leaves the README, confirm the note for that area holds it: this fork's rule is that every difference is written down somewhere, and the README is not that place.

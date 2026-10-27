@@ -82,7 +82,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 ## 与原版的区别
 
-三类差异。[在 Bun 上运行](#在-bun-上运行)是不装 Node.js 工具链所必需的改造。[这个分支新增的功能](#这个分支新增的功能)是在原版之上多做的那部分，两边做法不同的地方各附一句原版的处理。[不算 fork 差异的部分](#不算-fork-差异的部分)是上游自己写的、本仓库只是跟着拿到的改动。
+两类差异。[在 Bun 上运行](#在-bun-上运行)是不装 Node.js 工具链所必需的改造。[这个分支新增的功能](#这个分支新增的功能)是在原版之上多做的那部分，两边做法不同的地方各附一句原版的处理。
 
 ### 在 Bun 上运行
 
@@ -97,6 +97,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 | 测试套件 | Node 运行器（`npm test`） | 两种运行器都跑、都绿：`bun test` 与 `npm test` |
 | 浏览器回归测试 | Playwright Chromium（`npx playwright install --with-deps chromium`） | 用 Playwright 自带的 Apple WebKit：`npm run test:e2e:install` 拉取，CI 装 `--with-deps webkit`；本分支不安装也不启动任何 Chromium 二进制（见 [docs/agents/tests.md](./docs/agents/tests.md#e2e-playwright)） |
 | 构建工具链 | Next.js 16（Turbopack；开发状态与构建产物都在 `.next/`） | vinext 跑在 Vite 8/Rolldown 上，由 `vite.config.ts` 与 `next-config.ts` 配置：`bun run dev` 的状态在 `.vinext/`，`bun run build` 输出到 `dist/`，`bun run start` 提供 `dist/` |
+| 停止服务器 | `next start` 用 `server.close()` 应答 SIGINT/SIGTERM，并等连接结束 | `vinext start` 不应答任何信号，所以收尾改为显式退出：清理动作一跑完就退出（`lib/server-shutdown.ts`；[说明](./docs/agents/sessions.md#stopping-the-server-libserver-shutdownts)） |
 | 锁文件 | `package-lock.json` | `bun.lock` 已加入忽略列表；`bun-types` 则写进被跟踪的 `package-lock.json`，因为 CI 的 `npm ci` 不接受与它对不上的 `package.json` |
 | CI | Node.js 上跑 `.github/workflows/ci.yml` | 同一个 `ci.yml`，只把它要装的浏览器换成 `--with-deps webkit`——本分支不加 Bun 的 job，所以上面那些 Bun 检查在本地跑 |
 
@@ -169,14 +170,6 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 **改动清单不用再看一遍目录树。** 侧边栏的 Git 清单每次刷新都重新从 Git 读，所以它显示的就是此刻的目录树。问 Git 的三个问题——仓库根目录、状态、改动行数——是一起发出的，不是一个接一个；未跟踪文件的行数只数一遍，文件没变就留着这个结果，所以未跟踪文件很多的仓库也能很快作答。原版把同样的问题一个接一个地问，并且每次刷新都把所有未跟踪文件重数一遍。（[说明](./docs/agents/files-and-access.md#when-the-file-tree-reloads)）
 
 **「系统」面板显示模型拿到的那份提示词。** 「系统」面板列出完整的系统提示词，改写过它的插件也属于这份文本：插件自己写的那段话会出现在模型读到它的地方，而不是只留在插件的文件里。原版从记录里重放 pi 自己的那些段落，插件强制的那份提示词在那里从不出现——pi 在这次运行里送出它，记录里仍留着 pi 自己的段落。（[说明](./docs/agents/sessions.md#the-system-panel-shows-the-prompt-the-model-receives)）
-
-### 不算 fork 差异的部分
-
-下面这些来自上游，本仓库有它们只是因为上游写了它们：让「停止」不落在「压缩」接手的格子里、以免误双击（`0a38de9`，[#1131](https://github.com/agegr/pi-web/pull/1131)）；从标题折叠自定义消息（`574cbba`，[#1133](https://github.com/agegr/pi-web/pull/1133)）；已删除的子代理 worktree 改从它分叉出来的仓库回答（`f9a370e`，[#1137](https://github.com/agegr/pi-web/pull/1137)）；由 profile 决定子代理的启动参数（`fb6df88`，[#1138](https://github.com/agegr/pi-web/pull/1138)）；以及文件预览里的 CSV/TSV 表格（`f87afbb`，[#1150](https://github.com/agegr/pi-web/pull/1150)）。本 README 的早期版本把这些算成了 fork 的工作，现在不再这样写。
-
-上游后来又收走了这个分支的三项：手机上以单栏打开的 patch（`408230c`，[#1325](https://github.com/agegr/pi-web/pull/1325)）、按行显示的工具参数（`083fd11`，[#1324](https://github.com/agegr/pi-web/pull/1324)），以及落在自己文档里的页内片段链接（`2cefb72`，[#1323](https://github.com/agegr/pi-web/pull/1323)）。上一次同步之后上游写的其余部分同样照单全收：浏览器测试在断点变化后等侧栏开关稳定（`a26d85f`，[#1326](https://github.com/agegr/pi-web/pull/1326)）、会话搜索覆盖改名与自动生成的标题（`7c0778a`，[#1318](https://github.com/agegr/pi-web/pull/1318)）、手机上「引导」与「后续消息」各占一行（`628d6ac`，[#1330](https://github.com/agegr/pi-web/pull/1330)）、引用末尾保留光标（`bc762a3`，[#1319](https://github.com/agegr/pi-web/pull/1319)），以及桌面上新建会话后输入框直接拿到焦点（`12b157d`，[#1313](https://github.com/agegr/pi-web/pull/1313)）。
-
-其余没有列出的部分——会话、文件、Git、worktree、模型、MCP、扩展——都是上游代码，行为与原版描述一致。侧边栏的整体摆法也一样是上游的，而且是在本分支存在期间改掉的：桌面上文件栏放在会话列表下面、或者单独占一个标签页，项目分组用分区式标题，文件栏可折叠也可拖动，28px 行高、文件键按标签页的顺序排（`3fe257f`、`4fa6799`、`02532c3`、`0066d5f`、`51dda7c`、`cae6201`）；空白新会话页上，品牌字样位于项目与 worktree 选择器之上（`e2fe4fb`）。
 
 ## 快速开始（原版，Node.js）
 
