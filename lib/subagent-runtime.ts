@@ -28,11 +28,12 @@ import {
   subagentExtensionLoaderOptions,
   subagentToolOptions,
   withSubagentExtensionTools,
+  type SubagentListEntry,
   type SubagentMetadata,
   type SubagentResultMetadata,
   type SubagentRunInfo,
 } from "./subagents";
-import type { SessionEntry } from "./types";
+import type { SessionEntry, SessionInfo } from "./types";
 import { buildSubagentPromptPlan } from "./subagent-prompt";
 import { createSubagentSkillsBinding } from "./subagent-skills";
 import { projectTrustReloadOptions } from "./project-trust";
@@ -72,6 +73,8 @@ export interface SubagentRuntimeDependencies {
   reopenSession(sessionId: string, sessionFile: string): Promise<HostSession>;
   resolveSessionPath(sessionId: string): Promise<string | null>;
   invalidateSessionList(): void;
+  /** The session catalogue `list_subagent_runs` reads; live runs are overlaid on it. */
+  listSessions?(): Promise<readonly SessionInfo[]>;
   isBuiltInSubagentsEnabled?(): boolean;
   /** Where a settled run's report is queued for its parent. */
   settledReports: SettledReportSink;
@@ -962,6 +965,44 @@ export function createSubagentController(
     return run && settleOrphanedRun(run);
   }
 
+  /**
+   * Every subagent this parent delegated, newest activity first by the caller's ordering. The
+   * session index is the only record that survives a restart; the live map covers a run dispatched
+   * before the index refreshed, and its status wins over a file that still says queued or running.
+   */
+  async function list(parentSessionId: string): Promise<SubagentListEntry[]> {
+    const rows = new Map<string, SubagentListEntry>();
+    if (dependencies.listSessions) {
+      let sessions: readonly SessionInfo[] = [];
+      try {
+        sessions = await dependencies.listSessions();
+      } catch {
+        // The live runs are still worth answering with when the catalogue cannot be read.
+      }
+      for (const session of sessions) {
+        if (session.relation?.kind !== "subagent" || session.relation.parentSessionId !== parentSessionId) continue;
+        rows.set(session.id, {
+          sessionId: session.id,
+          profile: session.relation.profile,
+          status: session.relation.status,
+          updatedAt: session.modified,
+          description: session.relation.description,
+        });
+      }
+    }
+    for (const { run } of getSubagentRuns().values()) {
+      if (run.parentSessionId !== parentSessionId) continue;
+      rows.set(run.sessionId, {
+        sessionId: run.sessionId,
+        profile: run.profile,
+        status: run.status,
+        updatedAt: run.completedAt ?? run.createdAt,
+        description: run.description,
+      });
+    }
+    return [...rows.values()];
+  }
+
   /** A live turn is the only thing a steer can join; a settled child continues through resume. */
   async function steerRefusal(sessionId: string): Promise<string> {
     const run = await get(sessionId);
@@ -1052,7 +1093,7 @@ export function createSubagentController(
   return {
     // `abort` goes to the tools as well as to the routes: the parent that started a run can end one
     // it no longer wants, and does not need a report back telling it what it just did.
-    extensionRuntime: { start, resume, get, steer, abort, notifyParent, markResultConsumed },
+    extensionRuntime: { start, resume, get, list, steer, abort, notifyParent, markResultConsumed },
     get,
     steer,
     abort,

@@ -14,7 +14,7 @@ import type { SessionEntry, SubagentSessionStatus } from "./types";
 export const SUBAGENT_META_TYPE = "pi-web:subagent";
 export const SUBAGENT_STATUS_TYPE = "pi-web:subagent-status";
 export const SUBAGENT_RESULT_TYPE = "pi-web:subagent-result";
-export const SUBAGENT_CONTROL_TOOL_NAMES = ["Agent", "get_subagent_result", "steer_subagent", "abort_subagent"] as const;
+export const SUBAGENT_CONTROL_TOOL_NAMES = ["Agent", "get_subagent_result", "steer_subagent", "abort_subagent", "list_subagent_runs"] as const;
 
 export type SubagentStatus = SubagentSessionStatus;
 export type SubagentCodemode = "inherit" | "on" | "off";
@@ -112,6 +112,15 @@ export interface SubagentResultMetadata {
 export interface SubagentStatusMetadata {
   version: 1;
   status: Extract<SubagentStatus, "queued" | "running">;
+}
+
+/** One row of `list_subagent_runs`, read from the session index and live runs. */
+export interface SubagentListEntry {
+  sessionId: string;
+  profile: string;
+  status: SubagentStatus;
+  updatedAt: string;
+  description: string;
 }
 
 export interface SubagentRunInfo {

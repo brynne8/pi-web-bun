@@ -12,6 +12,7 @@ import {
 } from "./subagent-notification";
 import {
   SUBAGENT_CONTROL_TOOL_NAMES,
+  type SubagentListEntry,
   type SubagentProfile,
   type SubagentRunInfo,
 } from "./subagents";
@@ -39,6 +40,16 @@ const ABORT_SETTLE_POLL_MS = 50;
  */
 const SUBAGENT_TOOL_EXPOSURE = "model-only" satisfies ToolExposure;
 const AGENT_TOOL_NAME = SUBAGENT_CONTROL_TOOL_NAMES[0];
+const SUBAGENT_ACTIVE_STATUSES = new Set<SubagentListEntry["status"]>(["starting", "queued", "running"]);
+/** Exits that leave work behind: the default view keeps only the recent ones. */
+const SUBAGENT_ABNORMAL_STATUSES = new Set<SubagentListEntry["status"]>(["failed", "aborted", "interrupted"]);
+const SUBAGENT_UNFINISHED_STATUSES = new Set<SubagentListEntry["status"]>([
+  ...SUBAGENT_ACTIVE_STATUSES,
+  ...SUBAGENT_ABNORMAL_STATUSES,
+]);
+/** How long a failed, stopped or interrupted run stays in the default process list. */
+const SUBAGENT_RECENT_EXIT_MS = 60 * 60 * 1000;
+const SUBAGENT_LIST_DESCRIPTION_MAX = 120;
 /**
  * The delegation policy's opening rule, in a `<delegation>` block of its own appended to the
  * text of the run's system prompt — not the tool's `promptGuidelines`, which pi flattens into
@@ -135,6 +146,8 @@ export interface SubagentExtensionRuntime {
   start(request: StartSubagentRequest): Promise<SubagentExecution>;
   resume(request: ResumeSubagentRequest): Promise<SubagentExecution>;
   get(sessionId: string): Promise<SubagentRunInfo | null>;
+  /** Every subagent this parent delegated, from the session index and the live run map. */
+  list(parentSessionId: string): Promise<SubagentListEntry[]>;
   steer(sessionId: string, message: string): Promise<void>;
   /**
    * End a run the parent no longer wants: it takes the queued run out of the queue, ends the wait
@@ -216,6 +229,89 @@ export function subagentFinalText(run: SubagentRunInfo): string {
   const failure = withWorktree(`Subagent ${run.sessionId} failed: ${run.error ?? "Unknown error"}`);
   const partial = run.result?.trim();
   return partial ? `${failure}\n\nPartial output:\n\n${partial}` : failure;
+}
+
+function subagentListField(value: string, max = SUBAGENT_LIST_DESCRIPTION_MAX): string {
+  const flat = value.replace(/[\t\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  if (flat.length <= max) return flat;
+  const last = flat.charCodeAt(max - 1);
+  const cut = last >= 0xd800 && last <= 0xdbff ? max - 1 : max;
+  return `${flat.slice(0, cut)}…`;
+}
+
+/**
+ * `list_subagent_runs` answers in TSV: a fixed header plus one compact row per subagent, never the
+ * task or result. The default view is a process list: live runs plus exits recent enough to still
+ * matter. Completed runs and older exits are counted in one note instead of filling the answer.
+ */
+export function formatSubagentList(
+  entries: readonly SubagentListEntry[],
+  options: { status?: string; now?: number } = {},
+): string {
+  const filter = options.status === "active"
+    || options.status === "unfinished"
+    || options.status === "completed"
+    || options.status === "all"
+    ? options.status
+    : "recent";
+  const now = options.now ?? Date.now();
+  const isRecentExit = (entry: SubagentListEntry) => {
+    const endedAt = Date.parse(entry.updatedAt);
+    return Number.isFinite(endedAt) && now - endedAt <= SUBAGENT_RECENT_EXIT_MS;
+  };
+  const filtered = entries.filter((entry) => {
+    if (filter === "all") return true;
+    if (filter === "active") return SUBAGENT_ACTIVE_STATUSES.has(entry.status);
+    if (filter === "completed") return entry.status === "completed";
+    if (filter === "unfinished") return SUBAGENT_UNFINISHED_STATUSES.has(entry.status);
+    return SUBAGENT_ACTIVE_STATUSES.has(entry.status)
+      || (SUBAGENT_ABNORMAL_STATUSES.has(entry.status) && isRecentExit(entry));
+  });
+  if (entries.length === 0) return "No subagents delegated by this session.";
+
+  const olderExits = filter === "recent"
+    ? entries.filter((entry) => SUBAGENT_ABNORMAL_STATUSES.has(entry.status) && !isRecentExit(entry)).length
+    : 0;
+  const completedHidden = filter === "recent"
+    ? entries.filter((entry) => entry.status === "completed").length
+    : 0;
+  const hiddenNote = () => {
+    const what = [
+      ...(olderExits > 0 ? [`${olderExits} older exit${olderExits === 1 ? "" : "s"}`] : []),
+      ...(completedHidden > 0 ? [`${completedHidden} completed run${completedHidden === 1 ? "" : "s"}`] : []),
+    ];
+    const ways = olderExits > 0 && completedHidden > 0
+      ? '"all"'
+      : olderExits > 0 ? '"unfinished" or "all"' : '"completed" or "all"';
+    return `note: ${what.join(" and ")} not shown; set status to ${ways} to include them.`;
+  };
+
+  if (filtered.length === 0) {
+    if (filter === "active") return "No subagents are running or queued.";
+    if (filter === "completed") return "No completed subagents.";
+    if (filter === "all") return "No subagents delegated by this session.";
+    const empty = filter === "recent"
+      ? "No subagents are active or recently exited."
+      : "No active or unresolved subagents.";
+    return olderExits + completedHidden > 0 ? `${empty}\n${hiddenNote()}` : empty;
+  }
+
+  const sorted = [...filtered].sort((a, b) => {
+    const rank = Number(!SUBAGENT_ACTIVE_STATUSES.has(a.status)) - Number(!SUBAGENT_ACTIVE_STATUSES.has(b.status));
+    return rank || b.updatedAt.localeCompare(a.updatedAt);
+  });
+  const lines = ["agent_id\tprofile\tstatus\tlast_activity\tdescription"];
+  for (const entry of sorted) {
+    lines.push([
+      subagentListField(entry.sessionId, 64),
+      subagentListField(entry.profile, 40),
+      entry.status,
+      subagentListField(entry.updatedAt, 40),
+      subagentListField(entry.description),
+    ].join("\t"));
+  }
+  if (olderExits + completedHidden > 0) lines.push(hiddenNote());
+  return lines.join("\n");
 }
 
 /**
@@ -495,6 +591,31 @@ export function createSubagentExtension(
             return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], details: undefined, isError: true };
           } finally {
             endCollection?.();
+          }
+        },
+      }));
+
+      pi.registerTool(defineTool({
+        name: "list_subagent_runs",
+        label: "List agent runs",
+        description: "List the subagents this session delegated, as TSV: agent_id, profile, status, last_activity, description. Use it when you no longer remember which subagents exist. It does not wait for or fetch results. The default view is a process list: active runs, plus runs that failed, were stopped or were interrupted in the last hour, active ones first. Older exits and completed runs are counted in one note unless status asks for them.",
+        exposure: SUBAGENT_TOOL_EXPOSURE,
+        parameters: Type.Object({
+          status: Type.Optional(Type.String({ description: 'Which runs to list: "recent" (default), "active", "unfinished", "completed", or "all".' })),
+        }),
+        async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+          const parentSessionId = ctx?.sessionManager?.getSessionId?.();
+          if (!parentSessionId) {
+            return { content: [{ type: "text", text: "Cannot list subagents: no session." }], details: undefined, isError: true };
+          }
+          try {
+            const entries = await runtime.list(parentSessionId);
+            return {
+              content: [{ type: "text", text: formatSubagentList(entries, { status: params.status }) }],
+              details: undefined,
+            };
+          } catch (error) {
+            return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], details: undefined, isError: true };
           }
         },
       }));
