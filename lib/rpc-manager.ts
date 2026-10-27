@@ -18,7 +18,7 @@ import {
   createProjectCommandBashOperations,
   preferUserBashExtension,
 } from "./project-command-env";
-import { cacheSessionPath, catalogFirstMessage, getLatestModelChange, invalidateSessionListCache, listAllSessions, readLatestSessionEntryId, resolveSessionPath } from "./session-reader";
+import { cacheSessionPath, catalogFirstMessage, findSessionIdsByShortId, getLatestModelChange, invalidateSessionListCache, listAllSessions, readLatestSessionEntryId, resolveSessionPath } from "./session-reader";
 import { appendSessionNameSource } from "./session-name-source";
 import { computeLiveSessionTotalActiveMs } from "./session-timing";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
@@ -2389,6 +2389,7 @@ const SUBAGENT_CONTROLLER = createSubagentController({
   reopenSession: async (sessionId, sessionFile) =>
     (await startRpcSession(sessionId, sessionFile, undefined)).session,
   resolveSessionPath,
+  findSessionIdsByShortId,
   invalidateSessionList: invalidateSessionListCache,
   listSessions: listAllSessions,
   isBuiltInSubagentsEnabled,

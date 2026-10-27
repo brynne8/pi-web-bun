@@ -17,6 +17,7 @@ import {
   type SubagentRunInfo,
 } from "./subagents";
 import { worktreeHasUncommittedFiles } from "./worktree";
+import { shortSessionId } from "./session-short-id";
 
 // The guard and its screen-side strip live in the client-safe module, so the chat view can take
 // it off without importing the extension that writes it. Re-exported here because this is where
@@ -146,6 +147,11 @@ export interface SubagentExtensionRuntime {
   start(request: StartSubagentRequest): Promise<SubagentExecution>;
   resume(request: ResumeSubagentRequest): Promise<SubagentExecution>;
   get(sessionId: string): Promise<SubagentRunInfo | null>;
+  /**
+   * The full id for the 8-character form a report shows; anything else is returned as given, and an
+   * ambiguous short id throws. Optional so a fake runtime in a test still runs.
+   */
+  resolveSessionId?(sessionId: string): Promise<string>;
   /** Every subagent this parent delegated, from the session index and the live run map. */
   list(parentSessionId: string): Promise<SubagentListEntry[]>;
   steer(sessionId: string, message: string): Promise<void>;
@@ -211,22 +217,25 @@ function worktreeOutcomeText(run: SubagentRunInfo): string | undefined {
 }
 
 export function subagentFinalText(run: SubagentRunInfo): string {
+  // The report names the run by the 8 characters that tell it apart from every other session; the
+  // model only sees `content`, never `details`, so this is the id it copies into `resume` and
+  // `get_subagent_result`. A full UUIDv7 shares its head with every session started around it.
+  const id = shortSessionId(run.sessionId);
   if (run.status === "starting" || run.status === "running") {
-    return `Subagent ${run.sessionId} is ${run.status}.`;
+    return `Subagent ${id} is ${run.status}.`;
   }
-  // Keep the session ID in the text: the model only sees `content`, never `details`, and needs it for `resume` / `get_subagent_result`.
   // The worktree line follows the status, before the subagent's own words.
   const worktree = worktreeOutcomeText(run);
   const withWorktree = (status: string) => worktree ? `${status}\n\n${worktree}` : status;
   if (run.status === "completed") {
     const result = run.result?.trim();
     return result
-      ? `${withWorktree(`Subagent ${run.sessionId} completed.`)}\n\n${result}`
-      : withWorktree(`Subagent ${run.sessionId} completed without text output.`);
+      ? `${withWorktree(`Subagent ${id} completed.`)}\n\n${result}`
+      : withWorktree(`Subagent ${id} completed without text output.`);
   }
-  if (run.status === "aborted") return withWorktree(`Subagent ${run.sessionId} was stopped.`);
-  if (run.status === "interrupted") return `Subagent ${run.sessionId} was interrupted before completion.`;
-  const failure = withWorktree(`Subagent ${run.sessionId} failed: ${run.error ?? "Unknown error"}`);
+  if (run.status === "aborted") return withWorktree(`Subagent ${id} was stopped.`);
+  if (run.status === "interrupted") return `Subagent ${id} was interrupted before completion.`;
+  const failure = withWorktree(`Subagent ${id} failed: ${run.error ?? "Unknown error"}`);
   const partial = run.result?.trim();
   return partial ? `${failure}\n\nPartial output:\n\n${partial}` : failure;
 }
@@ -303,7 +312,7 @@ export function formatSubagentList(
   const lines = ["agent_id\tprofile\tstatus\tlast_activity\tdescription"];
   for (const entry of sorted) {
     lines.push([
-      subagentListField(entry.sessionId, 64),
+      subagentListField(shortSessionId(entry.sessionId), 64),
       subagentListField(entry.profile, 40),
       entry.status,
       subagentListField(entry.updatedAt, 40),
@@ -326,7 +335,7 @@ export function subagentNotificationText(run: SubagentRunInfo): string {
   if (!run.resumed) return `${SUBAGENT_NOTIFICATION_PREFIX}${text}`;
   // `resume` reuses the session ID, so without this line a resumed run's report reads exactly like
   // the earlier run's, and the parent cannot tell a new result from a repeat of one it handled (#985).
-  return `${SUBAGENT_NOTIFICATION_PREFIX}This report is from a resumed run of subagent ${run.sessionId}; it supersedes any earlier report from the same subagent.\n\n${text}`;
+  return `${SUBAGENT_NOTIFICATION_PREFIX}This report is from a resumed run of subagent ${shortSessionId(run.sessionId)}; it supersedes any earlier report from the same subagent.\n\n${text}`;
 }
 
 /**
@@ -347,27 +356,40 @@ async function waitForSettledRun(
   }
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The full id behind an `agent_id` the model passed: the 8-character form its report showed, or the
+ * full id. Resolution lives in the runtime so its run map and the session files stay keyed as before.
+ */
+async function resolveAgentId(runtime: SubagentExtensionRuntime, input: string): Promise<string> {
+  return runtime.resolveSessionId ? await runtime.resolveSessionId(input) : input;
+}
+
 /** The way back to a run's transcript, named in every answer that leaves one behind. */
 function subagentTranscriptBackText(sessionId: string): string {
-  return `What it got to stays in its session: read it with get_subagent_result("${sessionId}"), or continue it with Agent's \`resume\`.`;
+  return `What it got to stays in its session: read it with get_subagent_result("${shortSessionId(sessionId)}"), or continue it with Agent's \`resume\`.`;
 }
 
 /** The answer for a run that had nothing left to stop. */
 function subagentNothingToStopText(run: SubagentRunInfo): string {
-  return `Subagent ${run.sessionId} already ${run.status}; nothing to stop. ${subagentTranscriptBackText(run.sessionId)}`;
+  return `Subagent ${shortSessionId(run.sessionId)} already ${run.status}; nothing to stop. ${subagentTranscriptBackText(run.sessionId)}`;
 }
 
 /** What a stop answers with, naming the way back to the transcript it left behind. */
 function subagentStopText(run: SubagentRunInfo): string {
   const back = subagentTranscriptBackText(run.sessionId);
+  const id = shortSessionId(run.sessionId);
   // The run ended on its own terms while the stop was landing, so report what it is instead of
   // claiming the stop did it.
   if (TERMINAL_SUBAGENT_STATUSES.has(run.status)) {
     return run.status === "aborted"
-      ? `Subagent ${run.sessionId} stopped. ${back}`
+      ? `Subagent ${id} stopped. ${back}`
       : subagentFinalText(run);
   }
-  return `Stop requested for subagent ${run.sessionId}; it is still unwinding. ${back}`;
+  return `Stop requested for subagent ${id}; it is still unwinding. ${back}`;
 }
 
 export function createSubagentExtension(
@@ -399,7 +421,7 @@ export function createSubagentExtension(
         parameters: Type.Object({
           subagent_type: Type.Optional(Type.String({ description: `Configured agent profile. Available types: ${availableTypes}. Default: general-purpose.` })),
           prompt: Type.String({ description: "The complete task for the subagent." }),
-          resume: Type.Optional(Type.String({ description: "Existing session ID to continue with its current profile, model, thinking, and context. Omit new-session options." })),
+          resume: Type.Optional(Type.String({ description: "Existing subagent: its 8-character id, as its report shows it (the full session id also works). Continues with its current profile, model, thinking, and context. Omit new-session options." })),
           description: Type.String({ description: "Short activity label shown in the UI." }),
           run_in_background: Type.Optional(Type.Boolean({ description: "Return immediately and notify this session when complete. `plan` should always run in the foreground." })),
           model: Type.Optional(Type.String({ description: 'Optional provider/modelId override. Append ":<level>" (off, minimal, low, medium, high, xhigh, max) to also set the thinking level for this run, e.g. "provider/model:high".' })),
@@ -421,7 +443,7 @@ export function createSubagentExtension(
               ? await runtime.resume({
                   parentContext: ctx,
                   parentToolCallId: toolCallId,
-                  sessionId: resume,
+                  sessionId: await resolveAgentId(runtime, resume),
                   task: params.prompt,
                   description: params.description,
                   ...(params.run_in_background !== undefined ? { runInBackground: params.run_in_background } : {}),
@@ -457,7 +479,7 @@ export function createSubagentExtension(
                   );
                 });
               return {
-                content: [{ type: "text", text: `Subagent started in background. Session ID: ${execution.run.sessionId}. Its report arrives on its own when it finishes — do not poll it, call get_subagent_result for it, or wait on it. Do other work that does not need it if you have any; if you have none, stop — no output, no tools — until it arrives. Stopping does not cancel the subagent.` }],
+                content: [{ type: "text", text: `Subagent started in background. Session ID: ${shortSessionId(execution.run.sessionId)}. Its report arrives on its own when it finishes — do not poll it, call get_subagent_result for it, or wait on it. Do other work that does not need it if you have any; if you have none, stop — no output, no tools — until it arrives. Stopping does not cancel the subagent.` }],
                 details: subagentToolDetails(execution.run),
               };
             }
@@ -484,15 +506,21 @@ export function createSubagentExtension(
         description: "Fetch a subagent's report that is no longer in the conversation, or when the user asks for it. Never call this to check or wait for a run; its report arrives on its own.",
         exposure: SUBAGENT_TOOL_EXPOSURE,
         parameters: Type.Object({
-          agent_id: Type.String({ description: "Subagent session ID." }),
+          agent_id: Type.String({ description: "The subagent's 8-character id, as its report shows it (the full session id also works)." }),
           wait: Type.Optional(Type.Boolean({ description: "Only when the user asks you to wait for a run." })),
         }),
         async execute(_toolCallId, params, signal) {
           // Registers this call so a run that settles under it is not also announced as a
           // notification; see `beginSubagentResultCollection` in the runtime.
-          const endCollection = runtime.beginResultCollection?.(params.agent_id);
+          let agentId: string;
           try {
-            let run = await runtime.get(params.agent_id);
+            agentId = await resolveAgentId(runtime, params.agent_id);
+          } catch (error) {
+            return { content: [{ type: "text", text: errorMessage(error) }], details: undefined, isError: true };
+          }
+          const endCollection = runtime.beginResultCollection?.(agentId);
+          try {
+            let run = await runtime.get(agentId);
             if (!run) return { content: [{ type: "text", text: `Subagent not found: ${params.agent_id}` }], details: undefined, isError: true };
             while (params.wait && (run.status === "starting" || run.status === "running")) {
               await new Promise<void>((resolve, reject) => {
@@ -507,7 +535,7 @@ export function createSubagentExtension(
                 if (signal?.aborted) onAbort();
                 else signal?.addEventListener("abort", onAbort, { once: true });
               });
-              run = await runtime.get(params.agent_id);
+              run = await runtime.get(agentId);
               if (!run) return { content: [{ type: "text", text: `Subagent not found: ${params.agent_id}` }], details: undefined, isError: true };
             }
             // The parent now holds this result, so the background completion notification must not
@@ -530,15 +558,16 @@ export function createSubagentExtension(
         description: "Send a steering message to a currently running subagent session.",
         exposure: SUBAGENT_TOOL_EXPOSURE,
         parameters: Type.Object({
-          agent_id: Type.String({ description: "Subagent session ID." }),
+          agent_id: Type.String({ description: "The subagent's 8-character id, as its report shows it (the full session id also works)." }),
           message: Type.String({ description: "Instruction to inject after the current tool execution." }),
         }),
         async execute(_toolCallId, params) {
           try {
-            await runtime.steer(params.agent_id, params.message);
-            return { content: [{ type: "text", text: `Steering message sent to ${params.agent_id}.` }], details: undefined };
+            const agentId = await resolveAgentId(runtime, params.agent_id);
+            await runtime.steer(agentId, params.message);
+            return { content: [{ type: "text", text: `Steering message sent to ${shortSessionId(agentId)}.` }], details: undefined };
           } catch (error) {
-            return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], details: undefined, isError: true };
+            return { content: [{ type: "text", text: errorMessage(error) }], details: undefined, isError: true };
           }
         },
       }));
@@ -549,16 +578,22 @@ export function createSubagentExtension(
         description: "Stop a subagent session that is running, queued, or still connecting its servers. Its transcript stays, so it can be read afterwards or continued with `Agent`'s `resume`.",
         exposure: SUBAGENT_TOOL_EXPOSURE,
         parameters: Type.Object({
-          agent_id: Type.String({ description: "Subagent session ID." }),
+          agent_id: Type.String({ description: "The subagent's 8-character id, as its report shows it (the full session id also works)." }),
         }),
         async execute(_toolCallId, params) {
-          const agentId = params.agent_id.trim();
-          if (!agentId) {
+          const input = params.agent_id.trim();
+          if (!input) {
             return { content: [{ type: "text", text: "Subagent session ID is required" }], details: undefined, isError: true };
+          }
+          let agentId: string;
+          try {
+            agentId = await resolveAgentId(runtime, input);
+          } catch (error) {
+            return { content: [{ type: "text", text: errorMessage(error) }], details: undefined, isError: true };
           }
           const before = await runtime.get(agentId);
           if (!before) {
-            return { content: [{ type: "text", text: `Subagent not found: ${agentId}` }], details: undefined, isError: true };
+            return { content: [{ type: "text", text: `Subagent not found: ${input}` }], details: undefined, isError: true };
           }
           if (TERMINAL_SUBAGENT_STATUSES.has(before.status)) {
             return {
