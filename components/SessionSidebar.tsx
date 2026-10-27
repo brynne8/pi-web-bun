@@ -579,6 +579,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const stacked = !isMobile && filesPlacement === "below";
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("sessions");
   const [filesCollapsed, setFilesCollapsed] = useState(false);
+  // The file tree starts listing only once the files panel has been in view;
+  // from then on it stays mounted and open (the files tab, or the section
+  // below the sessions). A reader who only chats never pays for it.
+  const [filesEverShown, setFilesEverShown] = useState(false);
   const sessionsTabRef = useRef<HTMLButtonElement>(null);
   const filesTabRef = useRef<HTMLButtonElement>(null);
   const sessionsPanelRef = useRef<HTMLDivElement>(null);
@@ -753,7 +757,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     forgetRetiredSidebarKeys();
   }, []);
 
-  const loadSessions = useCallback(async (showLoading = false, force = false, summary = false) => {
+  const loadSessions = useCallback(async (showLoading = false, force = false, summary = false): Promise<boolean> => {
     const loadId = ++sessionLoadIdRef.current;
     try {
       if (showLoading) setLoading(true);
@@ -768,10 +772,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         awaitingInputSessionIds?: string[];
         completionNotificationSuppressedSessionIds?: string[];
       };
-      if (loadId !== sessionLoadIdRef.current) return;
+      if (loadId !== sessionLoadIdRef.current) return false;
       sessionListVersionRef.current = data.sessionListVersion;
       setAllSessions(data.sessions);
-      if (!summary) setSessionDetailsLoaded(true);
+      // A summary row without its details is the only reason to hydrate: an
+      // unchanged list already carries every exact count and name, so the
+      // second full fetch (and its scan) is skipped.
+      const needsDetails = data.sessions.some((session) => session.detailsPending === true);
+      setSessionDetailsLoaded(!summary || !needsDetails);
       // Treat the fetched running set as an initial fallback only. Once the
       // lightweight poll is live, a slow session-list fetch cannot overwrite it.
       if (!runningPollAuthoritativeRef.current) {
@@ -794,8 +802,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         return next.size === prev.size ? prev : next;
       });
       setError(null);
+      return needsDetails;
     } catch (e) {
       if (loadId === sessionLoadIdRef.current) setError(String(e));
+      return false;
     } finally {
       if (loadId === sessionLoadIdRef.current) setLoading(false);
     }
@@ -810,9 +820,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     if (isFirst) {
       // Header/stat metadata is enough to select the URL session and paint the
       // sidebar. Hydrate exact counts, names, and first messages once the
-      // selected chat has had a chance to start loading.
-      void loadSessions(true, false, true).then(() => {
-        if (!active) return;
+      // selected chat has had a chance to start loading — only when the
+      // summary has rows whose details a full scan still owes.
+      void loadSessions(true, false, true).then((needsDetails) => {
+        if (!active || !needsDetails) return;
         detailsHydrationTimerRef.current = setTimeout(() => {
           detailsHydrationTimerRef.current = null;
           if (active) void loadSessions(false, true);
@@ -1681,6 +1692,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       }
     }
   }, [sidebarTab, archiveView, stacked, filesCollapsed]);
+
+  useEffect(() => {
+    if (stacked ? !filesCollapsed : sidebarTab === "files") setFilesEverShown(true);
+  }, [sidebarTab, stacked, filesCollapsed]);
 
   // With `projectKey` (a group menu's "View archived") that project's header
   // goes to the top of the archive, unfolded if it was; the other projects
@@ -3291,6 +3306,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 fileSearchOpen={fileSearchOpen}
                 onFileSearchOpenChange={setFileSearchOpen}
                 showHidden={showIgnoredFiles}
+                treeVisible={filesEverShown}
               />
             )}
           </div>

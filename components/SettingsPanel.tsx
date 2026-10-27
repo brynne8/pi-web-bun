@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
 import { THEME_OPTIONS } from "@/lib/theme";
@@ -28,15 +28,18 @@ import {
   isThinkingExpandedByDefault,
   setThinkingExpandedByDefault,
 } from "@/lib/thinking-expansion-preference";
-import { ModelsConfig } from "./ModelsConfig";
+// A settings section's panel is not on the first page: each loads when the
+// section is opened, so the page does not carry the editors' code.
 import { setupPushSubscription } from "@/lib/push-client";
-import { SkillsConfig } from "./SkillsConfig";
-import { AgentsConfig } from "./AgentsConfig";
-import { PluginsConfig } from "./PluginsConfig";
-import { McpConfig } from "./McpConfig";
-import { ToolsConfig } from "./ToolsConfig";
 import { ConfigButton, ConfigSwitch } from "./SettingsUi";
 import { FontSettings } from "./FontSettings";
+
+const ModelsConfig = lazy(() => import("./ModelsConfig").then((module) => ({ default: module.ModelsConfig })));
+const SkillsConfig = lazy(() => import("./SkillsConfig").then((module) => ({ default: module.SkillsConfig })));
+const AgentsConfig = lazy(() => import("./AgentsConfig").then((module) => ({ default: module.AgentsConfig })));
+const PluginsConfig = lazy(() => import("./PluginsConfig").then((module) => ({ default: module.PluginsConfig })));
+const McpConfig = lazy(() => import("./McpConfig").then((module) => ({ default: module.McpConfig })));
+const ToolsConfig = lazy(() => import("./ToolsConfig").then((module) => ({ default: module.ToolsConfig })));
 
 interface Props {
   cwd: string | null;
@@ -614,7 +617,9 @@ export function SettingsPanel({
       hidden={section !== id}
       className="settings-section-host"
     >
-      {content}
+      <Suspense fallback={null}>
+        {content}
+      </Suspense>
     </div>
   ) : null;
 

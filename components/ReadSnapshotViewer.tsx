@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import SyntaxHighlighter from "react-syntax-highlighter/dist/esm/prism-light";
 import { vs } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { useTheme } from "@/hooks/useTheme";
+import { usePrismLanguages } from "@/hooks/usePrismLanguages";
 import { useI18n } from "@/hooks/useI18n";
 import { getLanguage } from "@/lib/file-types";
 import { getFileDirectory } from "@/lib/file-paths";
@@ -81,6 +82,10 @@ export function ReadSnapshotViewer({ filePath, content, offset, toolCallId, onOp
   // plain, still numbered source, with one line saying why it is uncoloured.
   const lines = useMemo(() => content.split("\n"), [content]);
   const tooBigToHighlight = lines.length > SOURCE_HIGHLIGHT_MAX_LINES;
+  // A read panel opens after the page does, so the Prism languages load then,
+  // as the file viewer's do: the source shows untokenised until the chunk
+  // arrives, and is coloured once it does.
+  usePrismLanguages(!tooBigToHighlight && !isTable && !showPreview && language !== "text");
 
   const source = useMemo(
     () => (

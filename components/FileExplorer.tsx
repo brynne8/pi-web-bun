@@ -89,6 +89,13 @@ interface Props {
   onFileSearchOpenChange?: (open: boolean) => void;
   /** Also list what Git ignores, dimmed (the explorer bar's switch). */
   showHidden?: boolean;
+  /**
+   * False while the files panel has not been looked at yet: the tree lists no
+   * directory until it is, so opening the page spawns no git process for a
+   * panel the reader never opens. The changed-files count is not part of the
+   * tree and keeps loading either way.
+   */
+  treeVisible?: boolean;
 }
 
 export interface FileExplorerHandle {
@@ -671,6 +678,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   fileSearchOpen = false,
   onFileSearchOpenChange,
   showHidden = false,
+  treeVisible = true,
 }, ref) {
   const { t } = useI18n();
   const [roots, setRoots] = useState<FileNode[]>([]);
@@ -988,13 +996,20 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
     setLoading(cwdChanged);
     setError(null);
+    if (!treeVisible) {
+      // Nothing has looked at the tree yet: keep it unlisted (and the previous
+      // project's rows out of it) until the panel is shown.
+      setRoots([]);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     fetchEntries(cwd, showHidden)
       .then((entries) => { if (!cancelled) setRoots(entries); })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [cwd, refreshKey, treeRefreshKey, showHidden]);
+  }, [cwd, refreshKey, treeRefreshKey, showHidden, treeVisible]);
 
   // Files changed outside pi-web (an editor, a terminal) show up once the
   // window is back in front (#1144).

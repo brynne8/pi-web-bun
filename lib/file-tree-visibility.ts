@@ -155,18 +155,38 @@ export async function readGitIgnoredNames(
   return new Set(matched.filter((name) => !tracked.has(name)));
 }
 
+// A restored tree asks for one directory after another, and every folder of a
+// big repository pays for its own git processes; the same answer within a few
+// seconds is the same answer. Short enough that a fresh .gitignore shows up
+// on the next listing after a refresh.
+const VISIBILITY_CACHE_TTL_MS = 4_000;
+const VISIBILITY_CACHE_MAX = 256;
+const visibilityCache = new Map<string, { at: number; reasons: (name: string) => FileTreeHiddenReason | null }>();
+
 /** Build the test of why an entry of one listing of `directory` is hidden; null when it is shown. */
 export async function getFileTreeHiddenReasons(
   directory: string,
   names: readonly string[],
 ): Promise<(name: string) => FileTreeHiddenReason | null> {
+  const cacheKey = `${directory}\0${names.join("\0")}`;
+  const cached = visibilityCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < VISIBILITY_CACHE_TTL_MS) return cached.reasons;
+
   const candidates = names.filter((name) => !ALWAYS_HIDDEN_NAMES.has(name));
   const ignored = candidates.length > 0 ? await readGitIgnoredNames(directory, candidates) : null;
-  return (name) => {
+  const reasons = (name: string) => {
     if (ALWAYS_HIDDEN_NAMES.has(name)) return "always";
     if (!ignored) return isHiddenOutsideGit(name) ? "excluded" : null;
     return ignored.has(name) ? "ignored" : null;
   };
+  visibilityCache.delete(cacheKey);
+  visibilityCache.set(cacheKey, { at: Date.now(), reasons });
+  while (visibilityCache.size > VISIBILITY_CACHE_MAX) {
+    const oldest = visibilityCache.keys().next().value;
+    if (oldest === undefined) break;
+    visibilityCache.delete(oldest);
+  }
+  return reasons;
 }
 
 /** Build the visibility test for one listing of `directory`. */

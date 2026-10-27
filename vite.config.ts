@@ -31,7 +31,12 @@ function gfmAutolinkEmail(): Plugin {
 process.env.__VINEXT_SHARED_REVALIDATE_SECRET = "";
 
 export default defineConfig({
-  plugins: [gfmAutolinkEmail(), vinext({ nextConfig })],
+  // vinext serves `_next/static` bytes as built: without precompressed
+  // variants a browser downloads and parses the client graph raw (2.3 MB at
+  // the time of writing, 0.55 MB brotli), which is what a slower machine
+  // waits on first. The build writes .br/.gz beside each asset and the server
+  // negotiates on Accept-Encoding.
+  plugins: [gfmAutolinkEmail(), vinext({ nextConfig, precompress: true })],
   // Vite 8's baseline is newer than Safari 16.2; mermaid's class `static {}`
   // blocks and the rest of the client graph must be lowered for it (#753).
   build: { target: "safari16.2" },
