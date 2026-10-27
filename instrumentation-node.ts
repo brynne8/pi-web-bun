@@ -7,6 +7,7 @@
 import { reportRealpathCoverage } from "@/lib/dlp-realpath-compat";
 import { configureHttpDispatcher, readHttpIdleTimeoutMs } from "@/lib/http-dispatcher";
 import { closeAllAgentEventStreams } from "@/lib/agent-event-stream";
+import { onServerShutdown } from "@/lib/server-shutdown";
 import { pruneBgLogs } from "@/lib/bash-bg-tasks";
 
 export function registerNodeInstrumentation(): void {
@@ -21,12 +22,11 @@ export function registerNodeInstrumentation(): void {
   // that stays quiet for longer, which a CLI session tolerates.
   configureHttpDispatcher(readHttpIdleTimeoutMs());
 
-  // In production Next 16 answers SIGINT/SIGTERM with server.close() and waits
-  // for every connection to end, without a timeout. SSE streams only end when
-  // the client disconnects, so close them here or the process never exits.
-  const shutdownStreams = () => closeAllAgentEventStreams();
-  process.on("SIGINT", shutdownStreams);
-  process.on("SIGTERM", shutdownStreams);
+  // Closing the streams is what lets a shutdown finish at all: an SSE response
+  // only ends when the client disconnects, so an open one would hold the process
+  // open past the deadline. The exit itself belongs to `lib/server-shutdown.ts`,
+  // which every shutdown path goes through.
+  onServerShutdown(closeAllAgentEventStreams);
 
   // Background bash logs are swept from `bgLogPath()` too, but that only runs as a task
   // starts: with the `bgTasksEnabled` switch off, or on a machine that never runs one, a

@@ -68,6 +68,7 @@ import { createReadOnlyMcpPolicyExtension, createSubagentMcpPolicyExtension } fr
 import { createSubagentSkillsBinding } from "./subagent-skills";
 import { isNestedToolExecutionEvent } from "./agent-event-wire";
 import { retryHttp2StreamDrops } from "./retry-http2-stream-drops";
+import { onServerShutdown } from "./server-shutdown";
 import { collectLiveAssistantNotices, readShowCacheMissNotices, withSessionPrices } from "./transcript-notices-server";
 import {
   appendClearedSessionToolSelection,
@@ -2334,8 +2335,7 @@ function getRegistry(): Map<string, AgentSessionWrapper> {
     // Node cannot await work from an exit handler; direct destruction starts
     // extension cleanup synchronously as a final best effort.
     process.once("exit", destroy);
-    process.once("SIGINT", shutdown);
-    process.once("SIGTERM", shutdown);
+    onServerShutdown(shutdown);
   }
   return globalThis.__piSessions;
 }
