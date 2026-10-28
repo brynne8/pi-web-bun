@@ -36,9 +36,10 @@ export const SETTLED_REPORTS_CUSTOM_TYPE = "pi-web:settled-reports";
 export const SETTLED_REPORTS_DETAILS_KIND = "pi-web-settled-reports";
 
 /**
- * How many times a batch pi took and then let go of is put back before the sink gives up on it.
- * One retry covers the ordinary case; a parent that drops it twice is not going to hold it, and a
- * note kept as queued after that would swallow every report that came after it.
+ * How many times a batch is put back before the sink gives up on it. One retry covers the ordinary
+ * case; a parent that drops it a second time is not going to hold it, and a note kept as queued
+ * after that would swallow every report that came after it. A resend that fails does not count:
+ * nothing was handed to pi, so the next report tries again.
  */
 const DROPPED_NOTE_RESENDS = 1;
 
@@ -257,19 +258,29 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
   }
 
   /**
-   * Put a batch pi no longer holds back into its queue. The follow-up queue lives in the wrapper,
-   * so a batch queued there is lost when that wrapper is released and the reopened parent starts
-   * with an empty queue. A note still marked queued after that carries every report that lands
-   * later into a message nobody can deliver, and the silence never ends by itself — so a dropped
-   * batch goes back, and one dropped twice is abandoned instead.
+   * Give up on a batch the parent let go of more than once. The dead-letter record keeps its reports
+   * readable after the note is gone; the pending index already lists them for the parent.
+   */
+  function abandonNote(sessionId: string, note: SettledReportNote): void {
+    writeDeadLetter(sessionId, note, note.requeued + 1, new Error("the parent let go of this batch after it was put back"));
+    forgetNote(sessionId, note);
+  }
+
+  /**
+   * Put a batch back in front of its parent: one pi no longer holds, or one an idle parent will not
+   * drain. The follow-up queue lives in the wrapper, so a batch queued there is lost when that
+   * wrapper is released and the reopened parent starts with an empty queue. A note still marked
+   * queued after that carries every report that lands later into a message nobody can deliver, and
+   * the silence never ends by itself — so a lost batch goes back, and one let go of twice is
+   * abandoned instead.
    *
    * Only ever called while the parent is idle: between draining its follow-up queue and appending
    * what it drained there is a moment when pi holds nothing and has written nothing, and a batch
-   * read as dropped there would be delivered twice. An idle parent has no such moment.
-   * A send that fails leaves the note queued here, and the next report tries again.
+   * read as dropped there would be delivered twice. An idle parent has no such moment. The caller
+   * has already taken a batch pi still holds back out of that queue, so this cannot queue it twice.
+   * A send that fails leaves the note as it is and the next report tries again.
    */
   async function resendDroppedNote(sessionId: string, parent: SettledReportParent, note: SettledReportNote): Promise<void> {
-    note.requeued++;
     if (note.parent !== parent) {
       // The wrapper the batch was queued on is gone and its queue went with it, so the append, and
       // the freeze that follows it, will happen on this one.
@@ -280,9 +291,10 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
     try {
       // Not a retry: a batch that never landed still owes the parent the turn it was meant to wake.
       await sendNote(parent, note, false);
+      note.requeued++;
     } catch {
-      // The parent refused even a queued message. The batch stays as it is and the next report
-      // puts it back, until the retries run out and the note is abandoned.
+      // The parent refused even a queued message, so nothing was handed over: the count stays as it
+      // is and the next report tries again.
     }
   }
 
@@ -291,16 +303,23 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
       const parent = await resolveParent(sessionId);
       if (!parent) return;
       let note = notes.get(sessionId);
-      // A note is only worth keeping while its batch can still reach the parent: pi may have let go
-      // of it, or the wrapper that held it may have been released with its queue inside. A parent
-      // with a run in flight is left alone — its queue is still pi's to drain.
-      if (note && note.queued && !note.consumed && !parent.isRunning()
-        && (!note.parent.isAlive() || !parentHoldsNote(note))) {
-        if (note.requeued >= DROPPED_NOTE_RESENDS) {
-          forgetNote(sessionId, note);
-          note = undefined;
-        } else {
-          await resendDroppedNote(sessionId, parent, note);
+      // A queued note is only worth keeping while something will still deliver its batch. pi may
+      // have let go of it, the wrapper that held it may have been released with its queue inside,
+      // or the parent may be idle with the batch still in that queue: pi drains a follow-up only
+      // inside a run, so a turn that failed, was aborted or ended returns before it does. A note
+      // left marked queued would carry every later report into a message nobody sends.
+      // A parent with a run in flight is left alone — its queue is still pi's to drain.
+      if (note && note.queued && !note.consumed && !parent.isRunning()) {
+        // Taking the batch back out first is what keeps the resend from delivering it twice; a
+        // queue that cannot be read is left alone, because nothing can be taken out of it.
+        const held = note.parent.isAlive() && parentHoldsNote(note);
+        if (!held || dropQueuedNote(note)) {
+          if (note.requeued >= DROPPED_NOTE_RESENDS) {
+            abandonNote(sessionId, note);
+            note = undefined;
+          } else {
+            await resendDroppedNote(sessionId, parent, note);
+          }
         }
       }
       if (!note || note.consumed) {
