@@ -32,6 +32,9 @@ const MINIMAP_PADDING = 12;
 const MINIMAP_BOTTOM_PADDING = 36 + MINIMAP_PADDING;
 const PREVIEW_HIDE_DELAY = 250;
 const NAVIGATION_ACTIVE_LOCK_MS = 1600;
+// Turns the hover preview renders around the hovered one.
+const PREVIEW_WINDOW_RADIUS = 12;
+const STREAM_MEASURE_DELAY = 400;
 
 interface AssistantPreview {
   markdown: string;
@@ -71,15 +74,34 @@ export function countToolCalls(message: AgentMessage | Partial<AgentMessage>): n
   );
 }
 
+/** A reply's text blocks are joined once per message object: pi appends, so a
+ *  message that keeps its identity keeps its text. */
+const answerMarkdownCache = new WeakMap<object, string>();
+
 function getAssistantAnswerMarkdown(message: AgentMessage | Partial<AgentMessage>): string {
   if (message.role !== "assistant" || !Array.isArray(message.content)) return "";
+  const cached = answerMarkdownCache.get(message);
+  if (cached !== undefined) return cached;
   // The chat shows every text block a turn wrote, not only the ones after its
   // last tool call, so the preview covers the same text.
-  return (message.content as AssistantContentBlock[])
+  const markdown = (message.content as AssistantContentBlock[])
     .filter((block): block is TextContent => block.type === "text")
     .map((block) => block.text)
     .join("\n\n")
     .trim();
+  answerMarkdownCache.set(message, markdown);
+  return markdown;
+}
+
+function getAssistantPreviewText(markdown: string): string {
+  for (const line of markdown.split("\n")) {
+    const text = line
+      .replace(/^\s{0,3}(?:#{1,6}|>|[-*+]|\d+\.)\s+/, "")
+      .replace(/[*_`]/g, "")
+      .trim();
+    if (text) return text.length > 240 ? `${text.slice(0, 240)}…` : text;
+  }
+  return "";
 }
 
 function PreviewHeading({
@@ -205,6 +227,12 @@ export const AssistantOutline = memo(function AssistantOutline({
     </div>
   );
 });
+
+export function AssistantTextPreview({ markdown }: { markdown: string }) {
+  const text = useMemo(() => getAssistantPreviewText(markdown), [markdown]);
+  if (!text) return null;
+  return <span className={styles.previewText}>{text}</span>;
+}
 
 function createTurnNodes(turns: TurnInfo[]): NodeInfo[] {
   return turns.map((turn, index) => ({
@@ -333,12 +361,23 @@ export const ChatMinimap = memo(function ChatMinimap({
   }, [scrollContainer, syncActiveNode]);
 
   const measureThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamMeasureRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const measureNodes = useCallback(() => {
     if (measureThrottleRef.current) return;
     measureThrottleRef.current = setTimeout(() => {
       measureThrottleRef.current = null;
-      const scrollEl = scrollContainer.current;
       const minimapEl = containerRef.current;
+      const streaming = Boolean(getStreamingMessage());
+      if (streaming && minimapEl) setMinimapHeight(minimapEl.clientHeight);
+      if (streaming) {
+        if (streamMeasureRef.current) return;
+        streamMeasureRef.current = setTimeout(() => {
+          streamMeasureRef.current = null;
+          measureNodes();
+        }, STREAM_MEASURE_DELAY);
+        return;
+      }
+      const scrollEl = scrollContainer.current;
       if (!scrollEl || !minimapEl) return;
 
       const refs = messageRefs.current;
@@ -449,6 +488,10 @@ export const ChatMinimap = memo(function ChatMinimap({
       if (measureThrottleRef.current) {
         clearTimeout(measureThrottleRef.current);
         measureThrottleRef.current = null;
+      }
+      if (streamMeasureRef.current) {
+        clearTimeout(streamMeasureRef.current);
+        streamMeasureRef.current = null;
       }
     };
   }, [measureNodes, scrollContainer, updateScroll]);
@@ -632,6 +675,14 @@ export const ChatMinimap = memo(function ChatMinimap({
 
   if (!visible) return null;
 
+  const previewCenterIndex = nearestNodeIndex ?? activeIndex ?? 0;
+  const previewWindowStart = Math.max(0, previewCenterIndex - PREVIEW_WINDOW_RADIUS);
+  const previewWindowEnd = Math.min(
+    positionedNodes.length - 1,
+    previewCenterIndex + PREVIEW_WINDOW_RADIUS,
+  );
+  const previewNodes = positionedNodes.slice(previewWindowStart, previewWindowEnd + 1);
+
   const lastNodeTop = positionedNodes.length > 0
     ? positionedNodes[positionedNodes.length - 1].topRatio * minimapHeight
     : MINIMAP_PADDING;
@@ -778,7 +829,7 @@ export const ChatMinimap = memo(function ChatMinimap({
               {t("chatMinimap.earlierTurns", { count: turnsBefore })}
             </button>
           )}
-          {allNodes.map((node) => {
+          {previewNodes.map((node) => {
             const isLocated = nearestNodeIndex === node.index;
             return (
               <div
@@ -835,13 +886,17 @@ export const ChatMinimap = memo(function ChatMinimap({
                       >
                         A
                       </button>
-                      <AssistantOutline
-                        markdown={assistant.markdown}
-                        onAnswerClick={() => scrollToAssistant(node, assistantIndex)}
-                        onHeadingClick={(headingIndex) => (
-                          scrollToHeading(node, assistantIndex, headingIndex)
-                        )}
-                      />
+                      {isLocated ? (
+                        <AssistantOutline
+                          markdown={assistant.markdown}
+                          onAnswerClick={() => scrollToAssistant(node, assistantIndex)}
+                          onHeadingClick={(headingIndex) => (
+                            scrollToHeading(node, assistantIndex, headingIndex)
+                          )}
+                        />
+                      ) : (
+                        <AssistantTextPreview markdown={assistant.markdown} />
+                      )}
                     </div>
                   ))}
                 </div>

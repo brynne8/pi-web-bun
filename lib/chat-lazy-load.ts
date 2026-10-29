@@ -33,6 +33,18 @@ export function getNextVisibleCount(currentVisibleCount: number, pageSize = VISI
   return currentVisibleCount + pageSize;
 }
 
+/**
+ * The window a revealed entry needs: from the entry to the tail, plus one page
+ * above it, so a reading position restored from a saved scroll anchor, a search
+ * hit or a minimap jump lands with history above it rather than at the very top
+ * of the window. An entry that is not loaded reveals everything that is.
+ */
+export function getAnchorRevealVisibleCount(entryCount: number, anchorIndex: number, pageSize = VISIBLE_PAGE_SIZE): number {
+  const total = Math.max(entryCount, 0);
+  if (anchorIndex < 0) return total;
+  return Math.min(Math.max(total - anchorIndex + Math.max(pageSize, 0), 0), total);
+}
+
 export function captureScrollDistance(scrollHeight: number, scrollTop: number): number {
   return scrollHeight - scrollTop;
 }

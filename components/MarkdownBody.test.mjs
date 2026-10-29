@@ -447,6 +447,26 @@ test("keeps typed line breaks in tight list items and headings", () => {
   assert.doesNotMatch(renderMarkdown("- alpha\n\n- beta", { keepLineBreaks: true }), /<br/);
 });
 
+test("a streamed reply renders the blocks a finished one does", () => {
+  // The split is transparent: the only difference in the markup is the whitespace
+  // react-markdown leaves between the blocks, so compare with it collapsed. Code
+  // fences and Mermaid render their source while streaming.
+  const flat = (markdown, props) => renderMarkdown(markdown, props).replace(/>\s+</g, "><");
+  const documents = [
+    "## 标题\n\n段落一，含 $x + y$ 与价格 $20。\n\n- 甲\n- 乙\n\n| 指标 | 值 |\n| --- | --- |\n| FPS | 60 |\n\n$$\na + b\n$$\n\n> 引用\n\n结尾。",
+    "1. 看门狗的原理是（ ）\nA. 监控温度\nB. 计数器\n2. 下一题\n\n- outer\n  more\n  - inner\n- next",
+    String.raw`平均一致性：
+
+[ C(x) = \frac{2}{T} \sum_i S_i ]
+
+射线为 \(r_c = K^{-1}p\)。`,
+    "今天天气很好。**我们去公园散步吧。**",
+  ];
+  for (const markdown of documents) {
+    assert.equal(flat(markdown, { isStreaming: true }), flat(markdown), markdown);
+  }
+});
+
 test("renders a hard break once when keeping line breaks", () => {
   // remark-rehype writes an mdast break as <br> plus "\n", which the user
   // bubble's pre-wrap paragraphs would show as a blank line.

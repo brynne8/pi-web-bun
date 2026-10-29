@@ -1,12 +1,12 @@
 "use client";
 
-import { createContext, memo, useContext, useMemo, type ComponentProps, type MouseEvent } from "react";
+import { createContext, memo, useContext, useMemo, useRef, type ComponentProps, type MouseEvent } from "react";
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
 import { parsePdfPageFragment, resolveLocalFileHref, shouldOpenLocalFileInApp } from "@/lib/file-links";
 import { encodeFilePathForApi } from "@/lib/file-paths";
 import { isAudioPath, isVideoPath } from "@/lib/file-types";
-import { isExternalMarkdownHref, jumpToMarkdownFragment, markdownAppUrlTransform, markdownDocumentRehypePlugins, markdownRehypePlugins, markdownRemarkPlugins, markdownUrlTransform, markdownUserRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
-import { splitMarkdownBlocks } from "@/lib/markdown-blocks";
+import { isExternalMarkdownHref, jumpToMarkdownFragment, markdownAppUrlTransform, markdownDocumentRehypePlugins, markdownRehypePlugins, markdownRemarkPlugins, markdownUrlTransform, markdownUserRemarkPlugins, normalizeDisplayMathIncremental, type DisplayMathCheckpoint } from "@/lib/markdown";
+import { splitMarkdownBlocksIncremental, type BlockSplitCheckpoint } from "@/lib/markdown-blocks";
 import { ImagePreview } from "./ImagePreview";
 import { MermaidBlock, CodeBlock } from "./MermaidBlock";
 
@@ -81,14 +81,22 @@ const MarkdownBlock = memo(function MarkdownBlock({ markdown, remarkPlugins, url
 });
 
 export const MarkdownBody = memo(function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile, onNavigateLink, keepLineBreaks }: MarkdownBodyProps) {
-  const normalizedMarkdown = useMemo(() => normalizeDisplayMath(children), [children]);
+  const normalizeCheckpoint = useRef<DisplayMathCheckpoint | null>(null);
+  const normalizedMarkdown = useMemo(() => {
+    const normalized = normalizeDisplayMathIncremental(children, normalizeCheckpoint.current);
+    normalizeCheckpoint.current = normalized.checkpoint;
+    return normalized.text;
+  }, [children]);
+  const splitCheckpoint = useRef<BlockSplitCheckpoint | null>(null);
   // A streaming reply grows by a few characters per chunk; parsing all of it
   // each time made a long reply quadratic. Its finished blocks keep their
   // parse and only the last is parsed again. A finished message is one block.
-  const blocks = useMemo(
-    () => (isStreaming ? splitMarkdownBlocks(normalizedMarkdown) : [normalizedMarkdown]),
-    [isStreaming, normalizedMarkdown],
-  );
+  const blocks = useMemo(() => {
+    if (!isStreaming) return [normalizedMarkdown];
+    const split = splitMarkdownBlocksIncremental(normalizedMarkdown, splitCheckpoint.current);
+    splitCheckpoint.current = split.checkpoint;
+    return split.blocks;
+  }, [isStreaming, normalizedMarkdown]);
   // Stable renderer identities keep stateful blocks mounted across message hover updates.
   const components = useMemo<Components>(() => ({
     code({ className, children, ...props }) {

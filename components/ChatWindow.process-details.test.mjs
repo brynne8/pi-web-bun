@@ -161,3 +161,21 @@ test("the memoized MessageView notices a part that gained or lost the turn", () 
   assert.match(messageSource, /&& prev\.blockIndexOffset === next\.blockIndexOffset/);
   assert.match(messageSource, /&& prev\.isTurnPart === next\.isTurnPart/);
 });
+
+test("rebuilds the transcript only when its own data changes", () => {
+  // AppShell re-renders the chat on each session stat and context update, which
+  // used to rebuild the whole transcript: every turn re-segmented, every turn's
+  // written files re-listed and every turn's words re-joined, while the message
+  // array itself had not changed.
+  assert.match(source, /const transcript = useMemo\(\(\) => \{/);
+  assert.match(source, /\{transcript\}/);
+  // The window's own slice is part of that build, so a window that grows rebuilds it.
+  assert.match(source, /const startIndex = getVisibleEntryStart\(rendered, messages\.length, visibleCount\);/);
+});
+
+test("joins a turn's copy text when the footer's Copy reads it", () => {
+  assert.match(source, /const turnTextBlocks = turnContent\.filter\(\(block\): block is TextContent => block\.type === "text"\);/);
+  assert.match(source, /const turnCopyText = turnTextBlocks\.length > 0 \? lazyTurnCopyText\(turnTextBlocks\) : undefined;/);
+  assert.doesNotMatch(source, /turnCopyText = turnContent/);
+  assert.match(source, /text=\{turnCopyText\}/);
+});

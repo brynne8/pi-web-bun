@@ -26,7 +26,7 @@ const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
 });
-const { AssistantOutline, countToolCalls } = await jiti.import("./ChatMinimap.tsx");
+const { AssistantOutline, AssistantTextPreview, countToolCalls } = await jiti.import("./ChatMinimap.tsx");
 
 test("renders math in headings without disabling heading navigation", () => {
   const html = renderToStaticMarkup(
@@ -42,6 +42,18 @@ test("renders math in headings without disabling heading navigation", () => {
   assert.match(html, /data-preview-heading-index="0"/);
   assert.match(html, /data-preview-heading-index="1"/);
   assert.doesNotMatch(html, /disabled=""/);
+});
+
+test("previews a turn the pointer is not on as one line of plain text", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(AssistantTextPreview, {
+      markdown: "## Plan\n\n**Step one** runs `the test`.\n\n## Later",
+    }),
+  );
+
+  assert.match(html, /Plan/);
+  assert.doesNotMatch(html, /<h2/);
+  assert.doesNotMatch(html, /[*`]/);
 });
 
 test("counts tool calls per assistant reply, including replies that also answer", () => {

@@ -1,3 +1,4 @@
+import "katex/dist/katex.min.css";
 import type { Content, Link, Parent, Root } from "mdast";
 import type { Element as HastElement, Root as HastRoot, RootContent as HastContent } from "hast";
 import { defaultUrlTransform, type Options as ReactMarkdownOptions } from "react-markdown";
@@ -136,16 +137,61 @@ function rewriteEscapedInlineCodeBackticks(line: string): string {
   });
 }
 
-export function normalizeDisplayMath(markdown: string): string {
-  const lineBreak = markdown.includes("\r\n") ? "\r\n" : "\n";
-  const lines = markdown.split(/\r?\n/);
-  const normalized: string[] = [];
-  let fence: { marker: string; size: number } | null = null;
-  let inlineCodeMarkerSize = 0;
-  let rawCodeTag: string | null = null;
-  const unmatchedDisplayMathUntil = new Map<string, number>();
+interface NormalizeState {
+  fence: { marker: string; size: number } | null;
+  inlineCodeMarkerSize: number;
+  rawCodeTag: string | null;
+}
 
-  for (let index = 0; index < lines.length; index++) {
+const initialNormalizeState: NormalizeState = { fence: null, inlineCodeMarkerSize: 0, rawCodeTag: null };
+
+/**
+ * Where a growing text resumes normalization: `lines` is the normalized output of
+ * the first `lineCount` input lines, `sourceLines` those lines themselves and
+ * `state` the normalizer state at the start of line `lineCount`, so normalizing
+ * from there gives the whole text's output.
+ */
+export interface DisplayMathCheckpoint {
+  source: string;
+  lineCount: number;
+  sourceLines: string[];
+  lines: string[];
+  state: NormalizeState;
+  lineBreak: string;
+}
+
+export interface DisplayMathNormalization {
+  text: string;
+  checkpoint: DisplayMathCheckpoint;
+}
+
+interface NormalizeRun {
+  lines: string[];
+  /** Input lines whose normalized output cannot change any more. */
+  committedLines: number;
+  /** How many leading entries of `lines` that output is. */
+  committedLength: number;
+  committedState: NormalizeState;
+}
+
+function normalizeLines(lines: string[], start: number, state: NormalizeState): NormalizeRun {
+  const normalized: string[] = [];
+  let fence = state.fence;
+  let inlineCodeMarkerSize = state.inlineCodeMarkerSize;
+  let rawCodeTag = state.rawCodeTag;
+  const unmatchedDisplayMathUntil = new Map<string, number>();
+  let committedLines = start;
+  let committedLength = 0;
+  let committedState: NormalizeState = { ...state };
+  let settled = true;
+
+  for (let index = start; index < lines.length; index++) {
+    if (settled) {
+      committedLines = index;
+      committedLength = normalized.length;
+      committedState = { fence, inlineCodeMarkerSize, rawCodeTag };
+      settled = index < lines.length - 1;
+    }
     let line = lines[index];
 
     if (rawCodeTag) {
@@ -227,18 +273,19 @@ export function normalizeDisplayMath(markdown: string): string {
 
     const bracketDisplayStart = line.match(/^([ ]{0,3})\\\[[ \t]*$/);
     if (bracketDisplayStart) {
-      const closingIndex = findBracketDisplayClose(lines, index + 1);
-      if (closingIndex !== -1) {
+      const closing = findBracketDisplayClose(lines, index + 1);
+      if (readsLastLine(closing, lines)) settled = false;
+      if (closing?.closed) {
         // Same lazy-continuation guard as above: indent content lines that sit at
         // column 0 so the block stays parseable when nested inside a list item.
         normalized.push(
           `${bracketDisplayStart[1]}$$`,
-          ...lines.slice(index + 1, closingIndex).map((mathLine) =>
+          ...lines.slice(index + 1, closing.index).map((mathLine) =>
             indentDisplayMathContent(mathLine, bracketDisplayStart[1]),
           ),
           `${bracketDisplayStart[1]}$$`,
         );
-        index = closingIndex;
+        index = closing.index;
         continue;
       }
     }
@@ -277,7 +324,8 @@ export function normalizeDisplayMath(markdown: string): string {
           indent,
           unmatchedDisplayMathUntil,
         );
-        if (closing) {
+        if (readsLastLine(closing, lines)) settled = false;
+        if (closing?.closed) {
           normalized.push(`${indent}$$`, `${indent}${firstLine}`);
           for (let j = index + 1; j < closing.index; j++) {
             normalized.push(indentDisplayMathContent(lines[j], indent));
@@ -307,7 +355,8 @@ export function normalizeDisplayMath(markdown: string): string {
         indent,
         unmatchedDisplayMathUntil,
       );
-      if (closing && (closing.glued || indent !== "")) {
+      if (readsLastLine(closing, lines)) settled = false;
+      if (closing?.closed && (closing.glued || indent !== "")) {
         normalized.push(`${indent}$$`);
         for (let j = index + 1; j < closing.index; j++) {
           normalized.push(indentDisplayMathContent(lines[j], indent));
@@ -322,13 +371,80 @@ export function normalizeDisplayMath(markdown: string): string {
     normalized.push(normalizeInlineLatexMath(line));
   }
 
-  return normalized.join(lineBreak);
+  return { lines: normalized, committedLines, committedLength, committedState };
+}
+
+/**
+ * A forward search that stopped on the last line, or never stopped: that line is
+ * still growing, so what the search finds there — and the output of the line that
+ * started it — can still change.
+ */
+function readsLastLine(search: { index: number } | null, lines: string[]): boolean {
+  return !search || search.index >= lines.length - 1;
+}
+
+export function normalizeDisplayMath(markdown: string): string {
+  const lineBreak = markdown.includes("\r\n") ? "\r\n" : "\n";
+  return normalizeLines(markdown.split(/\r?\n/), 0, initialNormalizeState).lines.join(lineBreak);
+}
+
+function samePrefixLines(lines: string[], expected: string[], count: number): boolean {
+  if (count >= lines.length) return false;
+  for (let index = 0; index < count; index++) {
+    if (lines[index] !== expected[index]) return false;
+  }
+  return true;
+}
+
+function resumableNormalize(
+  previous: DisplayMathCheckpoint | null,
+  lines: string[],
+  lineBreak: string,
+): { lineCount: number; state: NormalizeState; lines: string[] } {
+  // The committed lines and the line ending they were split on are all a resume
+  // needs: the text after them is read again either way, so a chunk that keeps
+  // the prefix resumes exactly as one that extends it does.
+  if (previous && previous.lineBreak === lineBreak
+    && samePrefixLines(lines, previous.sourceLines, previous.lineCount)) {
+    return { lineCount: previous.lineCount, state: previous.state, lines: previous.lines };
+  }
+  return { lineCount: 0, state: initialNormalizeState, lines: [] };
+}
+
+/**
+ * `normalizeDisplayMath` for a text that only grows: the leading lines the
+ * previous checkpoint committed keep their output and only the rest is
+ * normalized again. A chunk that does not keep that prefix (an authoritative
+ * replacement) is normalized whole, as a finished message is.
+ */
+export function normalizeDisplayMathIncremental(
+  markdown: string,
+  previous: DisplayMathCheckpoint | null,
+): DisplayMathNormalization {
+  const lineBreak = markdown.includes("\r\n") ? "\r\n" : "\n";
+  const lines = markdown.split(/\r?\n/);
+  const resume = resumableNormalize(previous, lines, lineBreak);
+  const run = normalizeLines(lines, resume.lineCount, resume.state);
+  const all = resume.lines.concat(run.lines);
+  return {
+    text: all.join(lineBreak),
+    checkpoint: {
+      source: markdown,
+      lineCount: run.committedLines,
+      sourceLines: lines.slice(0, run.committedLines),
+      lines: all.slice(0, resume.lines.length + run.committedLength),
+      state: run.committedState,
+      lineBreak,
+    },
+  };
 }
 
 interface DisplayMathClose {
   index: number;
   content: string;
   glued: boolean;
+  /** The closing `$$` was found at `index`; otherwise a block boundary was. */
+  closed: boolean;
 }
 
 function findDisplayMathClose(
@@ -338,21 +454,23 @@ function findDisplayMathClose(
   unmatchedUntil: Map<string, number>,
 ): DisplayMathClose | null {
   const knownUnmatchedUntil = unmatchedUntil.get(indent);
-  if (knownUnmatchedUntil !== undefined && startIndex < knownUnmatchedUntil) return null;
+  if (knownUnmatchedUntil !== undefined && startIndex < knownUnmatchedUntil) {
+    return { index: knownUnmatchedUntil, content: "", glued: false, closed: false };
+  }
 
   for (let index = startIndex; index < lines.length; index++) {
     const line = lines[index];
-    if (isDisplayMathFence(line, indent)) return { index, content: "", glued: false };
+    if (isDisplayMathFence(line, indent)) return { index, content: "", glued: false, closed: true };
 
     // A new Markdown block cannot belong to the preceding formula. In particular,
     // do not let a later sibling list item provide a closing `$$` for this block.
     if (isDisplayMathBlockBoundary(line) || isDisplayMathOpeningLine(line)) {
       unmatchedUntil.set(indent, index);
-      return null;
+      return { index, content: "", glued: false, closed: false };
     }
 
     const content = getDisplayMathGluedCloseContent(line, indent);
-    if (content !== null) return { index, content, glued: true };
+    if (content !== null) return { index, content, glued: true, closed: true };
   }
 
   // Multiple unmatched glued openers with the same indentation previously each
@@ -398,10 +516,17 @@ function indentDisplayMathContent(line: string, indent: string): string {
   return `${indent.slice(leadingSpaces)}${line}`;
 }
 
-function findBracketDisplayClose(lines: string[], startIndex: number): number {
+interface BracketDisplayClose {
+  /** The line the search stopped at. */
+  index: number;
+  /** The closing `\]` was found there; otherwise a block boundary was. */
+  closed: boolean;
+}
+
+function findBracketDisplayClose(lines: string[], startIndex: number): BracketDisplayClose | null {
   for (let index = startIndex; index < lines.length; index++) {
     const line = lines[index];
-    if (/^ {0,3}\\\][ \t]*$/.test(line)) return index;
+    if (/^ {0,3}\\\][ \t]*$/.test(line)) return { index, closed: true };
 
     // Do not pair delimiters across another Markdown block boundary.
     if (
@@ -409,11 +534,11 @@ function findBracketDisplayClose(lines: string[], startIndex: number): number {
       /^ {0,3}\\\[[ \t]*$/.test(line) ||
       /<(code|pre|script|style)\b/i.test(line)
     ) {
-      return -1;
+      return { index, closed: false };
     }
   }
 
-  return -1;
+  return null;
 }
 
 function updateInlineCodeMarker(line: string, initialMarkerSize: number): number {

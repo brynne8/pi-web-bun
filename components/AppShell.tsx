@@ -7,22 +7,36 @@ import { SessionSidebar, type SelectSessionOptions, type SessionSidebarControl }
 import { ChatWindow } from "./ChatWindow";
 import { NewSessionContextBar, type NewSessionContextControl } from "./NewSessionContextBar";
 import type { ChatScrollPosition } from "@/lib/chat-scroll-position";
-import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { openFileTab, saveFileViewerState, saveParkedFileViewerState, switchFileWorkspace, type ParkedFileWorkspace } from "./file-tab-state";
-import { SettingsPanel, SettingsSectionIcon } from "./SettingsPanel";
-import { ProjectTrustDialog, type ProjectTrustFailure } from "./ProjectTrustDialog";
+import type { ProjectTrustFailure } from "./ProjectTrustDialog";
 import { BranchNavigator, hasSessionBranches } from "./BranchNavigator";
 import { SystemPromptPanel } from "./SystemPromptPanel";
 import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
 import { AgentSessionPanel } from "./AgentSessionPanel";
-import { SubagentViewer } from "./SubagentViewer";
-import { ReadSnapshotViewer } from "./ReadSnapshotViewer";
 import type { ReadSnapshot } from "@/lib/read-snapshot";
 // The terminal brings @xterm with it, which nothing on the first page needs:
 // its chunk loads when the first terminal tab mounts.
 const TerminalPanel = lazy(() =>
   import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })),
+);
+const FileViewer = lazy(() =>
+  import("./FileViewer").then((module) => ({ default: module.FileViewer })),
+);
+const ProjectTrustDialog = lazy(() =>
+  import("./ProjectTrustDialog").then((module) => ({ default: module.ProjectTrustDialog })),
+);
+const SubagentViewer = lazy(() =>
+  import("./SubagentViewer").then((module) => ({ default: module.SubagentViewer })),
+);
+const ReadSnapshotViewer = lazy(() =>
+  import("./ReadSnapshotViewer").then((module) => ({ default: module.ReadSnapshotViewer })),
+);
+const SettingsPanel = lazy(() =>
+  import("./SettingsPanel").then((module) => ({ default: module.SettingsPanel })),
+);
+const SettingsSectionIcon = lazy(() =>
+  import("./SettingsPanel").then((module) => ({ default: module.SettingsSectionIcon })),
 );
 import { newTerminalTab, restoreTerminalTabs, TERMINAL_TABS_KEY, type TerminalTab } from "./terminal-tab-state";
 import { useTheme } from "@/hooks/useTheme";
@@ -1531,7 +1545,7 @@ export function AppShell() {
               onMouseEnter={(event) => { if (!disabled) { event.currentTarget.style.background = "var(--bg-hover)"; event.currentTarget.style.color = "var(--text)"; } }}
               onMouseLeave={(event) => { event.currentTarget.style.background = "none"; event.currentTarget.style.color = "var(--text-muted)"; }}
             >
-              <SettingsSectionIcon section={section} size={14} strokeWidth={2} />
+              <Suspense fallback={null}><SettingsSectionIcon section={section} size={14} strokeWidth={2} /></Suspense>
               <span>{label}</span>
             </button>
           );
@@ -1550,7 +1564,7 @@ export function AppShell() {
           onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; event.currentTarget.style.color = "var(--text)"; }}
           onMouseLeave={(event) => { event.currentTarget.style.background = "none"; event.currentTarget.style.color = "var(--text-muted)"; }}
         >
-          <SettingsSectionIcon section="general" size={14} strokeWidth={2} />
+          <Suspense fallback={null}><SettingsSectionIcon section="general" size={14} strokeWidth={2} /></Suspense>
           <span>{translate("common.settings")}</span>
         </button>
       </div>
@@ -2795,30 +2809,32 @@ export function AppShell() {
         {/* Only the active viewer is mounted. Lightweight per-tab state is restored on activation. */}
         <div style={{ flex: 1, minHeight: 0, overflow: "hidden", paddingBottom: "env(safe-area-inset-bottom)" }}>
           {activeFileTab?.filePath ? (
-            <FileViewer
-              key={`${fileWorkspaceGeneration}:${activeFileTab.id}:${activeFileTab.viewerRevision ?? 0}`}
-              filePath={activeFileTab.filePath}
-              cwd={activeCwd ?? undefined}
-              sourceSessionId={activeFileTab.sourceSessionId}
-              gitRefreshKey={explorerRefreshKey}
-              initialDisplayMode={activeFileTab.initialDisplayMode}
-              initialPage={activeFileTab.page}
-              initialState={activeFileTab.viewerState}
-              watchEnabled={rightPanelOpen}
-              onStateChange={(viewerState) => handleFileViewerStateChange(
-                fileWorkspaceGeneration,
-                activeFileTab.id,
-                activeFileTab.viewerRevision ?? 0,
-                viewerState,
-              )}
-              onMentionLines={rightPanelOpen ? handleFileLineMention : undefined}
-              onAtMention={handleAtMention}
-              onOpenFile={(filePath, page) => handleOpenFile(
-                filePath,
-                getFileName(filePath),
-                { sourceSessionId: activeFileTab.sourceSessionId, page },
-              )}
-            />
+            <Suspense fallback={null}>
+              <FileViewer
+                key={`${fileWorkspaceGeneration}:${activeFileTab.id}:${activeFileTab.viewerRevision ?? 0}`}
+                filePath={activeFileTab.filePath}
+                cwd={activeCwd ?? undefined}
+                sourceSessionId={activeFileTab.sourceSessionId}
+                gitRefreshKey={explorerRefreshKey}
+                initialDisplayMode={activeFileTab.initialDisplayMode}
+                initialPage={activeFileTab.page}
+                initialState={activeFileTab.viewerState}
+                watchEnabled={rightPanelOpen}
+                onStateChange={(viewerState) => handleFileViewerStateChange(
+                  fileWorkspaceGeneration,
+                  activeFileTab.id,
+                  activeFileTab.viewerRevision ?? 0,
+                  viewerState,
+                )}
+                onMentionLines={rightPanelOpen ? handleFileLineMention : undefined}
+                onAtMention={handleAtMention}
+                onOpenFile={(filePath, page) => handleOpenFile(
+                  filePath,
+                  getFileName(filePath),
+                  { sourceSessionId: activeFileTab.sourceSessionId, page },
+                )}
+              />
+            </Suspense>
           ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) && !activeAgentTab && !activeReadTab ? (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
                {translate("files.noneOpen")}
@@ -2838,59 +2854,67 @@ export function AppShell() {
             </div>
           ))}
           {activeAgentTab && (
-            <SubagentViewer
-              key={activeAgentTab.sessionId}
-              sessionId={activeAgentTab.sessionId}
-              fallbackLabel={activeAgentTab.label}
-              running={runningSessionIds.has(activeAgentTab.sessionId)}
-              onOpenFile={handleOpenLinkedFile}
-            />
+            <Suspense fallback={null}>
+              <SubagentViewer
+                key={activeAgentTab.sessionId}
+                sessionId={activeAgentTab.sessionId}
+                fallbackLabel={activeAgentTab.label}
+                running={runningSessionIds.has(activeAgentTab.sessionId)}
+                onOpenFile={handleOpenLinkedFile}
+              />
+            </Suspense>
           )}
           {activeReadTab && (
-            <ReadSnapshotViewer
-              key={activeReadTab.toolCallId}
-              toolCallId={activeReadTab.toolCallId}
-              filePath={activeReadTab.snapshot.filePath}
-              content={activeReadTab.snapshot.content}
-              offset={activeReadTab.snapshot.offset}
-              onOpenFile={handleOpenLinkedFile}
-            />
+            <Suspense fallback={null}>
+              <ReadSnapshotViewer
+                key={activeReadTab.toolCallId}
+                toolCallId={activeReadTab.toolCallId}
+                filePath={activeReadTab.snapshot.filePath}
+                content={activeReadTab.snapshot.content}
+                offset={activeReadTab.snapshot.offset}
+                onOpenFile={handleOpenLinkedFile}
+              />
+            </Suspense>
           )}
         </div>
       </div>
     </div>
     {settingsSection && (
-      <SettingsPanel
-        cwd={projectTrustCwd}
-        sessionId={selectedSession?.id ?? null}
-        initialSection={settingsSection}
-        quoteSelectionEnabled={quoteSelectionEnabled}
-        onQuoteSelectionChange={handleQuoteSelectionChange}
-        onClose={() => {
-          setSettingsSection(null);
-          setModelsRefreshKey((key) => key + 1);
-        }}
-        onSessionReloaded={() => setSessionKey((key) => key + 1)}
-        projectTrust={projectTrust}
-        onOpenTrustDialog={openProjectTrustDialog}
-        onProjectTrustChanged={handleProjectTrustChanged}
-        tools={systemTools}
-        toolsLoading={systemInfoLoading}
-        onRequestTools={requestSystemInfo}
-      />
+      <Suspense fallback={null}>
+        <SettingsPanel
+          cwd={projectTrustCwd}
+          sessionId={selectedSession?.id ?? null}
+          initialSection={settingsSection}
+          quoteSelectionEnabled={quoteSelectionEnabled}
+          onQuoteSelectionChange={handleQuoteSelectionChange}
+          onClose={() => {
+            setSettingsSection(null);
+            setModelsRefreshKey((key) => key + 1);
+          }}
+          onSessionReloaded={() => setSessionKey((key) => key + 1)}
+          projectTrust={projectTrust}
+          onOpenTrustDialog={openProjectTrustDialog}
+          onProjectTrustChanged={handleProjectTrustChanged}
+          tools={systemTools}
+          toolsLoading={systemInfoLoading}
+          onRequestTools={requestSystemInfo}
+        />
+      </Suspense>
     )}
     {/* After Settings, so it opens above it (z-index 1100 over 1000) when Settings › MCP asks for it. */}
     {projectTrustDialogOpen && projectTrustCwd && (
-      <ProjectTrustDialog
-        cwd={projectTrustCwd}
-        busy={projectTrustBusy}
-        error={projectTrustError}
-        onCancel={() => {
-          if (!projectTrustBusy) setProjectTrustDialogOpen(false);
-        }}
-        onConfirm={() => void handleTrustProject()}
-        onStatus={setProjectTrust}
-      />
+      <Suspense fallback={null}>
+        <ProjectTrustDialog
+          cwd={projectTrustCwd}
+          busy={projectTrustBusy}
+          error={projectTrustError}
+          onCancel={() => {
+            if (!projectTrustBusy) setProjectTrustDialogOpen(false);
+          }}
+          onConfirm={() => void handleTrustProject()}
+          onStatus={setProjectTrust}
+        />
+      </Suspense>
     )}
     </>
   );

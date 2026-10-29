@@ -142,6 +142,26 @@ test("previews the first thinking line and reveals the full text with the saved 
   }
 });
 
+test("a collapsed thinking preview is plain text, so a chunk does not re-parse it", () => {
+  const previousWindow = globalThis.window;
+  try {
+    globalThis.window = { localStorage: { getItem: () => "false" } };
+    const html = renderToStaticMarkup(React.createElement(
+      I18nProvider,
+      null,
+      React.createElement(ThinkingBlock, {
+        block: { type: "thinking", thinking: "Find the **needle** here\nsecond line" },
+        blockIndex: 0,
+      }),
+    ));
+    assert.match(html, />[^<]*\*\*needle\*\*[^<]*</);
+    assert.doesNotMatch(html, /<code>|<strong>/);
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
 test("renders the thinking body as markdown without growing past the card's type", () => {
   const previousWindow = globalThis.window;
   try {
@@ -802,6 +822,34 @@ test("shows tool-result images while the tool details stay collapsed", () => {
   assert.match(html, /<img[^>]+src="data:image\/png;base64,YWJj"/);
   assert.doesNotMatch(html, /captured-1280x720/);
   assert.doesNotMatch(html, /"tabId"/);
+});
+
+test("user and tool-result images load lazily and decode off the main thread", () => {
+  const userHtml = renderMessage({
+    role: "user",
+    content: [
+      { type: "text", text: "inspect this" },
+      { type: "image", data: "YWJj", mimeType: "image/png" },
+    ],
+    timestamp: Date.now(),
+  });
+  assert.match(userHtml, /<img[^>]+loading="lazy"/);
+  assert.match(userHtml, /<img[^>]+decoding="async"/);
+
+  const block = { type: "toolCall", toolCallId: "call-img-lazy", toolName: "page_screenshot", input: {} };
+  const result = {
+    role: "toolResult",
+    toolCallId: block.toolCallId,
+    content: [{ type: "image", data: "YWJj", mimeType: "image/png" }],
+  };
+  const toolHtml = renderMessage({
+    role: "assistant",
+    provider: "anthropic",
+    model: "claude-test",
+    content: [block],
+  }, { toolResults: new Map([[block.toolCallId, result]]) });
+  assert.match(toolHtml, /<img[^>]+loading="lazy"/);
+  assert.match(toolHtml, /<img[^>]+decoding="async"/);
 });
 
 test("uses the unanswered truncation notice for an empty length reply", () => {

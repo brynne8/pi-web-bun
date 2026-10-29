@@ -41,6 +41,7 @@ import { cacheMissSummaryText, TRANSCRIPT_NOTICE_WARNING_COLOR, TranscriptNotice
 import { findChatScrollAnchor, type ChatScrollPosition } from "@/lib/chat-scroll-position";
 import {
   captureScrollDistance,
+  getAnchorRevealVisibleCount,
   getNextVisibleCount,
   getPromptAnchorSpacerHeight,
   getVisibleEntryStart,
@@ -100,6 +101,9 @@ interface Props {
 }
 const CHAT_MINIMAP_WIDTH = 36;
 const CHAT_COLUMN_PADDING = 16;
+// How often the prompt anchor measures while a reply streams in: each measure
+// forces layout, and a chunk arrives more often than the anchor moves.
+const PROMPT_ANCHOR_MEASURE_INTERVAL_MS = 80;
 
 // One update check per page. Every fresh composer mounts the header again
 // (each move of the new-session bar does), and a link that turned up late
@@ -167,6 +171,18 @@ function NewSessionUpdateLink({
       </a>
     </>
   );
+}
+
+/**
+ * What a turn's Copy hands over, joined when it is read rather than when the
+ * transcript is built: a turn's words can be tens of kilobytes, and the turn's
+ * footer only ever asks whether there are any and passes them to the clipboard,
+ * which both read the value through `toString`.
+ */
+function lazyTurnCopyText(blocks: readonly TextContent[]): string {
+  let text: string | undefined;
+  const join = () => (text ??= blocks.map((block) => block.text).join("\n\n").trim());
+  return { toString: join } as unknown as string;
 }
 
 function getUserInputText(message: AgentMessage): string | null {
@@ -480,6 +496,11 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   // Only render the last N messages initially. When the user scrolls to the
   // top, load another page while keeping the scroll position stable.
   const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
+  // The head of the loaded history as it last rendered: a page prepended above
+  // the window would otherwise push the window's own first messages out of the
+  // DOM, so the window grows by the page that landed.
+  const historyHeadRef = useRef<string | null>(null);
+  const previousLengthRef = useRef(0);
   // State, not a ref: the sentinel can appear with nothing else changing (a
   // finished turn regrouped into more rows), and must get an observer then.
   const [sentinel, setSentinel] = useState<HTMLDivElement | null>(null);
@@ -555,7 +576,10 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     const locate = async () => {
       const initialHistory = searchHistoryRef.current;
       if (initialHistory.entryIds.includes(position.anchorEntryId)) {
-        setVisibleCount((current) => Math.max(current, initialHistory.entryIds.length * 2));
+        setVisibleCount((current) => Math.max(current, getAnchorRevealVisibleCount(
+          initialHistory.entryIds.length,
+          initialHistory.entryIds.indexOf(position.anchorEntryId),
+        )));
         setRestoreAnchorReady(true);
         return;
       }
@@ -572,7 +596,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             setPendingScrollRestore(null);
             return;
           }
-          setVisibleCount((current) => current + Math.max(VISIBLE_PAGE_SIZE, context.messages.length * 2));
+          setVisibleCount((current) => current + Math.max(VISIBLE_PAGE_SIZE, context.messages.length));
           if (context.entryIds.includes(position.anchorEntryId)) {
             setRestoreAnchorReady(true);
             return;
@@ -634,7 +658,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       if (controller.signal.aborted) return;
       if (found) {
         prevScrollDistanceRef.current = null;
-        setVisibleCount((current) => Math.max(current, (searchHistoryRef.current.entryIds.length + 200) * 2));
+        const loaded = searchHistoryRef.current.entryIds;
+        setVisibleCount((current) => Math.max(current, getAnchorRevealVisibleCount(loaded.length, loaded.indexOf(searchTarget.entryId))));
         setPendingSearchScroll(searchTarget);
       } else {
         onSearchTargetHandled?.(searchTarget);
@@ -707,11 +732,19 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     // intersecting the whole time would otherwise report no change and never load again.
   }, [sentinel, visibleCount, historyCursor, hasEarlierMessages, session, loadOlderPage, sessionIdRef, scrollContainerRef, pendingScrollRestore]);
 
-  // Keep the rendered window at least as large as what's loaded, so prepended
-  // (older) pages stay visible instead of being sliced off the top.
+  // A page prepended above the window widens it by that page, so what the
+  // reader was looking at stays mounted and the scroll restore below has the
+  // same content to hold. Appends (a run's own messages) need nothing: the
+  // window always ends at the tail.
   useEffect(() => {
-    setVisibleCount((current) => Math.max(current, messages.length));
-  }, [messages.length]);
+    const head = `${messageKeys[0] ?? ""}|${entryIds[0] ?? ""}`;
+    const previous = historyHeadRef.current;
+    const prepended = previous === null ? 0 : messages.length - previousLengthRef.current;
+    historyHeadRef.current = head;
+    previousLengthRef.current = messages.length;
+    if (previous === null || prepended <= 0 || previous === head) return;
+    setVisibleCount((current) => current + Math.max(VISIBLE_PAGE_SIZE, prepended));
+  }, [entryIds, messageKeys, messages.length]);
 
   // After visibleCount increases (more messages prepended), restore the
   // scroll position so the viewport doesn't jump.
@@ -837,8 +870,10 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     return history.reverse();
   }, [messages]);
   const messageRefs = useMessageRefs(visibleMessages.length);
+  // A minimap jump reaches a turn that is loaded but outside the window: the
+  // window counts messages, so everything loaded covers every turn there is.
   const revealHistoryForMinimap = useCallback(() => {
-    setVisibleCount((current) => Math.max(current, messages.length * 2));
+    setVisibleCount((current) => Math.max(current, messages.length));
   }, [messages.length]);
 
   const isEmptyNew = isNew && messages.length === 0 && !isStreaming && !sessionBusy;
@@ -847,6 +882,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const promptAnchorSpacerRef = useRef<HTMLDivElement | null>(null);
   const promptAnchorSpacerHeightRef = useRef(0);
   const promptAnchorMeasureFrameRef = useRef<number | null>(null);
+  const promptAnchorMeasuredAtRef = useRef(0);
   const promptAnchorAdjustmentDoneRef = useRef(false);
   const promptAnchorUpdateRef = useRef<(() => void) | null>(null);
 
@@ -874,6 +910,17 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         || lastUserMsgRef.current !== userMessage
         || promptAnchorSpacerRef.current !== spacer
       ) return;
+
+      // Every measure reads layout out of the container, the reader's own message
+      // and the spacer, so a reply streaming in measures once per interval
+      // rather than once per chunk.
+      const now = Date.now();
+      if (now - promptAnchorMeasuredAtRef.current < PROMPT_ANCHOR_MEASURE_INTERVAL_MS) {
+        // The measure the burst is still owed: it runs once the interval has passed.
+        schedulePromptAnchorMeasure();
+        return;
+      }
+      promptAnchorMeasuredAtRef.current = now;
 
       const containerTop = container.getBoundingClientRect().top;
       const userMessageTop = userMessage.getBoundingClientRect().top
@@ -943,6 +990,369 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     promptAnchorUpdateRef.current?.();
   }, []);
   useLayoutEffect(updatePromptAnchor, [isStreaming, hasStreamingContent, updatePromptAnchor]);
+  const renderSessionId = session?.id ?? sessionIdRef.current ?? undefined;
+  // The transcript is rebuilt when its own data changes, not on every render of
+  // the chat: AppShell re-renders this on each session stat and context update,
+  // which re-segmented every turn and re-listed every turn's files each time.
+  const transcript = useMemo(() => {
+    let lastUserIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") { lastUserIdx = i; break; }
+    }
+    // Anchor for live-tail detection. A compaction summary or subagent
+    // completion can sit after the last user message and own the
+    // still-streaming segment. lastUserIdx stays the scroll target.
+    let lastAnchorIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (isMessageGroupAnchor(messages[i])) { lastAnchorIdx = i; break; }
+    }
+
+    const visibleRefIndexByMessage = new Map<number, number>();
+    let refIdx = 0;
+    messages.forEach((msg, idx) => {
+      if (isMessageGroupAnchor(msg) || msg.role === "assistant") {
+        visibleRefIndexByMessage.set(idx, refIdx++);
+      }
+    });
+
+    const attachVisibleRef = (idx: number, refIndex: number) => (el: HTMLDivElement | null) => {
+      messageRefs.current[refIndex] = el;
+      if (idx === lastUserIdx) { (lastUserMsgRef as { current: HTMLDivElement | null }).current = el; }
+    };
+
+    const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; blockIndexOffset?: number; isTurnPart?: boolean; isTurnTail?: boolean; withNotices?: boolean } = {}): ReactNode => {
+      const msg = options.messageOverride ?? messages[idx];
+      if (isHiddenCustomMessage(msg)) return null;
+      // pi's showCacheMissNotices (#1265): read from the stored message, not a turn view's copy.
+      const notices = options.withNotices === false ? [] : getTranscriptNotices(messages[idx]);
+      const isVisible = isMessageGroupAnchor(msg) || msg.role === "assistant";
+      const currentRefIdx = visibleRefIndexByMessage.get(idx);
+      const keyPrefix = options.keyPrefix ?? "message";
+      // Not the entry id alone: a message sent or streamed in this run
+      // gets its id only when the file is read again (#1184).
+      const messageKey = messageKeys[idx];
+      let showTimestamp = false;
+      if (msg.role === "assistant") {
+        showTimestamp = true;
+        for (let j = idx + 1; j < messages.length; j++) {
+          const r = messages[j].role;
+          if (r === "user") break;
+          if (r === "assistant") { showTimestamp = false; break; }
+        }
+        // Hide on the currently-streaming tail (the streaming bubble owns the live timestamp)
+        if (showTimestamp && isStreaming && idx === messages.length - 1) {
+          showTimestamp = false;
+        }
+      }
+      const view = (
+        <MessageView
+          key={`${keyPrefix}-view-${messageKey}`}
+          message={msg}
+          toolResults={toolResultsMap}
+          modelNames={modelNames}
+          cwd={messageCwd}
+          onOpenFile={onOpenFile}
+          onOpenSubagent={onOpenSubagent}
+          onOpenReadSnapshot={onOpenReadSnapshot}
+          entryId={entryIds[idx]}
+          searchBlock={entryIds[idx] === pendingSearchScroll?.entryId ? searchBlock : undefined}
+          onFork={bashRunning || isNew ? undefined : handleFork}
+          forking={forkingEntryId === entryIds[idx]}
+          onEditContent={sessionBusy ? undefined : handleEditContent}
+          onCancelEdit={cancelEdit}
+          isEditing={editEntryId === entryIds[idx]}
+          showTimestamp={showTimestamp}
+          prevTimestamp={idx > 0 ? (messages[idx - 1] as AgentMessage & { timestamp?: number }).timestamp : undefined}
+          sessionId={renderSessionId}
+          blockIndexOffset={options.blockIndexOffset}
+          isTurnPart={options.isTurnPart}
+          isTurnTail={options.isTurnTail}
+        />
+      );
+      const noticeLines = notices.length > 0 ? <TranscriptNoticeLines key={`${keyPrefix}-notices-${messageKey}`} notices={notices} /> : null;
+      // One shape with or without notices, so lines arriving on a reload do not remount the view.
+      if (!isVisible || currentRefIdx === undefined) return <Fragment key={`${keyPrefix}-${messageKey}`}>{view}{noticeLines}</Fragment>;
+      return (
+        <div key={`${keyPrefix}-${messageKey}`} data-entry-id={entryIds[idx]} ref={options.attachRef === false ? undefined : attachVisibleRef(idx, currentRefIdx)}>
+          {view}
+          {noticeLines}
+        </div>
+      );
+    };
+
+    // Each entry remembers the message it came from: the window below counts
+    // messages, and a turn renders as several entries for one of them.
+    const rendered: { node: ReactNode; messageIdx: number }[] = [];
+    for (let idx = 0; idx < messages.length;) {
+      const msg = messages[idx];
+      const hasAnchor = isMessageGroupAnchor(msg);
+      if (!hasAnchor && idx !== 0) {
+        rendered.push({ node: renderMessage(idx), messageIdx: idx });
+        idx += 1;
+        continue;
+      }
+
+      // The first history page starts at a fixed entry count, so a turn
+      // longer than that page begins without its anchor. Group the
+      // leading segment anyway instead of flattening the whole turn.
+      const userIdx = hasAnchor ? idx : -1;
+      const groupStartIdx = hasAnchor ? idx : 0;
+      let endIdx = idx + 1;
+      while (endIdx < messages.length && !isMessageGroupAnchor(messages[endIdx])) endIdx += 1;
+
+      const isLiveTail = (sessionBusy || isStreaming) && endIdx === messages.length && userIdx === lastAnchorIdx;
+      if (isLiveTail) {
+        // A running turn folds as it will once it is history: each run of thinking
+        // and tool calls that a paragraph of text has moved past folds into its own
+        // group, and only the step in progress stays open. A turn with no text keeps
+        // everything open until it ends, then folds as a whole. The token counts, Copy
+        // and the failure wait for the footer at the turn's end.
+        const liveSegments = splitTurnSegments(messages, userIdx + 1, endIdx);
+        const lastLiveSegmentIdx = liveSegments.length - 1;
+        for (const item of planTurnRender(liveSegments, groupStartIdx, endIdx)) {
+          if (item.kind === "raw") {
+            // A message no segment covers (the anchor, a tool result)
+            // keeps its place in the turn as it is.
+            rendered.push({ node: renderMessage(item.index, { isTurnPart: true }), messageIdx: item.index });
+            continue;
+          }
+          const { segment, segmentIndex: liveSegmentIdx } = item;
+          const views: { node: ReactNode; messageIdx: number }[] = [];
+          let revealSegment = false;
+          let segmentRefIdx: number | undefined;
+          for (const part of segment.parts) {
+            const stored = messages[part.index] as AssistantMessage;
+            if (part.custom) {
+              revealSegment ||= Boolean(pendingSearchScroll && pendingSearchScroll.entryId === entryIds[part.index]);
+              views.push({ node: renderMessage(part.index, { attachRef: false, keyPrefix: `segment-${liveSegmentIdx}` }), messageIdx: part.index });
+              continue;
+            }
+            const view = getTurnPart(turnPartCache, stored, part.start, part.end);
+            const partBlocks = view.content ?? [];
+            revealSegment ||= Boolean(pendingSearchScroll && entryIds[part.index] === pendingSearchScroll.entryId && (!searchBlock || partBlocks.includes(searchBlock)));
+            segmentRefIdx ??= visibleRefIndexByMessage.get(part.index);
+            views.push({
+              node: renderMessage(part.index, {
+                attachRef: segment.kind === "answer",
+                keyPrefix: `segment-${liveSegmentIdx}-${part.start}`,
+                messageOverride: view,
+                blockIndexOffset: part.start,
+                isTurnPart: true,
+              }),
+              messageIdx: part.index,
+            });
+          }
+          // The step in progress (the last segment) stays open; every earlier
+          // run has real text after it, so it folds here and now.
+          if (segment.kind === "process" && liveSegmentIdx !== lastLiveSegmentIdx) {
+            const firstIdx = segment.parts[0].index;
+            const lastIdx = segment.parts[segment.parts.length - 1].index;
+            const segmentMessages = messages.slice(firstIdx, lastIdx + 1);
+            rendered.push({
+              node: (
+                <div
+                  key={`process-group-${entryIds[groupStartIdx] ?? groupStartIdx}-${liveSegmentIdx}`}
+                  ref={segmentRefIdx === undefined ? undefined : (el) => { messageRefs.current[segmentRefIdx] = el; }}
+                >
+                  <ProcessDetailsGroup
+                    messageCount={segment.messageCount}
+                    toolCallCount={segment.toolCallCount}
+                    durationMs={getTurnDurationMs(messages, firstIdx, lastIdx + 1)}
+                    cacheMisses={summarizeCacheMisses(segmentMessages)}
+                    reveal={revealSegment}
+                    t={t}
+                  >
+                    {views.map((entry) => entry.node)}
+                  </ProcessDetailsGroup>
+                </div>
+              ),
+              messageIdx: groupStartIdx,
+            });
+          } else {
+            rendered.push(...views);
+          }
+        }
+        idx = endIdx;
+        continue;
+      }
+
+      if (hasAnchor) rendered.push({ node: renderMessage(userIdx), messageIdx: userIdx });
+
+      // The turn's words stay on screen and each run of thinking and tool
+      // calls between them folds into a group of its own, so a long turn
+      // reads as several groups with the sentences in between rather than
+      // one fold holding everything up to its last tool call.
+      const segments = splitTurnSegments(messages, userIdx + 1, endIdx);
+      // Whether anything the model wrote is on the screen. A turn that wrote
+      // none of it still folds its workings: only a truncation with no answer
+      // anywhere asks to be handled here (the Compact button below).
+      const answered = turnHasAnswer(segments);
+      // The turn's own length, from its anchor to its last response's end
+      // (#1222): the footer's row, next to what the turn cost.
+      const turnDurationMs = hasAnchor && entryIds[userIdx] ? getTurnDurationMs(messages, userIdx, endIdx) : undefined;
+
+      // Each tool call is stored as its own assistant entry, so no single
+      // part carries what the turn wrote or what it cost: gather the turn's
+      // blocks once, and sum its requests' numbers.
+      const turnContent: AssistantContentBlock[] = [];
+      const turnUsage = getTurnUsage(messages, userIdx, endIdx);
+      let turnTimestamp: number | undefined;
+      for (let turnIdx = userIdx + 1; turnIdx < endIdx; turnIdx++) {
+        const turnMessage = messages[turnIdx] as AssistantMessage | undefined;
+        if (turnMessage?.role === "assistant") {
+          for (const block of turnMessage.content ?? []) turnContent.push(block);
+          turnTimestamp = turnMessage.timestamp ?? turnTimestamp;
+        }
+      }
+      const turnWrittenFiles = extractTurnWrittenFiles(turnContent, toolResultsMap, messageCwd);
+      // What Copy hands over: the turn's words, not the last part's sentence.
+      const turnTextBlocks = turnContent.filter((block): block is TextContent => block.type === "text");
+      const turnCopyText = turnTextBlocks.length > 0 ? lazyTurnCopyText(turnTextBlocks) : undefined;
+
+      // The turn's last part is the one place a part may still show the turn's own
+      // row: the model label a part used to repeat for every run of one entry.
+      const lastSegmentIdx = segments.length - 1;
+      const lastPartIdx = (segments[lastSegmentIdx]?.parts.length ?? 1) - 1;
+      for (const [segmentIdx, segment] of segments.entries()) {
+        const views: { node: ReactNode; messageIdx: number }[] = [];
+        let revealSegment = false;
+        let segmentRefIdx: number | undefined;
+
+        for (const [partIdx, part] of segment.parts.entries()) {
+          const stored = messages[part.index] as AssistantMessage;
+          if (part.custom) {
+            revealSegment ||= Boolean(pendingSearchScroll && pendingSearchScroll.entryId === entryIds[part.index]);
+            views.push({ node: renderMessage(part.index, { attachRef: false, keyPrefix: `segment-${segmentIdx}` }), messageIdx: part.index });
+            continue;
+          }
+          const view = getTurnPart(turnPartCache, stored, part.start, part.end);
+          const partBlocks = view.content ?? [];
+          revealSegment ||= Boolean(pendingSearchScroll && entryIds[part.index] === pendingSearchScroll.entryId && (!searchBlock || partBlocks.includes(searchBlock)));
+          segmentRefIdx ??= visibleRefIndexByMessage.get(part.index);
+          views.push({
+            node: renderMessage(part.index, {
+              // A group's contents are not the turn's scroll target: its answer is.
+            attachRef: segment.kind === "answer",
+            keyPrefix: `segment-${segmentIdx}-${part.start}`,
+            messageOverride: view,
+            blockIndexOffset: part.start,
+              // No part is the turn: its time, its numbers, its failure and its
+              // Copy all come after the last segment, where the turn ends.
+              isTurnPart: true,
+              isTurnTail: segmentIdx === lastSegmentIdx && partIdx === lastPartIdx,
+            }),
+            messageIdx: part.index,
+          });
+        }
+
+        if (segment.kind === "process") {
+          // The stretch's own length and what its folded steps' cache
+          // misses came to (#1222, #1265), both read off the segment's
+          // messages alone.
+          const firstIdx = segment.parts[0].index;
+          const lastIdx = segment.parts[segment.parts.length - 1].index;
+          const segmentMessages = messages.slice(firstIdx, lastIdx + 1);
+          rendered.push({
+            node: (
+            <div
+              key={`process-group-${entryIds[groupStartIdx] ?? groupStartIdx}-${segmentIdx}`}
+              ref={segmentRefIdx === undefined ? undefined : (el) => { messageRefs.current[segmentRefIdx] = el; }}
+            >
+              <ProcessDetailsGroup
+                messageCount={segment.messageCount}
+                toolCallCount={segment.toolCallCount}
+                durationMs={getTurnDurationMs(messages, firstIdx, lastIdx + 1)}
+                cacheMisses={summarizeCacheMisses(segmentMessages)}
+                reveal={revealSegment}
+                t={t}
+              >
+                {views.map((entry) => entry.node)}
+              </ProcessDetailsGroup>
+            </div>
+            ),
+            messageIdx: groupStartIdx,
+          });
+          continue;
+        }
+        rendered.push(...views);
+      }
+
+      // A turn's failure is its outcome, not one of its workings, so it shows
+      // here rather than inside a group the user has to open to find the reason
+      // the run stopped (#906). pi records it on the response that ended the run.
+      let noticeMessage: AssistantMessage | undefined;
+      for (let turnIdx = endIdx - 1; turnIdx > userIdx; turnIdx--) {
+        const candidate = messages[turnIdx] as AssistantMessage | undefined;
+        if (candidate?.role !== "assistant") continue;
+        noticeMessage = candidate;
+        break;
+      }
+      const notice = noticeMessage
+        && (getAssistantErrorMessage(noticeMessage) || isAssistantTruncated(noticeMessage))
+        ? noticeMessage : undefined;
+      if (notice) {
+        // A run cut off by the output limit with no answer anywhere in it can be
+        // recovered from here, and only while it is the session's tail.
+        const canRecover = !answered && isAssistantTruncated(notice) && !hasAssistantAnswer(notice)
+          && endIdx === messages.length && !isStreaming;
+        rendered.push({
+          messageIdx: endIdx - 1,
+          node: (
+            <div key={`turn-notice-${entryIds[groupStartIdx] ?? groupStartIdx}`} style={{ marginTop: -8, marginBottom: 16 }}>
+              <AssistantNotice
+                message={notice}
+                onCompact={canRecover ? handleCompact : undefined}
+                isCompacting={canRecover ? isCompacting : undefined}
+                compactError={canRecover ? compactError : undefined}
+              />
+            </div>
+          ),
+        });
+      }
+
+      // The turn's footer, once where the turn ends — not under whichever part
+      // happens to hold the last sentence: stop a run mid-thinking and the turn
+      // ends on a folded group, and pi-web saves one assistant entry per tool
+      // call, so a per-part footer repeats down the turn.
+      if (turnCopyText || turnWrittenFiles.length > 0 || turnUsage) {
+        rendered.push({
+          messageIdx: endIdx - 1,
+          node: (
+            <TurnFooter
+              key={`turn-footer-${entryIds[groupStartIdx] ?? groupStartIdx}`}
+              usage={turnUsage}
+              timestamp={turnTimestamp}
+              durationMs={turnDurationMs}
+              text={turnCopyText}
+              writtenFiles={turnWrittenFiles}
+              onOpenFile={onOpenFile}
+            />
+          ),
+        });
+      }
+      idx = endIdx;
+    }
+    // The window counts messages, so a turn that renders as several entries cannot
+    // push a prepended page's own messages out of it.
+    const startIndex = getVisibleEntryStart(rendered, messages.length, visibleCount);
+    const hasMore = startIndex > 0 || hasEarlierMessages;
+    return (
+      <>
+        {hasMore && (
+           <div ref={setSentinel} className="py-3 text-center text-xs text-text-muted">
+             {t("chat.loadEarlier")}
+          </div>
+        )}
+        {rendered.slice(startIndex).map((entry) => entry.node)}
+      </>
+    );
+  }, [
+    messages, entryIds, messageKeys, toolResultsMap, turnPartCache, renderSessionId,
+    messageCwd, modelNames, visibleCount, hasEarlierMessages, pendingSearchScroll, searchBlock,
+    forkingEntryId, editEntryId, sessionBusy, isStreaming, bashRunning, isNew,
+    isCompacting, compactError, handleFork, handleEditContent, cancelEdit, handleCompact,
+    onOpenFile, onOpenSubagent, onOpenReadSnapshot, t, messageRefs, lastUserMsgRef,
+  ]);
 
   const availableThinkingLevels = displayModelValue
     ? (modelThinkingLevels[`${displayModelValue.provider}:${displayModelValue.modelId}`] ?? null)
@@ -1096,362 +1506,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         >
           <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
             <div ref={messageContentRef} onPointerUp={captureQuotedSelection} style={{ width: "100%", minWidth: 0, maxWidth: "var(--chat-content-max-width, 820px)", margin: "0 auto" }}>
-            {(() => {
-              let lastUserIdx = -1;
-              for (let i = messages.length - 1; i >= 0; i--) {
-                if (messages[i].role === "user") { lastUserIdx = i; break; }
-              }
-              // Anchor for live-tail detection. A compaction summary or subagent
-              // completion can sit after the last user message and own the
-              // still-streaming segment. lastUserIdx stays the scroll target.
-              let lastAnchorIdx = -1;
-              for (let i = messages.length - 1; i >= 0; i--) {
-                if (isMessageGroupAnchor(messages[i])) { lastAnchorIdx = i; break; }
-              }
-
-              const visibleRefIndexByMessage = new Map<number, number>();
-              let refIdx = 0;
-              messages.forEach((msg, idx) => {
-                if (isMessageGroupAnchor(msg) || msg.role === "assistant") {
-                  visibleRefIndexByMessage.set(idx, refIdx++);
-                }
-              });
-
-              const attachVisibleRef = (idx: number, refIndex: number) => (el: HTMLDivElement | null) => {
-                messageRefs.current[refIndex] = el;
-                if (idx === lastUserIdx) { (lastUserMsgRef as { current: HTMLDivElement | null }).current = el; }
-              };
-
-              const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; blockIndexOffset?: number; isTurnPart?: boolean; isTurnTail?: boolean; withNotices?: boolean } = {}): ReactNode => {
-                const msg = options.messageOverride ?? messages[idx];
-                if (isHiddenCustomMessage(msg)) return null;
-                // pi's showCacheMissNotices (#1265): read from the stored message, not a turn view's copy.
-                const notices = options.withNotices === false ? [] : getTranscriptNotices(messages[idx]);
-                const isVisible = isMessageGroupAnchor(msg) || msg.role === "assistant";
-                const currentRefIdx = visibleRefIndexByMessage.get(idx);
-                const keyPrefix = options.keyPrefix ?? "message";
-                // Not the entry id alone: a message sent or streamed in this run
-                // gets its id only when the file is read again (#1184).
-                const messageKey = messageKeys[idx];
-                let showTimestamp = false;
-                if (msg.role === "assistant") {
-                  showTimestamp = true;
-                  for (let j = idx + 1; j < messages.length; j++) {
-                    const r = messages[j].role;
-                    if (r === "user") break;
-                    if (r === "assistant") { showTimestamp = false; break; }
-                  }
-                  // Hide on the currently-streaming tail (the streaming bubble owns the live timestamp)
-                  if (showTimestamp && isStreaming && idx === messages.length - 1) {
-                    showTimestamp = false;
-                  }
-                }
-                const view = (
-                  <MessageView
-                    key={`${keyPrefix}-view-${messageKey}`}
-                    message={msg}
-                    toolResults={toolResultsMap}
-                    modelNames={modelNames}
-                    cwd={messageCwd}
-                    onOpenFile={onOpenFile}
-                    onOpenSubagent={onOpenSubagent}
-                    onOpenReadSnapshot={onOpenReadSnapshot}
-                    entryId={entryIds[idx]}
-                    searchBlock={entryIds[idx] === pendingSearchScroll?.entryId ? searchBlock : undefined}
-                    onFork={bashRunning || isNew ? undefined : handleFork}
-                    forking={forkingEntryId === entryIds[idx]}
-                    onEditContent={sessionBusy ? undefined : handleEditContent}
-                    onCancelEdit={cancelEdit}
-                    isEditing={editEntryId === entryIds[idx]}
-                    showTimestamp={showTimestamp}
-                    prevTimestamp={idx > 0 ? (messages[idx - 1] as AgentMessage & { timestamp?: number }).timestamp : undefined}
-                    sessionId={session?.id ?? sessionIdRef.current ?? undefined}
-                    blockIndexOffset={options.blockIndexOffset}
-                    isTurnPart={options.isTurnPart}
-                    isTurnTail={options.isTurnTail}
-                  />
-                );
-                const noticeLines = notices.length > 0 ? <TranscriptNoticeLines key={`${keyPrefix}-notices-${messageKey}`} notices={notices} /> : null;
-                // One shape with or without notices, so lines arriving on a reload do not remount the view.
-                if (!isVisible || currentRefIdx === undefined) return <Fragment key={`${keyPrefix}-${messageKey}`}>{view}{noticeLines}</Fragment>;
-                return (
-                  <div key={`${keyPrefix}-${messageKey}`} data-entry-id={entryIds[idx]} ref={options.attachRef === false ? undefined : attachVisibleRef(idx, currentRefIdx)}>
-                    {view}
-                    {noticeLines}
-                  </div>
-                );
-              };
-
-              // Each entry remembers the message it came from: the window below counts
-              // messages, and a turn renders as several entries for one of them.
-              const rendered: { node: ReactNode; messageIdx: number }[] = [];
-              for (let idx = 0; idx < messages.length;) {
-                const msg = messages[idx];
-                const hasAnchor = isMessageGroupAnchor(msg);
-                if (!hasAnchor && idx !== 0) {
-                  rendered.push({ node: renderMessage(idx), messageIdx: idx });
-                  idx += 1;
-                  continue;
-                }
-
-                // The first history page starts at a fixed entry count, so a turn
-                // longer than that page begins without its anchor. Group the
-                // leading segment anyway instead of flattening the whole turn.
-                const userIdx = hasAnchor ? idx : -1;
-                const groupStartIdx = hasAnchor ? idx : 0;
-                let endIdx = idx + 1;
-                while (endIdx < messages.length && !isMessageGroupAnchor(messages[endIdx])) endIdx += 1;
-
-                const isLiveTail = (sessionBusy || isStreaming) && endIdx === messages.length && userIdx === lastAnchorIdx;
-                if (isLiveTail) {
-                  // A running turn folds as it will once it is history: each run of thinking
-                  // and tool calls that a paragraph of text has moved past folds into its own
-                  // group, and only the step in progress stays open. A turn with no text keeps
-                  // everything open until it ends, then folds as a whole. The token counts, Copy
-                  // and the failure wait for the footer at the turn's end.
-                  const liveSegments = splitTurnSegments(messages, userIdx + 1, endIdx);
-                  const lastLiveSegmentIdx = liveSegments.length - 1;
-                  for (const item of planTurnRender(liveSegments, groupStartIdx, endIdx)) {
-                    if (item.kind === "raw") {
-                      // A message no segment covers (the anchor, a tool result)
-                      // keeps its place in the turn as it is.
-                      rendered.push({ node: renderMessage(item.index, { isTurnPart: true }), messageIdx: item.index });
-                      continue;
-                    }
-                    const { segment, segmentIndex: liveSegmentIdx } = item;
-                    const views: { node: ReactNode; messageIdx: number }[] = [];
-                    let revealSegment = false;
-                    let segmentRefIdx: number | undefined;
-                    for (const part of segment.parts) {
-                      const stored = messages[part.index] as AssistantMessage;
-                      if (part.custom) {
-                        revealSegment ||= Boolean(pendingSearchScroll && pendingSearchScroll.entryId === entryIds[part.index]);
-                        views.push({ node: renderMessage(part.index, { attachRef: false, keyPrefix: `segment-${liveSegmentIdx}` }), messageIdx: part.index });
-                        continue;
-                      }
-                      const view = getTurnPart(turnPartCache, stored, part.start, part.end);
-                      const partBlocks = view.content ?? [];
-                      revealSegment ||= Boolean(pendingSearchScroll && entryIds[part.index] === pendingSearchScroll.entryId && (!searchBlock || partBlocks.includes(searchBlock)));
-                      segmentRefIdx ??= visibleRefIndexByMessage.get(part.index);
-                      views.push({
-                        node: renderMessage(part.index, {
-                          attachRef: segment.kind === "answer",
-                          keyPrefix: `segment-${liveSegmentIdx}-${part.start}`,
-                          messageOverride: view,
-                          blockIndexOffset: part.start,
-                          isTurnPart: true,
-                        }),
-                        messageIdx: part.index,
-                      });
-                    }
-                    // The step in progress (the last segment) stays open; every earlier
-                    // run has real text after it, so it folds here and now.
-                    if (segment.kind === "process" && liveSegmentIdx !== lastLiveSegmentIdx) {
-                      const firstIdx = segment.parts[0].index;
-                      const lastIdx = segment.parts[segment.parts.length - 1].index;
-                      const segmentMessages = messages.slice(firstIdx, lastIdx + 1);
-                      rendered.push({
-                        node: (
-                          <div
-                            key={`process-group-${entryIds[groupStartIdx] ?? groupStartIdx}-${liveSegmentIdx}`}
-                            ref={segmentRefIdx === undefined ? undefined : (el) => { messageRefs.current[segmentRefIdx] = el; }}
-                          >
-                            <ProcessDetailsGroup
-                              messageCount={segment.messageCount}
-                              toolCallCount={segment.toolCallCount}
-                              durationMs={getTurnDurationMs(messages, firstIdx, lastIdx + 1)}
-                              cacheMisses={summarizeCacheMisses(segmentMessages)}
-                              reveal={revealSegment}
-                              t={t}
-                            >
-                              {views.map((entry) => entry.node)}
-                            </ProcessDetailsGroup>
-                          </div>
-                        ),
-                        messageIdx: groupStartIdx,
-                      });
-                    } else {
-                      rendered.push(...views);
-                    }
-                  }
-                  idx = endIdx;
-                  continue;
-                }
-
-                if (hasAnchor) rendered.push({ node: renderMessage(userIdx), messageIdx: userIdx });
-
-                // The turn's words stay on screen and each run of thinking and tool
-                // calls between them folds into a group of its own, so a long turn
-                // reads as several groups with the sentences in between rather than
-                // one fold holding everything up to its last tool call.
-                const segments = splitTurnSegments(messages, userIdx + 1, endIdx);
-                // Whether anything the model wrote is on the screen. A turn that wrote
-                // none of it still folds its workings: only a truncation with no answer
-                // anywhere asks to be handled here (the Compact button below).
-                const answered = turnHasAnswer(segments);
-                // The turn's own length, from its anchor to its last response's end
-                // (#1222): the footer's row, next to what the turn cost.
-                const turnDurationMs = hasAnchor && entryIds[userIdx] ? getTurnDurationMs(messages, userIdx, endIdx) : undefined;
-
-                // Each tool call is stored as its own assistant entry, so no single
-                // part carries what the turn wrote or what it cost: gather the turn's
-                // blocks once, and sum its requests' numbers.
-                const turnContent: AssistantContentBlock[] = [];
-                const turnUsage = getTurnUsage(messages, userIdx, endIdx);
-                let turnTimestamp: number | undefined;
-                for (let turnIdx = userIdx + 1; turnIdx < endIdx; turnIdx++) {
-                  const turnMessage = messages[turnIdx] as AssistantMessage | undefined;
-                  if (turnMessage?.role === "assistant") {
-                    for (const block of turnMessage.content ?? []) turnContent.push(block);
-                    turnTimestamp = turnMessage.timestamp ?? turnTimestamp;
-                  }
-                }
-                const turnWrittenFiles = extractTurnWrittenFiles(turnContent, toolResultsMap, messageCwd);
-                // What Copy hands over: the turn's words, not the last part's sentence.
-                const turnCopyText = turnContent
-                  .filter((block): block is TextContent => block.type === "text")
-                  .map((block) => block.text)
-                  .join("\n\n")
-                  .trim();
-
-                // The turn's last part is the one place a part may still show the turn's own
-                // row: the model label a part used to repeat for every run of one entry.
-                const lastSegmentIdx = segments.length - 1;
-                const lastPartIdx = (segments[lastSegmentIdx]?.parts.length ?? 1) - 1;
-                for (const [segmentIdx, segment] of segments.entries()) {
-                  const views: { node: ReactNode; messageIdx: number }[] = [];
-                  let revealSegment = false;
-                  let segmentRefIdx: number | undefined;
-
-                  for (const [partIdx, part] of segment.parts.entries()) {
-                    const stored = messages[part.index] as AssistantMessage;
-                    if (part.custom) {
-                      revealSegment ||= Boolean(pendingSearchScroll && pendingSearchScroll.entryId === entryIds[part.index]);
-                      views.push({ node: renderMessage(part.index, { attachRef: false, keyPrefix: `segment-${segmentIdx}` }), messageIdx: part.index });
-                      continue;
-                    }
-                    const view = getTurnPart(turnPartCache, stored, part.start, part.end);
-                    const partBlocks = view.content ?? [];
-                    revealSegment ||= Boolean(pendingSearchScroll && entryIds[part.index] === pendingSearchScroll.entryId && (!searchBlock || partBlocks.includes(searchBlock)));
-                    segmentRefIdx ??= visibleRefIndexByMessage.get(part.index);
-                    views.push({
-                      node: renderMessage(part.index, {
-                        // A group's contents are not the turn's scroll target: its answer is.
-                      attachRef: segment.kind === "answer",
-                      keyPrefix: `segment-${segmentIdx}-${part.start}`,
-                      messageOverride: view,
-                      blockIndexOffset: part.start,
-                        // No part is the turn: its time, its numbers, its failure and its
-                        // Copy all come after the last segment, where the turn ends.
-                        isTurnPart: true,
-                        isTurnTail: segmentIdx === lastSegmentIdx && partIdx === lastPartIdx,
-                      }),
-                      messageIdx: part.index,
-                    });
-                  }
-
-                  if (segment.kind === "process") {
-                    // The stretch's own length and what its folded steps' cache
-                    // misses came to (#1222, #1265), both read off the segment's
-                    // messages alone.
-                    const firstIdx = segment.parts[0].index;
-                    const lastIdx = segment.parts[segment.parts.length - 1].index;
-                    const segmentMessages = messages.slice(firstIdx, lastIdx + 1);
-                    rendered.push({
-                      node: (
-                      <div
-                        key={`process-group-${entryIds[groupStartIdx] ?? groupStartIdx}-${segmentIdx}`}
-                        ref={segmentRefIdx === undefined ? undefined : (el) => { messageRefs.current[segmentRefIdx] = el; }}
-                      >
-                        <ProcessDetailsGroup
-                          messageCount={segment.messageCount}
-                          toolCallCount={segment.toolCallCount}
-                          durationMs={getTurnDurationMs(messages, firstIdx, lastIdx + 1)}
-                          cacheMisses={summarizeCacheMisses(segmentMessages)}
-                          reveal={revealSegment}
-                          t={t}
-                        >
-                          {views.map((entry) => entry.node)}
-                        </ProcessDetailsGroup>
-                      </div>
-                      ),
-                      messageIdx: groupStartIdx,
-                    });
-                    continue;
-                  }
-                  rendered.push(...views);
-                }
-
-                // A turn's failure is its outcome, not one of its workings, so it shows
-                // here rather than inside a group the user has to open to find the reason
-                // the run stopped (#906). pi records it on the response that ended the run.
-                let noticeMessage: AssistantMessage | undefined;
-                for (let turnIdx = endIdx - 1; turnIdx > userIdx; turnIdx--) {
-                  const candidate = messages[turnIdx] as AssistantMessage | undefined;
-                  if (candidate?.role !== "assistant") continue;
-                  noticeMessage = candidate;
-                  break;
-                }
-                const notice = noticeMessage
-                  && (getAssistantErrorMessage(noticeMessage) || isAssistantTruncated(noticeMessage))
-                  ? noticeMessage : undefined;
-                if (notice) {
-                  // A run cut off by the output limit with no answer anywhere in it can be
-                  // recovered from here, and only while it is the session's tail.
-                  const canRecover = !answered && isAssistantTruncated(notice) && !hasAssistantAnswer(notice)
-                    && endIdx === messages.length && !isStreaming;
-                  rendered.push({
-                    messageIdx: endIdx - 1,
-                    node: (
-                      <div key={`turn-notice-${entryIds[groupStartIdx] ?? groupStartIdx}`} style={{ marginTop: -8, marginBottom: 16 }}>
-                        <AssistantNotice
-                          message={notice}
-                          onCompact={canRecover ? handleCompact : undefined}
-                          isCompacting={canRecover ? isCompacting : undefined}
-                          compactError={canRecover ? compactError : undefined}
-                        />
-                      </div>
-                    ),
-                  });
-                }
-
-                // The turn's footer, once where the turn ends — not under whichever part
-                // happens to hold the last sentence: stop a run mid-thinking and the turn
-                // ends on a folded group, and pi-web saves one assistant entry per tool
-                // call, so a per-part footer repeats down the turn.
-                if (turnCopyText || turnWrittenFiles.length > 0 || turnUsage) {
-                  rendered.push({
-                    messageIdx: endIdx - 1,
-                    node: (
-                      <TurnFooter
-                        key={`turn-footer-${entryIds[groupStartIdx] ?? groupStartIdx}`}
-                        usage={turnUsage}
-                        timestamp={turnTimestamp}
-                        durationMs={turnDurationMs}
-                        text={turnCopyText}
-                        writtenFiles={turnWrittenFiles}
-                        onOpenFile={onOpenFile}
-                      />
-                    ),
-                  });
-                }
-                idx = endIdx;
-              }
-              // The window counts messages, so a turn that renders as several entries cannot
-              // push a prepended page's own messages out of it.
-              const startIndex = getVisibleEntryStart(rendered, messages.length, visibleCount);
-              const hasMore = startIndex > 0 || hasEarlierMessages;
-              return (
-                <>
-                  {hasMore && (
-                     <div ref={setSentinel} className="py-3 text-center text-xs text-text-muted">
-                       {t("chat.loadEarlier")}
-                    </div>
-                  )}
-                  {rendered.slice(startIndex).map((entry) => entry.node)}
-                </>
-              );
-            })()}
+            {transcript}
             {isStreaming && hasStreamingContent && (
               <StreamingReply store={streamingStore} onCommit={updatePromptAnchor} toolResults={toolResultsMap} modelNames={modelNames} cwd={messageCwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} />
             )}
@@ -1476,7 +1531,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                   output: "",
                   excludeFromContext: pendingBash.excludeFromContext,
                 } as BashExecutionMessage}
-                sessionId={session?.id ?? sessionIdRef.current ?? undefined}
+                sessionId={renderSessionId}
                 onOpenSubagent={onOpenSubagent}
               />
             )}

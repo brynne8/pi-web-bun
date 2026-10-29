@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import SyntaxHighlighter from "react-syntax-highlighter/dist/esm/prism-light";
-import { vs } from "react-syntax-highlighter/dist/cjs/styles/prism";
+import vs from "react-syntax-highlighter/dist/cjs/styles/prism/vs";
 import { useTheme } from "@/hooks/useTheme";
 import { usePrismLanguages } from "@/hooks/usePrismLanguages";
 import { useI18n } from "@/hooks/useI18n";

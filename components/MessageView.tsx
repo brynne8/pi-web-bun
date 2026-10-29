@@ -1,7 +1,6 @@
 "use client";
 
 import { memo, useState, useRef, useEffect, useMemo } from "react";
-import ReactMarkdown from "react-markdown";
 import { MarkdownBody } from "./MarkdownBody";
 import { ImagePreview } from "./ImagePreview";
 import { ThinkingIcon } from "./ThinkingIcon";
@@ -412,6 +411,8 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             <img
               src={src}
               alt=""
+              loading="lazy"
+              decoding="async"
               style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid rgba(59,130,246,0.15)" }}
             />
           </ImagePreview>
@@ -825,18 +826,21 @@ function AssistantMessageView({
   const toolCallDurations = useMemo<Map<string, number>>(() => {
     const map = new Map<string, number>();
     if (!toolResults) return map;
-    for (const [callId, result] of toolResults) {
+    for (const block of blocks) {
+      if (block.type !== "toolCall") continue;
+      const result = toolResults.get(block.toolCallId);
+      if (!result) continue;
       const ms = recordedDurationMs(result.durationMs)
         ?? (result.timestamp && message.timestamp ? result.timestamp - message.timestamp : undefined);
-      if (ms !== undefined && ms >= TOOL_DURATION_MIN_MS) map.set(callId, ms);
+      if (ms !== undefined && ms >= TOOL_DURATION_MIN_MS) map.set(block.toolCallId, ms);
     }
     return map;
-  }, [toolResults, message.timestamp]);
+  }, [toolResults, message.timestamp, blocks]);
 
-  const textContent = blocks
-    .filter((b): b is TextContent => b.type === "text")
-    .map((b) => b.text)
-    .join("\n");
+  const textContent = useMemo(
+    () => (isStreaming ? "" : blocks.filter((b): b is TextContent => b.type === "text").map((b) => b.text).join("\n")),
+    [blocks, isStreaming],
+  );
   // A part of a segmented turn shows none of this: a turn cut off mid-thinking
   // ends on a folded group, and a footer attached to a part would sit after some
   // sentence in the middle of it. `TurnFooter` renders once at the turn's end.
@@ -961,7 +965,7 @@ function AssistantMessageView({
         {/* Not keyed by the entry id: a message of this run gets one when the file is
             read again, and its blocks keep their state across that read (#1184). */}
         {blockItems.map(({ block, originalIndex }) => (
-          <BlockView key={originalIndex} block={block} searchTarget={block === searchBlock} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
+          <BlockView key={originalIndex} block={block} searchTarget={block === searchBlock} result={block.type === "toolCall" ? toolResults?.get(block.toolCallId) : undefined} duration={block.type === "toolCall" ? toolCallDurations.get(block.toolCallId) : undefined} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
         ))}
       </div>
 
@@ -1027,7 +1031,7 @@ function AssistantMessageView({
   );
 }
 
-function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDuration, toolCallDurations, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, sessionId, entryId, blockIndex }: { block: AssistantContentBlock; searchTarget?: boolean; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; cwd?: string; onOpenFile?: (filePath: string, page?: number) => void; onOpenSubagent?: (sessionId: string, label: string) => void; onOpenReadSnapshot?: (toolCallId: string, snapshot: ReadSnapshot) => void; sessionId?: string; entryId?: string; blockIndex: number }) {
+const BlockView = memo(function BlockView({ block, searchTarget, result, duration, isStreaming, streamingDuration, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, sessionId, entryId, blockIndex }: { block: AssistantContentBlock; searchTarget?: boolean; result?: ToolResultMessage; duration?: number; isStreaming?: boolean; streamingDuration?: number; cwd?: string; onOpenFile?: (filePath: string, page?: number) => void; onOpenSubagent?: (sessionId: string, label: string) => void; onOpenReadSnapshot?: (toolCallId: string, snapshot: ReadSnapshot) => void; sessionId?: string; entryId?: string; blockIndex: number }) {
   if (block.type === "text") {
     return <div data-message-text data-search-target={searchTarget || undefined}><TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} /></div>;
   }
@@ -1035,13 +1039,10 @@ function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDur
     return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} />;
   }
   if (block.type === "toolCall") {
-    const tc = block as ToolCallContent;
-    const result = toolResults?.get(tc.toolCallId);
-    const duration = toolCallDurations?.get(tc.toolCallId);
-    return <ToolCallBlock block={tc} result={result} duration={duration} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} />;
+    return <ToolCallBlock block={block as ToolCallContent} result={result} duration={duration} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} />;
   }
   return null;
-}
+});
 
 function TextBlock({ block, isStreaming, cwd, onOpenFile }: { block: TextContent; isStreaming?: boolean; cwd?: string; onOpenFile?: (filePath: string, page?: number) => void }) {
   return <SafeMarkdownBody isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>{block.text}</SafeMarkdownBody>;
@@ -1151,7 +1152,7 @@ export function ThinkingBlock({ block, duration, isStreaming, cwd, onOpenFile, s
         <ThinkingIcon active={expanded} />
         {!expanded && (
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {preview ? <ReactMarkdown allowedElements={[]} unwrapDisallowed skipHtml>{preview}</ReactMarkdown> : "..."}
+            {preview || "..."}
           </span>
         )}
       </button>
@@ -1229,14 +1230,15 @@ function ToolCallBlock({ block, result, duration, cwd, onOpenFile, onOpenSubagen
     setToolCallExpanded(block.toolCallId, next);
     setExpanded(next);
   };
-  const inputStr = getToolCallInputText(block);
+  const inputStr = useMemo(() => getToolCallInputText(block), [block]);
   const isStreamingInput = block.rawInput !== undefined;
   const isEditTool = isEditToolName(block.toolName);
   const resultDiff = result && !result.isError ? getResultDiff(result) : null;
-  const patchFiles = getApplyPatchFiles(block, result);
-  const patchLabel = isApplyPatchToolName(block.toolName)
-    ? summarizeApplyPatchInput(block)
-    : null;
+  const patchFiles = useMemo(() => getApplyPatchFiles(block, result), [block, result]);
+  const patchLabel = useMemo(
+    () => (isApplyPatchToolName(block.toolName) ? summarizeApplyPatchInput(block) : null),
+    [block],
+  );
   // A script and the calls it made, instead of the input JSON. Streamed input is
   // still incomplete JSON and keeps the generic view.
   const codemodeCode = block.toolName === CODEMODE_TOOL_NAME && !isStreamingInput ? codemodeScript(block.input) : null;
@@ -1847,6 +1849,7 @@ function ResultImages({ images, isError }: { images: ImageContent[]; isError: bo
               src={src}
               alt=""
               loading="lazy"
+              decoding="async"
               style={{
                 display: "block",
                 maxWidth: "min(100%, 720px)",
