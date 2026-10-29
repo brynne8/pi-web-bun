@@ -266,18 +266,42 @@ const SLASH_SOURCE_ORDER: Record<SlashCommandSource, number> = {
   skill: 3,
 };
 
-function slashMatchRank(command: SlashCommandPaletteItem, query: string, t: (key: string) => string): number {
+// pi's TUI matches a skill by its bare name (pi-tui's
+// CombinedAutocompleteProvider), so `/copy` finds `skill:copy-text` by prefix;
+// the full `skill:<name>` still matches a query that spells the prefix.
+function slashMatchRank(command: SlashCommandPaletteItem, query: string): number {
   const name = command.name.toLowerCase();
-  const description = getSlashDescription(command, t).toLowerCase();
-  if (name === query) return 0;
-  if (name.startsWith(query)) return 1;
+  const bareName = command.source === "skill" && name.startsWith("skill:") ? name.slice("skill:".length) : name;
+  if (bareName === query || name === query) return 0;
+  if (bareName.startsWith(query) || name.startsWith(query)) return 1;
   if (name.includes(query)) return 2;
-  if (description.includes(query)) return 3;
-  return 4;
+  return 3;
 }
 
 function getSlashDescription(command: SlashCommandPaletteItem, t: (key: string) => string): string {
   return command.source === "builtin" ? t(command.description) : command.description ?? "";
+}
+
+/**
+ * The palette's matches for a lower-cased query. pi's TUI matches names only;
+ * the palette searches descriptions too, but only when no name matches, so
+ * `/copy` lists the built-in, not every skill whose description says "copy".
+ */
+export function filterSlashCommands(
+  commands: SlashCommandPaletteItem[],
+  query: string,
+  t: (key: string) => string,
+): SlashCommandPaletteItem[] {
+  const ranked = commands.map((command) => ({ command, rank: slashMatchRank(command, query) }));
+  const byName = ranked.filter(({ rank }) => rank < 3);
+  const matches = byName.length > 0
+    ? byName
+    : ranked.filter(({ command }) => getSlashDescription(command, t).toLowerCase().includes(query));
+  return matches
+    .sort((a, b) => a.rank - b.rank
+      || SLASH_SOURCE_ORDER[a.command.source] - SLASH_SOURCE_ORDER[b.command.source]
+      || TEXT_COLLATOR.compare(a.command.name, b.command.name))
+    .map(({ command }) => command);
 }
 
 // Skill slash commands are named "skill:<skillName>"; look the skill up in the
@@ -314,15 +338,9 @@ export function buildSlashCommandLayout(
   };
 }
 
-const CLIENT_IMAGE_COMPRESSION_THRESHOLD_BYTES = 1024 * 1024;
-const CLIENT_MAX_IMAGE_SIDE = 1024;
-const CLIENT_JPEG_QUALITY = 0.85;
-
-export function shouldCompressImageFile(file: Pick<File, "size" | "type">): boolean {
-  return file.size > CLIENT_IMAGE_COMPRESSION_THRESHOLD_BYTES && file.type !== "image/gif";
-}
-
-function readImageFile(file: Blob, mimeType: string): Promise<{ data: string; mimeType: string }> {
+// Attached images go to pi as they are: pi resizes prompt images itself, following
+// images.autoResize and the model's inputLimits.images.resize.
+export function readImageFile(file: Blob, mimeType: string): Promise<{ data: string; mimeType: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -336,34 +354,6 @@ function readImageFile(file: Blob, mimeType: string): Promise<{ data: string; mi
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
-}
-
-export async function compressImageFile(file: File): Promise<{ data: string; mimeType: string }> {
-  const original = () => readImageFile(file, file.type);
-  if (!shouldCompressImageFile(file) || typeof createImageBitmap !== "function") return original();
-
-  const bitmap = await createImageBitmap(file).catch(() => null);
-  if (!bitmap) return original();
-
-  try {
-    const scale = Math.min(1, CLIENT_MAX_IMAGE_SIDE / Math.max(bitmap.width, bitmap.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return original();
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const data = canvas.toDataURL("image/jpeg", CLIENT_JPEG_QUALITY).split(",")[1];
-    return data && data.length < Math.ceil(file.size / 3) * 4
-      ? { data, mimeType: "image/jpeg" }
-      : original();
-  } catch {
-    return original();
-  } finally {
-    bitmap.close();
-  }
 }
 
 function imageToDraftImage(image: AttachedImage): ChatDraftImage {
@@ -823,7 +813,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     try {
       const newImages = await Promise.all(
         imageFiles.map(async (file) => ({
-          ...await compressImageFile(file),
+          ...await readImageFile(file, file.type),
           previewUrl: URL.createObjectURL(file),
         }))
       );
@@ -970,18 +960,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       ? BUILTIN_SLASH_COMMANDS.filter((command) => command.availableWhileStreaming)
       : BUILTIN_SLASH_COMMANDS;
     const commands = [...builtinCommands, ...(slashCommands ?? [])];
-    return [...commands]
-      .filter((command) => {
-        const name = command.name.toLowerCase();
-        const description = getSlashDescription(command, t).toLowerCase();
-        return name.includes(slashQuery) || description.includes(slashQuery);
-      })
-      .sort((a, b) => {
-        const rankDelta = slashMatchRank(a, slashQuery, t) - slashMatchRank(b, slashQuery, t);
-        if (rankDelta !== 0) return rankDelta;
-        return SLASH_SOURCE_ORDER[a.source] - SLASH_SOURCE_ORDER[b.source]
-          || TEXT_COLLATOR.compare(a.name, b.name);
-      });
+    return filterSlashCommands(commands, slashQuery, t);
   })();
 
   const {
@@ -1585,7 +1564,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       disabled={builtinCommandPending}
       aria-busy={builtinCommandPending}
       style={{
-        flexShrink: 0,
+        // Never taller than the chat: a short window shrinks the queue first (#1428).
+        ...(compact ? { flexShrink: 0 } : { display: "flex", flexDirection: "column", minHeight: 0 }),
         minWidth: 0,
         margin: 0,
         border: 0,
@@ -1609,7 +1589,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           e.target.value = "";
         }}
       />}
-      <div style={{ maxWidth: "var(--chat-content-max-width, 820px)", margin: "0 auto" }}>
+      <div style={{ ...(compact ? undefined : { display: "flex", flexDirection: "column", minHeight: 0, width: "100%" }), maxWidth: "var(--chat-content-max-width, 820px)", margin: "0 auto" }}>
         <ModelErrorBanner error={modelError} />
         <ModelScopeWarningBanner warnings={modelScopeWarnings} />
         {showImageUnsupportedWarning && (() => {
@@ -1626,6 +1606,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         {/* Queued steering / follow-up messages (delivered by pi on upcoming turns) */}
         {((queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0)) > 0 && (
           <div style={{
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 72, // the header and one whole row
             marginBottom: 8,
             border: "1px solid var(--border)",
             borderRadius: 6,
@@ -1683,12 +1666,19 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 </button>
               )}
             </div>
-            {queuedMessages?.steering.map((text, i) => (
-              <QueuedMessageRow key={`steer-${i}`} kind="steer" text={text} />
-            ))}
-            {queuedMessages?.followUp.map((text, i) => (
-              <QueuedMessageRow key={`followup-${i}`} kind="follow-up" text={text} />
-            ))}
+            {/* Only the rows scroll: a long queue must not push the input and its buttons off screen (#1428). */}
+            <div style={{
+              maxHeight: "min(180px, calc(var(--app-viewport-height, 100dvh) * 0.25))",
+              overflowY: "auto",
+              overscrollBehavior: "contain",
+            }}>
+              {queuedMessages?.steering.map((text, i) => (
+                <QueuedMessageRow key={`steer-${i}`} kind="steer" text={text} />
+              ))}
+              {queuedMessages?.followUp.map((text, i) => (
+                <QueuedMessageRow key={`followup-${i}`} kind="follow-up" text={text} />
+              ))}
+            </div>
           </div>
         )}
         {/* Retry banner */}

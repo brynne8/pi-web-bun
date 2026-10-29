@@ -15,6 +15,11 @@ export interface ChatDraft {
 
 const drafts = new Map<string, ChatDraft>();
 
+/** Where a fresh composer's draft waits once the page leaves it; the next fresh composer in that cwd takes it back. */
+export function parkedNewSessionDraftKey(cwd: string): string {
+  return `parked-new:${cwd}`;
+}
+
 function cloneDraft(draft: ChatDraft): ChatDraft {
   return {
     value: draft.value,

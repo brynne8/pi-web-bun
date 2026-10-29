@@ -5,6 +5,7 @@ import { randomUUID } from "crypto";
 import { allowFileRoot } from "@/lib/file-access";
 import { invalidateSessionListCache } from "@/lib/session-reader";
 import { startRpcSession } from "@/lib/rpc-manager";
+import { cwdMissingBody } from "@/lib/missing-cwd";
 
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
@@ -37,7 +38,7 @@ export async function POST(req: Request) {
     }
     if (!existsSync(cwd)) {
       return NextResponse.json({
-        error: `Directory does not exist: ${cwd}`,
+        ...cwdMissingBody(cwd),
         ...(commandType === "prompt"
           ? { code: "prompt_rejected", accepted: false }
           : {}),

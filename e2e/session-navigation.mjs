@@ -70,8 +70,7 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     watch(tab);
     // A cold tab under `next dev` may wait on a compile.
     tab.setDefaultTimeout(60_000);
-    // A new tab starts on about:blank before it navigates to the link.
-    await tab.waitForURL((url) => url.href !== "about:blank", { waitUntil: "domcontentloaded" });
+    await tab.goto(target.url, { waitUntil: "domcontentloaded" });
     return tab;
   };
   const markDocument = (target) => target.evaluate(() => { window.__piNavMarker = "kept"; });

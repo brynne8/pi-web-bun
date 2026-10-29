@@ -12,7 +12,7 @@ test("the source view renders and highlights a window, never every line", () => 
   const viewer = file.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "TextFileViewer");
   const calculations = viewer.body.statements.filter((node) =>
     ts.isVariableStatement(node) && node.declarationList.declarations.some((declaration) =>
-      ["isDelimitedTable", "viewerContent", "sourceLines", "language", "isHtml", "isMarkdown", "hasPreview", "effectiveDisplayMode", "showingSource"].includes(declaration.name.getText(file)),
+      ["isBinary", "isDelimitedTable", "viewerContent", "sourceLines", "language", "isHtml", "isMarkdown", "hasPreview", "effectiveDisplayMode", "showingSource"].includes(declaration.name.getText(file)),
     ),
   ).map((node) => node.getText(file)).join("\n");
   const { outputText } = ts.transpileModule(`

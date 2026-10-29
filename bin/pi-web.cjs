@@ -26,11 +26,13 @@ const { stripPrerenderSecret, getStripWarning } = require("./vinext-secrets.cjs"
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { findVinextCli } = require("./vinext-cli.cjs");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { openInBrowser } = require("./browser-opener.cjs");
+const { openWhenServing } = require("./browser-opener.cjs");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { createRunRecordTracker, getOpenUrl, getRunDir, isServerAnswering } = require("./run-records.cjs");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { getPackageVersion, runCommand } = require("./pi-web-commands.cjs");
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { formatReachableAddresses } = require("./network-addresses.cjs");
 
 const READY_POLL_MS = 200;
 
@@ -134,6 +136,10 @@ function startServer({ port, hostname, openBrowser }) {
 
   child.stdout.on("data", (chunk) => process.stdout.write(chunk));
 
+  // vinext repeats no `-H` value of its own, but a wildcard bind still routes
+  // nowhere: name the interfaces and their addresses instead.
+  const reachable = formatReachableAddresses(hostname, port);
+
   // `vinext start` has no "Ready" line, so readiness is the server answering.
   // A browser on this machine reaches a wildcard bind through loopback.
   if (port !== "0") {
@@ -145,7 +151,8 @@ function startServer({ port, hostname, openBrowser }) {
       serverReady = true;
       clearInterval(readyTimer);
       runRecord.markReady();
-      if (openBrowser) openInBrowser(url);
+      if (reachable) process.stdout.write(`${reachable}\n`);
+      if (openBrowser) openWhenServing({ hostname, port, url });
     }, READY_POLL_MS);
     readyTimer.unref();
     child.once("exit", () => clearInterval(readyTimer));

@@ -108,7 +108,7 @@ export interface SettledReportSinkDependencies {
 
 export interface SettledReportSink {
   /** Hand a settled report to its parent, appending it to the batch already in the queue. */
-  deliver(sessionId: string, report: SettledReport): Promise<void>;
+  deliver(sessionId: string, report: SettledReport, onSent?: () => void): Promise<void>;
   /**
    * Take a report back because its parent already collected the result: it leaves the batch and
    * the pending index, and a batch left empty is taken out of pi's queue.
@@ -145,8 +145,8 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
   }
 
   /** Queue the batch, appended in place, as one follow-up: only the first attempt may start a turn. */
-  async function sendNote(parent: SettledReportParent, note: SettledReportNote, retry: boolean): Promise<void> {
-    await parent.inner.sendCustomMessage({
+  async function sendNote(parent: SettledReportParent, note: SettledReportNote, retry: boolean, onSent?: () => void): Promise<void> {
+    const sending = parent.inner.sendCustomMessage({
       customType: SETTLED_REPORTS_CUSTOM_TYPE,
       content: note.blocks,
       display: true,
@@ -156,6 +156,10 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
         reports: note.reports,
       },
     }, { deliverAs: "followUp", triggerTurn: !retry });
+    // pi marks its run active inside the send, before this promise settles with the
+    // turn: the caller's "the parent's own run stands for this now" check goes here.
+    onSent?.();
+    await sending;
   }
 
   /** A run started between the state check and the send; the parent is streaming, not broken. */
@@ -236,10 +240,10 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
    * Deliver the batch, retrying a busy parent on the backoff schedule. Any other failure, and a
    * busy parent that never clears, is dead-lettered; the error is rethrown so the caller logs it.
    */
-  async function deliverBatch(parent: SettledReportParent, sessionId: string, note: SettledReportNote): Promise<void> {
+  async function deliverBatch(parent: SettledReportParent, sessionId: string, note: SettledReportNote, onSent?: () => void): Promise<void> {
     for (let attempt = 1; attempt <= DELIVERY_MAX_ATTEMPTS; attempt++) {
       try {
-        await sendNote(parent, note, attempt > 1);
+        await sendNote(parent, note, attempt > 1, onSent);
         return;
       } catch (error) {
         if (!isBusy(error) || attempt === DELIVERY_MAX_ATTEMPTS) {
@@ -280,7 +284,7 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
    * has already taken a batch pi still holds back out of that queue, so this cannot queue it twice.
    * A send that fails leaves the note as it is and the next report tries again.
    */
-  async function resendDroppedNote(sessionId: string, parent: SettledReportParent, note: SettledReportNote): Promise<void> {
+  async function resendDroppedNote(sessionId: string, parent: SettledReportParent, note: SettledReportNote, onSent?: () => void): Promise<void> {
     if (note.parent !== parent) {
       // The wrapper the batch was queued on is gone and its queue went with it, so the append, and
       // the freeze that follows it, will happen on this one.
@@ -290,7 +294,7 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
     }
     try {
       // Not a retry: a batch that never landed still owes the parent the turn it was meant to wake.
-      await sendNote(parent, note, false);
+      await sendNote(parent, note, false, onSent);
       note.requeued++;
     } catch {
       // The parent refused even a queued message, so nothing was handed over: the count stays as it
@@ -299,7 +303,7 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
   }
 
   return {
-    async deliver(sessionId, report) {
+    async deliver(sessionId, report, onSent) {
       const parent = await resolveParent(sessionId);
       if (!parent) return;
       let note = notes.get(sessionId);
@@ -318,7 +322,7 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
             abandonNote(sessionId, note);
             note = undefined;
           } else {
-            await resendDroppedNote(sessionId, parent, note);
+            await resendDroppedNote(sessionId, parent, note, onSent);
           }
         }
       }
@@ -350,7 +354,7 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
       if (note.queued) return;
       note.queued = true;
       try {
-        await deliverBatch(parent, sessionId, note);
+        await deliverBatch(parent, sessionId, note, onSent);
       } catch (error) {
         // The batch never reached pi's queue, so a later report must open a fresh note rather
         // than append to a message that will never be sent.

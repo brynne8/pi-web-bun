@@ -131,7 +131,7 @@ test("a turn's footer is the turn's, rendered once where the turn ends", () => {
   // The numbers are the turn's: every request the tool loop made, summed.
   assert.match(source, /const turnUsage = getTurnUsage\(messages, userIdx, endIdx\)/);
   assert.match(messageSource, /const showsTurnFooter = !isTurnPart;/);
-  assert.match(messageSource, /\{showsTurnFooter && message\.usage && !isStreaming && \(/);
+  assert.match(messageSource, /\{showsTurnFooter && stats\.length > 0 && !isStreaming && \(/);
   assert.match(messageSource, /\{textContent && showsTurnFooter && !isStreaming && \(/);
 });
 

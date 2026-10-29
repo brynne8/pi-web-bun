@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { createRequire } from "node:module";
 import { realpathSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
 
 // A fresh composer's first send, with the user switching to another session at
@@ -21,7 +21,7 @@ for (const id of ["./useAgentSession.ts"]) {
   delete nodeRequire.cache[realpathSync(fileURLToPath(new URL(id, import.meta.url)))];
 }
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true, tryNative: false, alias: { react: shimPath } });
-const { renderHook } = await import(shimPath);
+const { renderHook } = await import(pathToFileURL(shimPath).href);
 const { useAgentSession } = await jiti.import("./useAgentSession.ts");
 
 // These stand-ins outlive the file under a runner that keeps one process for the whole

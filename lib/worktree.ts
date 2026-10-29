@@ -250,23 +250,19 @@ async function getRepoRoot(cwd: string): Promise<string> {
   return realPathOrSelf(repoRootFromCommonDir(toNativePath(commonDir)));
 }
 
-export async function listWorktrees(cwd: string): Promise<WorktreeInfo[]> {
+/** Every worktree git has registered, `missing` when it is prunable or its folder is gone. */
+async function listRegisteredWorktrees(cwd: string): Promise<{ path: string; branch: string | null; missing: boolean }[]> {
   const out = await git(cwd, ["worktree", "list", "--porcelain"]);
-  const worktrees: WorktreeInfo[] = [];
-  let current: (Partial<WorktreeInfo> & { prunable?: boolean }) | null = null;
+  const worktrees: { path: string; branch: string | null; missing: boolean }[] = [];
+  let current: { path: string; branch?: string; prunable?: boolean } | null = null;
 
   const flush = () => {
     if (current?.path) {
-      // Prunable worktrees point at missing/broken gitdirs and cannot be
-      // browsed or selected usefully. Also skip vanished paths even if git has
-      // not marked them prunable yet.
-      if (!current.prunable && existsSync(current.path)) {
-        worktrees.push({
-          path: current.path,
-          branch: current.branch ?? null,
-          isMain: worktrees.length === 0,
-        });
-      }
+      worktrees.push({
+        path: current.path,
+        branch: current.branch ?? null,
+        missing: current.prunable === true || !existsSync(current.path),
+      });
     }
     current = null;
   };
@@ -287,6 +283,15 @@ export async function listWorktrees(cwd: string): Promise<WorktreeInfo[]> {
   return worktrees;
 }
 
+export async function listWorktrees(cwd: string): Promise<WorktreeInfo[]> {
+  // Prunable worktrees point at missing/broken gitdirs and cannot be browsed
+  // or selected usefully. Also skip vanished paths even if git has not marked
+  // them prunable yet.
+  return (await listRegisteredWorktrees(cwd))
+    .filter((worktree) => !worktree.missing)
+    .map(({ path, branch }, index) => ({ path, branch, isMain: index === 0 }));
+}
+
 function findWorktreeByPath(worktrees: readonly WorktreeInfo[], candidate: string): WorktreeInfo | undefined {
   return worktrees.find((worktree) => samePath(worktree.path, candidate));
 }
@@ -299,6 +304,19 @@ function sanitizeBranchForDir(branch: string): string {
   return branch.replace(/[\/\\:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
+/**
+ * A branch git will not check out twice: it is the branch of another worktree.
+ * `missing`: that worktree's folder is gone, and git keeps the branch until
+ * `git worktree prune` clears the entry (never run here).
+ */
+export class WorktreeBranchInUseError extends Error {
+  constructor(readonly branch: string, readonly worktreePath: string, readonly missing: boolean) {
+    super(missing
+      ? `Branch '${branch}' belongs to a worktree whose folder is gone: ${worktreePath}; git worktree prune clears it`
+      : `Branch '${branch}' is already checked out at ${worktreePath}`);
+  }
+}
+
 export async function addWorktree(cwd: string, branch: string): Promise<{ path: string; branch: string }> {
   const trimmed = branch.trim();
   if (!trimmed) throw new Error("Branch name is required");
@@ -307,6 +325,11 @@ export async function addWorktree(cwd: string, branch: string): Promise<{ path: 
   if (!dirName) throw new Error(`Invalid branch name: ${branch}`);
 
   const repoRoot = await getRepoRoot(cwd);
+  // Before the folder check: a branch pi-web already made a worktree for also
+  // has its folder, and the answer is where that checkout is, not the folder.
+  // Missing entries too: a deleted folder's entry still holds the branch.
+  const holder = (await listRegisteredWorktrees(repoRoot)).find((worktree) => worktree.branch === trimmed);
+  if (holder) throw new WorktreeBranchInUseError(trimmed, holder.path, holder.missing);
   const baseDir = `${resolve(repoRoot)}-worktrees`;
   const worktreePath = join(baseDir, dirName);
   if (existsSync(worktreePath)) {

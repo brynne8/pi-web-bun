@@ -9,7 +9,7 @@ import {
   invalidateSessionManagerCache,
   buildSessionContext,
 } from "@/lib/session-reader";
-import { getRpcSession } from "@/lib/rpc-manager";
+import { getRpcSession, renameRpcSession, subagentDisplayStatus } from "@/lib/rpc-manager";
 import { projectTreeForResponse, toSummaryTree } from "@/lib/project-tree";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
 import { computeSessionStats } from "@/lib/session-stats";
@@ -129,7 +129,7 @@ export async function GET(
         : "(no messages)",
       parentSessionId,
       ...(subagent
-        ? { relation: { kind: "subagent" as const, parentSessionId: subagent.parentSessionId, profile: subagent.profile, description: subagent.description, status: liveRpc?.isRunning() ? "running" as const : subagent.status } }
+        ? { relation: { kind: "subagent" as const, parentSessionId: subagent.parentSessionId, profile: subagent.profile, description: subagent.description, status: subagentDisplayStatus(header.id, subagent.status) } }
         : header.parentSession
           ? { relation: { kind: "fork" as const, ...(parentSessionId ? { originSessionId: parentSessionId } : {}) } }
           : {}),
@@ -186,17 +186,21 @@ export async function PATCH(
       return NextResponse.json({ error: "name is required" }, { status: 400 });
     }
     const filePath = await resolveSessionPath(id);
-    if (!filePath) {
+    const trimmed = name.trim();
+    // A session a wrapper holds is renamed in it, never on disk behind its back (#1388).
+    const renamed = await renameRpcSession(id, trimmed, () => {
+      if (!filePath) return false;
+      // No wrapper: appendSessionInfo on a fresh manager, bypassing the cache.
+      const sm = openSessionManager(filePath, { mutable: true });
+      sm.appendSessionInfo(trimmed);
+      appendSessionNameSource(sm, trimmed, "user");
+      invalidateSessionManagerCache(filePath);
+      invalidateSessionListCache();
+      return true;
+    });
+    if (!renamed) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
-
-    // PATCH writes via appendSessionInfo — open fresh, bypassing the cache.
-    const sm = openSessionManager(filePath, { mutable: true });
-    const trimmed = name.trim();
-    sm.appendSessionInfo(trimmed);
-    appendSessionNameSource(sm, trimmed, "user");
-    invalidateSessionManagerCache(filePath);
-    invalidateSessionListCache();
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

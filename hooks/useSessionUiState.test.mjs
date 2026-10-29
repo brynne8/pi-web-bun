@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { createRequire } from "node:module";
 import { realpathSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
 
 // The hook runs against the React stand-in and a scripted fetch: each request
@@ -18,7 +18,7 @@ for (const id of ["./useSessionUiState.ts"]) {
   delete nodeRequire.cache[realpathSync(fileURLToPath(new URL(id, import.meta.url)))];
 }
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true, tryNative: false, alias: { react: shimPath } });
-const { renderHook } = await import(shimPath);
+const { renderHook } = await import(pathToFileURL(shimPath).href);
 const { useSessionUiState } = await jiti.import("./useSessionUiState.ts");
 
 const answers = [];

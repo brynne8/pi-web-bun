@@ -1,6 +1,7 @@
 "use client";
 
-import { memo, useState, useRef, useEffect, useMemo } from "react";
+import { Fragment, memo, useState, useRef, useEffect, useMemo, type CSSProperties } from "react";
+import ReactMarkdown from "react-markdown";
 import { MarkdownBody } from "./MarkdownBody";
 import { ImagePreview } from "./ImagePreview";
 import { ThinkingIcon } from "./ThinkingIcon";
@@ -15,19 +16,20 @@ import { isApplyPatchToolName, isEditToolName, isShellToolName } from "@/lib/too
 import { readSnapshotOfCall, type ReadSnapshot } from "@/lib/read-snapshot";
 import { isToolCallExpanded, setToolCallExpanded } from "@/lib/tool-call-expansion";
 import { isThinkingExpandedByDefault, THINKING_EXPANDED_EVENT } from "@/lib/thinking-expansion-preference";
-import { skillExpansionToCommand } from "@/lib/slash-display";
+import { skillExpansionContent, skillExpansionToCommand } from "@/lib/slash-display";
 import type { SubagentToolDetails } from "@/lib/subagent-extension";
 import { CODEMODE_TOOL_NAME, codemodeCalls, codemodeScript, codemodeScriptPreview, stripCodemodeHeader } from "@/lib/codemode-view";
 import { CodemodeCallList } from "./CodemodeToolView";
 import { BashCommand } from "./BashCommand";
 import { KeyValueTable } from "./KeyValueTable";
 import { toolFieldsOfInput } from "@/lib/tool-fields";
+import { parseStreamingJson } from "@earendil-works/pi-ai/utils/json-parse";
 import { mcpToolLabel, prettyMcpResultText } from "@/lib/mcp-tool-display";
 import { BgTaskNotificationView } from "./BgTaskNotificationView";
 import { BG_TASK_NOTIFICATION_CUSTOM_TYPE, stripBgTaskNotificationPrefix } from "@/lib/bg-task-notification";
 import { stripSubagentNotificationPrefix } from "@/lib/subagent-notification";
 import { streamRateKey, streamRateStart, streamTokensPerSecond, type StreamRateStart } from "@/lib/stream-token-rate";
-import { getTranscriptNotices } from "@/lib/transcript-notices";
+import { formatNoticeTokens, getTranscriptNotices } from "@/lib/transcript-notices";
 import { TRANSCRIPT_NOTICE_WARNING_COLOR, transcriptNoticeText } from "@/components/TranscriptNotices";
 import type {
   AgentMessage,
@@ -510,7 +512,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                 )}
               </div>
               {expanded && (
-                <MarkdownBody className="markdown-user-message" keepLineBreaks cwd={cwd} onOpenFile={onOpenFile}>{content}</MarkdownBody>
+                <MarkdownBody className="markdown-user-message" keepLineBreaks cwd={cwd} onOpenFile={onOpenFile}>{skillExpansionContent(content) ?? content}</MarkdownBody>
               )}
             </div>
           ) : (
@@ -846,6 +848,8 @@ function AssistantMessageView({
   // sentence in the middle of it. `TurnFooter` renders once at the turn's end.
   const showsTurnFooter = !isTurnPart;
 
+  const stats = message.usage ? formatUsage(message.usage) : [];
+
   const copyContent = () => {
     copyText(textContent).then(() => {
       setCopied(true);
@@ -981,12 +985,13 @@ function AssistantMessageView({
       <div style={{
         display: "flex", alignItems: "center", gap: 8, marginTop: 4,
       }}>
-        {/* Usage is per stored request, and pi-web saves one assistant entry per
-            tool call: shown on every part it is a row of token counts repeating
-            down the turn. It belongs with the rest of the turn's footer. */}
-        {showsTurnFooter && message.usage && !isStreaming && (
-          <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
-            {formatUsage(message.usage)}
+        {showsTurnFooter && stats.length > 0 && !isStreaming && (
+          // One item per count: a single space at 11px ran them together. The
+          // spaces stay in the text for copying; the flex gap draws the room.
+          <div style={{ display: "flex", flexWrap: "wrap", columnGap: 7, fontSize: 11, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
+            {stats.map((part, index) => (
+              <Fragment key={index}>{index > 0 && " "}<UsagePart part={part} /></Fragment>
+            ))}
           </div>
         )}
         {textContent && showsTurnFooter && !isStreaming && (
@@ -1152,7 +1157,7 @@ export function ThinkingBlock({ block, duration, isStreaming, cwd, onOpenFile, s
         <ThinkingIcon active={expanded} />
         {!expanded && (
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {preview || "..."}
+            {preview ? <ReactMarkdown allowedElements={[]} unwrapDisallowed skipHtml>{preview}</ReactMarkdown> : "..."}
           </span>
         )}
       </button>
@@ -1234,6 +1239,8 @@ function ToolCallBlock({ block, result, duration, cwd, onOpenFile, onOpenSubagen
   const isStreamingInput = block.rawInput !== undefined;
   const isEditTool = isEditToolName(block.toolName);
   const resultDiff = result && !result.isError ? getResultDiff(result) : null;
+  const resultDiffText = resultDiff?.text;
+  const resultPatchPath = useMemo(() => singlePatchPath(resultDiffText), [resultDiffText]);
   const patchFiles = useMemo(() => getApplyPatchFiles(block, result), [block, result]);
   const patchLabel = useMemo(
     () => (isApplyPatchToolName(block.toolName) ? summarizeApplyPatchInput(block) : null),
@@ -1256,14 +1263,15 @@ function ToolCallBlock({ block, result, duration, cwd, onOpenFile, onOpenSubagen
   // needs the card expanded to be seen.
   const shellBackground = shellInput?.run_in_background === true;
 
-  // Flat arguments read as facts instead of as a JSON blob: a read's path and span, a
+  // Flat arguments read as facts instead of as JSON: a read's path and span, a
   // write's path next to its text, a subagent's profile and prompt. Tools with a view of
   // their own keep it, and one nested value — an `edit`'s `edits[]`, an MCP argument
   // holding an object — takes the whole card back to the JSON, since a row that drops a
-  // subtree hides an argument. See `lib/tool-fields.ts`.
+  // subtree hides an argument. See `lib/tool-fields.ts`. Input still streaming goes
+  // through pi's own partial parse, the arguments its TUI draws live.
   const toolFields =
-    !isStreamingInput && codemode === null && patchFiles === null && shellCommand === null
-      ? toolFieldsOfInput(block.input)
+    codemode === null && patchFiles === null && shellCommand === null
+      ? toolFieldsOfInput(isStreamingInput ? parseStreamingJson(block.rawInput) : block.input)
       : null;
 
   // `server/tool` instead of the registered `mcp__server__tool`, as pi's TUI shows it.
@@ -1345,7 +1353,7 @@ function ToolCallBlock({ block, result, duration, cwd, onOpenFile, onOpenSubagen
               ? t("chat.generatingToolInput")
               : shellCommand !== null
                 ? <BashCommand command={shellCommand} limit={TOOL_PREVIEW_LENGTH} />
-                : (patchLabel ?? (codemode ? codemodeScriptPreview(codemode.code) : getToolPreview(block)))}
+                : (patchLabel ?? (codemode ? codemodeScriptPreview(codemode.code) : getToolPreview(block, resultPatchPath)))}
           </span>
           {shellBackground && (
             <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>(background)</span>
@@ -1817,6 +1825,13 @@ function getResultDiff(result: ToolResultMessage): ResultDiff | null {
   if (diff) return { text: diff };
 
   return null;
+}
+
+/** The file a result's patch changed, when it changed exactly one. */
+function singlePatchPath(text: string | undefined): string | null {
+  if (!text) return null;
+  const files = parseUnifiedPatch(text);
+  return files?.length === 1 ? stackedFilePath(files[0]) || null : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -2333,7 +2348,7 @@ export function getCustomMessagePreview(text: string): string {
 }
 
 
-function getToolPreview(block: ToolCallContent): string {
+function getToolPreview(block: ToolCallContent, resultPatchPath: string | null): string {
   const input = block.input;
   if (!input || typeof input !== "object") return "";
   const keys = Object.keys(input);
@@ -2343,6 +2358,7 @@ function getToolPreview(block: ToolCallContent): string {
   if ("command" in input) return String(input.command).slice(0, TOOL_PREVIEW_LENGTH);
   if ("path" in input) return String(input.path).slice(0, TOOL_PREVIEW_LENGTH);
   if ("file_path" in input) return String(input.file_path).slice(0, TOOL_PREVIEW_LENGTH);
+  if (resultPatchPath) return resultPatchPath.slice(0, TOOL_PREVIEW_LENGTH);
   if ("pattern" in input) return String(input.pattern).slice(0, TOOL_PREVIEW_LENGTH);
   if ("query" in input) return String(input.query).slice(0, TOOL_PREVIEW_LENGTH);
 
@@ -2356,17 +2372,69 @@ export function formatUsage(usage: {
   cacheRead: number;
   cacheWrite: number;
   cost: { total: number };
-}): string {
-  const parts = [];
-  if (usage.input) parts.push(`${usage.input.toLocaleString()} in`);
-  if (usage.output) parts.push(`${usage.output.toLocaleString()} out`);
-  if (usage.cacheRead) parts.push(`${usage.cacheRead.toLocaleString()} cache R`);
-  if (usage.cacheWrite) parts.push(`${usage.cacheWrite.toLocaleString()} cache W`);
-  if (usage.cost?.total) parts.push(`$${usage.cost.total.toFixed(4)}`);
-  return parts.join(" · ");
+}): StatPart[] {
+  // pi's TUI footer: ↑1.2k ↓567 R8.9k W12, with its formatTokens().
+  const parts: StatPart[] = [];
+  if (usage.input) parts.push({ icon: "up", before: "↑", text: formatNoticeTokens(usage.input) });
+  if (usage.output) parts.push({ icon: "down", before: "↓", text: formatNoticeTokens(usage.output) });
+  if (usage.cacheRead) parts.push({ text: `R${formatNoticeTokens(usage.cacheRead)}` });
+  if (usage.cacheWrite) parts.push({ text: `W${formatNoticeTokens(usage.cacheWrite)}` });
+  if (usage.cost?.total) parts.push({ text: `$${usage.cost.total.toFixed(4)}` });
+  return parts;
+}
+
+// "took 12s" as a clock and "12s": the words around the time stay as hidden
+// text, wherever the language puts them.
+/** One count of the stats line; `before`/`after` are copied and read aloud, not shown. */
+export interface StatPart {
+  text: string;
+  icon?: "up" | "down" | "clock";
+  before?: string;
+  after?: string;
+}
+
+const STAT_ICON_PATHS = {
+  up: "M6 10.5V1.5M2.5 5 6 1.5 9.5 5",
+  down: "M6 1.5v9M2.5 7 6 10.5 9.5 7",
+  clock: "M6 1.25a4.75 4.75 0 1 0 0 9.5 4.75 4.75 0 1 0 0-9.5M6 3.5V6l1.75 1",
+};
+
+// Unseen but still text: font-size 0 stays in a copied selection, where a
+// zero-width overflow box drops it and sr-only's absolute box adds a line break.
+const HIDDEN_STAT_TEXT: CSSProperties = { fontSize: 0 };
+
+// ↑ and ↓ come from whatever font has them: Segoe UI or a CJK fallback on
+// Windows draws them small, heavy or off the baseline. The icons are drawn
+// here instead; their text stays, zero-width, for copying and screen readers.
+// Everything stays inline: a block or flex box would copy as a line break
+// between the icon and its count.
+export function UsagePart({ part }: { part: StatPart }) {
+  if (!part.icon) return <span>{part.text}</span>;
+  return (
+    <span>
+      {part.before && <span style={HIDDEN_STAT_TEXT}>{part.before}</span>}
+      <svg
+        width={part.icon === "clock" ? 10 : 9}
+        height={part.icon === "clock" ? 10 : 9}
+        viewBox="0 0 12 12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+        style={{ display: "inline", verticalAlign: part.icon === "clock" ? "-0.1em" : "-0.05em", marginRight: part.icon === "clock" ? 3 : 1 }}
+      >
+        <path d={STAT_ICON_PATHS[part.icon]} />
+      </svg>
+      {part.text}
+      {part.after && <span style={HIDDEN_STAT_TEXT}>{part.after}</span>}
+    </span>
+  );
 }
 
 function BashExecutionView({ message, sessionId }: { message: BashExecutionMessage; sessionId?: string }) {
+  const { t } = useI18n();
   const [fullOutput, setFullOutput] = useState<string | null>(null);
   const [loadingFull, setLoadingFull] = useState(false);
   const [fullError, setFullError] = useState<string | null>(null);
@@ -2430,14 +2498,14 @@ function BashExecutionView({ message, sessionId }: { message: BashExecutionMessa
               disabled={loadingFull}
               style={{ background: "none", border: "none", color: "var(--accent)", cursor: loadingFull ? "default" : "pointer", fontSize: 11, padding: 0, textDecoration: "underline" }}
             >
-              {loadingFull ? "loading…" : "view full output"}
+              {loadingFull ? t("chat.loadingFullOutput") : t("chat.viewFullOutput")}
             </button>
           )}
           <a
             href={`${fullOutputUrl}&download=1`}
             style={{ marginLeft: showFullButton ? 10 : 0, color: "var(--accent)", fontSize: 11, textDecoration: "underline" }}
           >
-            download full output
+            {t("chat.downloadFullOutput")}
           </a>
           {fullError && <span style={{ marginLeft: 6, color: "var(--text-dim)", fontSize: 11 }}>({fullError})</span>}
         </div>

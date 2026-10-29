@@ -9,8 +9,11 @@ import { configureHttpDispatcher, readHttpIdleTimeoutMs } from "@/lib/http-dispa
 import { closeAllAgentEventStreams } from "@/lib/agent-event-stream";
 import { onServerShutdown } from "@/lib/server-shutdown";
 import { pruneBgLogs } from "@/lib/bash-bg-tasks";
+import { applyCodemodeWorkerDefault } from "@/lib/codemode-workers";
 
 export function registerNodeInstrumentation(): void {
+  // Before any session can run a codemode script (lib/codemode-workers.ts).
+  applyCodemodeWorkerDefault();
   // Which of the shim's two ways in a consumer of `node:fs/promises` actually
   // got, on the first line of the server's log. The patch and the hook are both
   // already installed by the import above; this only reports them.
@@ -37,7 +40,8 @@ export function registerNodeInstrumentation(): void {
   // Next evaluates a route's code on its first request, so the first
   // /api/sessions used to pay for importing the whole pi SDK, seconds on
   // Windows (#964). Start that import now, unawaited so register() stays fast:
-  // it overlaps the browser opening, and the routes reuse Node's cached module.
+  // the launcher opens the browser only once the first page is served, after
+  // it (bin/browser-opener.js), and the routes reuse Node's cached module.
   // A failure is left for the routes' own import to report.
   import("@earendil-works/pi-coding-agent").catch(() => {});
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { realpathSync } from "node:fs";
 import { createJiti } from "jiti";
@@ -19,7 +19,7 @@ for (const id of ["./useResizablePanel.ts", "../lib/panel-layout.ts"]) {
   delete nodeRequire.cache[realpathSync(fileURLToPath(new URL(id, import.meta.url)))];
 }
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true, tryNative: false, alias: { react: shimPath } });
-const { renderHook } = await import(shimPath);
+const { renderHook } = await import(pathToFileURL(shimPath).href);
 const { useResizablePanel } = await jiti.import("./useResizablePanel.ts");
 
 function emitter(extra = {}) {

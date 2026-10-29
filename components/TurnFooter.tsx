@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { formatTurnDuration } from "@/lib/turn-duration";
-import { formatTime, formatUsage } from "./MessageView";
+import { formatTime, formatUsage, UsagePart, type StatPart } from "./MessageView";
 import { TurnWrittenFiles } from "./TurnWrittenFiles";
 import type { WrittenFile } from "@/lib/turn-written-files";
 import type { AssistantMessage } from "@/lib/types";
@@ -31,11 +31,11 @@ export function TurnFooter({ usage, timestamp, durationMs, text, writtenFiles = 
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const [hovered, setHovered] = useState(false);
-  const usageText = usage ? formatUsage(usage) : "";
+  const usageParts: StatPart[] = usage ? formatUsage(usage) : [];
   const durationText = durationMs !== undefined ? t("chat.turnDuration", { time: formatTurnDuration(durationMs) }) : "";
   const timeText = formatTime(timestamp);
   // A time on its own is no footer: a turn with nothing else about it shows nothing.
-  if (!usageText && !durationText && !text && writtenFiles.length === 0) return null;
+  if (usageParts.length === 0 && !durationText && !text && writtenFiles.length === 0) return null;
 
   const copy = () => {
     copyText(text ?? "").then(() => {
@@ -57,8 +57,14 @@ export function TurnFooter({ usage, timestamp, durationMs, text, writtenFiles = 
     >
       {writtenFiles.length > 0 && <TurnWrittenFiles files={writtenFiles} onOpenFile={onOpenFile} />}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-        {usageText && (
-          <div style={{ fontSize: 11, color: "var(--text-dim)" }}>{usageText}</div>
+        {usageParts.length > 0 && (
+          // One item per count: a single space at 11px ran them together. The
+          // spaces stay in the text for copying; the flex gap draws the room.
+          <div style={{ display: "flex", flexWrap: "wrap", columnGap: 7, fontSize: 11, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
+            {usageParts.map((part, index) => (
+              <Fragment key={index}>{index > 0 && " "}<UsagePart part={part} /></Fragment>
+            ))}
+          </div>
         )}
         {durationText && (
           <div style={{ fontSize: 11, color: "var(--text-dim)" }}>{durationText}</div>

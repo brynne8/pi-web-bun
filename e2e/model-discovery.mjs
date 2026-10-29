@@ -17,7 +17,7 @@ const DISCOVERY_ROUTE = "**/api/models-config/discover";
 export async function installModelDiscoveryStub(page) {
   const config = { providers: {
     anthropic: { models: [{ id: "claude-existing" }] },
-    relay: { baseUrl: "https://example.invalid/v1", api: "openai-responses", models: [{ id: "relay-existing" }] },
+    relay: { baseUrl: "https://example.invalid/v1", api: "openai-responses", models: [{ id: "relay-existing", name: "Relay Existing" }] },
   } };
   const stub = { discoveries: [], saved: undefined };
   await page.route(CONFIG_ROUTE, (route) => {
@@ -42,6 +42,9 @@ export async function checkModelDiscovery(page, stub) {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     const settings = page.getByRole("dialog", { name: "Settings", exact: true });
     await settings.getByRole("button", { name: "Models", exact: true }).click();
+    const modelRows = settings.locator(".models-sidebar-indented-item");
+    await modelRows.filter({ hasText: /^claude-existing$/ }).waitFor(); // a model without a name is listed by its id
+    assert.equal(await modelRows.filter({ hasText: /^Relay Existing$/ }).count(), 1, "A model is listed by its models.json name");
     await settings.locator(".config-sidebar-item").filter({ hasText: /^anthropic$/ }).click();
     const api = settings.locator(".config-field-label").filter({ hasText: /^API$/ }).locator("..").locator("select");
     assert.equal(await api.inputValue(), "", "A missing protocol stays unspecified in the editor");

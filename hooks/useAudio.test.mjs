@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { createRequire } from "node:module";
 import { realpathSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
 
 // The hook runs against a stand-in for React's hooks, mocked timers and a fake
@@ -17,7 +17,7 @@ const shimPath = fileURLToPath(new URL("./__fixtures__/react-hook-shim.mjs", imp
 const nodeRequire = createRequire(import.meta.url);
 delete nodeRequire.cache[realpathSync(fileURLToPath(new URL("./useAudio.ts", import.meta.url)))];
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true, tryNative: false, alias: { react: shimPath } });
-const { renderHook } = await import(shimPath);
+const { renderHook } = await import(pathToFileURL(shimPath).href);
 const { AUDIO_IDLE_SUSPEND_MS, AUDIO_STALE_CHIME_MS, useAudio } = await jiti.import("./useAudio.ts");
 
 const node = () => ({ connect() {}, start() {}, stop() {}, frequency: {}, gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} } });

@@ -43,22 +43,22 @@ test("keeps the session event stream open through the idle grace window", () => 
   assert.match(source, /const EVENT_STREAM_IDLE_GRACE_MS = 30_000/);
   assert.match(graceSource, /setTimeout\(\(\) => void checkServerIdle\(\), EVENT_STREAM_IDLE_GRACE_MS\)/);
   assert.match(graceSource, /fetch\(agentStatusUrl\(sid\)\)/);
-  assert.match(graceSource, /closeEvents\(\)/);
+  assert.match(graceSource, /closeEvents\("grace_end"\)/);
   assert.match(finishSource, /scheduleEventStreamClose\(sid\)/);
   assert.doesNotMatch(finishSource, /closeEvents\(\)/);
   assert.doesNotMatch(agentEndSource, /closeEvents\(\)/);
   assert.match(agentStartSource, /cancelEventStreamGrace\(\)/);
   assert.match(agentSettledSource, /scheduleEventStreamClose\(sid\)/);
   // A stopped run ends quietly: the event says so (pi 1.1's agent_settled.aborted, carried on prompt_done).
-  assert.match(agentSettledSource, /onAgentEnd\?\.\(\{ aborted: event\.aborted === true \}\)/);
-  assert.match(promptDoneSource, /notifyPromptStage\(runId, event\.aborted === true\)/);
+  assert.match(agentSettledSource, /onAgentEnd\?\.\(\{ aborted: event\.aborted === true, \.\.\.\(event\.subagentsActive === true \? \{ subagentsActive: true \} : \{\}\) \}\)/);
+  assert.match(promptDoneSource, /notifyPromptStage\(runId, event\.aborted === true, event\.subagentsActive === true\)/);
   assert.match(promptDoneSource, /scheduleEventStreamClose\(sid\)/);
   assert.match(sendSource, /const definitivelyRejected = !promptRequestStarted/);
   assert.match(sendSource, /if \(!definitivelyRejected && sentSessionId\) \{[\s\S]*?waitForPromptSettlement/);
-  assert.match(sendSource, /restoreSubmission\(message, images, composerDraftKey\);[\s\S]*?if \(sentSessionId\) \{[\s\S]*?reconcileAgentState\(sentSessionId\);[\s\S]*?return;[\s\S]*?\}[\s\S]*?closeEvents\(\)/);
+  assert.match(sendSource, /restoreSubmission\(message, images, composerDraftKey\);[\s\S]*?if \(sentSessionId\) \{[\s\S]*?reconcileAgentState\(sentSessionId\);[\s\S]*?return;[\s\S]*?\}[\s\S]*?closeEvents\("send_failed"\)/);
   assert.doesNotMatch(
     sendSource,
-    /rpcPromptPendingRef\.current = false;\s*agentRunningRef\.current = false;\s*closeEvents\(\)/,
+    /rpcPromptPendingRef\.current = false;\s*agentRunningRef\.current = false;\s*closeEvents\("send_failed"\)/,
   );
 });
 
@@ -208,7 +208,7 @@ test("only the session-mount load probes disk for external appends", () => {
   );
   assert.match(loadSessionSource, /options\?: \{ force\?: boolean \}/);
   assert.match(loadSessionSource, /if \(options\?\.force\) params\.set\("force", "1"\)/);
-  assert.match(loadSessionSource, /d\.wrapperRebuilt[\s\S]*?eventConnectionRef\.current\?\.close\(\)[\s\S]*?maintain\(sid\)/);
+  assert.match(loadSessionSource, /d\.wrapperRebuilt[\s\S]*?eventConnectionRef\.current\?\.close\("rebuilt"\)[\s\S]*?maintain\(sid\)/);
   assert.match(mountSource, /loadSession\(session\.id, !cached, true, \{ force: true \}\)/);
   assert.match(source, /await loadSession\(sid\)/);
   assert.equal([...source.matchAll(/\{ force: true \}/g)].length, 1);
@@ -364,7 +364,7 @@ test("streaming submissions cannot be stranded in an idle direct queue", () => {
   assert.match(queueSource, /type: "prompt"/);
   assert.match(queueSource, /streamingBehavior: behavior/);
   assert.match(queueSource, /const rejected = isPromptRejectedError\(e\);/);
-  assert.match(queueSource, /if \(rejected\) restore\(\)/);
+  assert.match(queueSource, /A steer or follow-up has no bubble standing for it[\s\S]*?restore\(\);/);
   // An accepted submission reports success so a Stop-resend keeps going; a refused one reports
   // failure, so the texts behind it stay in the composer instead of starting runs alone.
   assert.match(queueSource, /return !rejected;/);
@@ -424,15 +424,16 @@ test("delegates event stream readiness and hides an empty agent phase", () => {
   );
 
   assert.match(source, /new AgentEventConnection\(\{/);
-  assert.match(source, /shouldMaintain: \(sid\)[\s\S]*?sessionIdRef\.current === sid/);
+  assert.match(source, /shouldMaintain: wantsEventStream,/);
+  assert.match(source, /const wantsEventStream = useCallback\(\(sid: string\) => \(\s*sessionHookMountedRef\.current\s*&& sessionIdRef\.current === sid/);
   assert.match(ensureSource, /eventConnectionRef\.current!\.ensureConnected\(sid\)/);
   assert.match(ensureSource, /eventConnectionRef\.current!\.maintain\(sid\)/);
   assert.match(chatWindowSource, /const hasStreamingContent = useStreamingSelector\(streamingStore, selectHasStreamingContent\)/);
   assert.match(chatWindowSource, /isStreaming && hasStreamingContent && \([\s\S]*?<StreamingReply store=\{streamingStore\}/);
-  assert.match(chatWindowSource, /agentRunning && !hasStreamingContent && \(agentPhase \|\| isCompacting\)/);
+  assert.match(chatWindowSource, /\(agentRunning \|\| isCompacting\) && !hasStreamingContent && \(agentPhase \|\| isCompacting\)/);
   // Compaction is what the user needs to know while a turn is being compacted, so it is
   // forwarded to the label instead of letting the stream phase read as a hang.
-  assert.match(chatWindowSource, /phaseLabel\(agentPhase, t, isCompacting\)/);
+  assert.match(chatWindowSource, /phaseLabel\(agentPhase, t, isCompacting, \(queuedMessages\?\.steering\.length \?\? 0\) \+ \(queuedMessages\?\.followUp\.length \?\? 0\)\)/);
   assert.match(phaseLabelSource, /return null;/);
 });
 
@@ -469,7 +470,7 @@ test("keeps the selected session warm while idle and renews its lease", () => {
   assert.match(source, /`\/api\/agent\/\$\{encodeURIComponent\(sid\)\}\/lease/);
   assert.match(source, /fetch\(sessionLeaseUrl\(sid\)/);
   assert.match(source, /setInterval\(\(\) => void renew\(\), SESSION_LEASE_RENEW_INTERVAL_MS\)/);
-  assert.match(source, /eventStreamReleasedRef\.current = true;[\s\S]*?closeEvents\(\)/);
+  assert.match(source, /eventStreamReleasedRef\.current = true;[\s\S]*?closeEvents\("released"\)/);
   assert.match(source, /maintainEventsConnected\(sid\)/);
   assert.doesNotMatch(source, /void connectEvents\(/);
   assert.match(chatWindowSource, /sessionRunning\?: boolean/);
@@ -678,7 +679,7 @@ test("drops queued extension UI when a tool change rebuilds the wrapper", () => 
   // so their extension_ui_closed events never reach this hook.
   assert.match(
     setToolsSource,
-    /if \(activeSessionId !== sid \|\| result\?\.recreated\) \{[\s\S]*?closeEvents\(\);[\s\S]*?setExtensionDialogs\(\[\]\);\s+setExtensionCustomUis\(\[\]\);[\s\S]*?maintainEventsConnected\(activeSessionId\)/,
+    /if \(activeSessionId !== sid \|\| result\?\.recreated\) \{[\s\S]*?closeEvents\("set_tools"\);[\s\S]*?setExtensionDialogs\(\[\]\);\s+setExtensionCustomUis\(\[\]\);[\s\S]*?maintainEventsConnected\(activeSessionId\)/,
   );
   // A tool change that keeps the wrapper keeps its pending requests on screen.
   const unconditional = setToolsSource.slice(setToolsSource.indexOf("      setSlashCommands([]);"));

@@ -32,6 +32,72 @@ const TERMINAL_SUBAGENT_STATUSES = new Set<SubagentRunInfo["status"]>(["complete
 /** How long an abort waits for the run to write its terminal status before answering. */
 const ABORT_SETTLE_WAIT_MS = 2_000;
 const ABORT_SETTLE_POLL_MS = 50;
+
+export const SUBAGENT_WAIT_TIMEOUT_MS = 30 * 60_000;
+// Node timers overflow above a signed 32-bit millisecond delay.
+const MAX_SUBAGENT_WAIT_SECONDS = Math.floor(2_147_483_647 / 1000);
+const waitTimeoutParameter = () => Type.Optional(Type.Integer({
+  minimum: 1,
+  maximum: MAX_SUBAGENT_WAIT_SECONDS,
+  description: "Seconds to wait for completion. Default: 1800 (30 minutes). Use a longer budget for long tasks. Applies only to a foreground Agent or get_subagent_result with wait: true; expiry returns status without cancelling the child.",
+}));
+
+function waitTimeoutMs(seconds?: number): number {
+  if (seconds === undefined) return SUBAGENT_WAIT_TIMEOUT_MS;
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > MAX_SUBAGENT_WAIT_SECONDS) {
+    throw new Error(`wait_timeout must be an integer between 1 and ${MAX_SUBAGENT_WAIT_SECONDS} seconds`);
+  }
+  return seconds * 1000;
+}
+
+function pollDelay(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(new Error("Result wait aborted"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, 500);
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/** Bound the caller's wait, not the child run. Abort only the local polling on exit. */
+async function waitForSubagent<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<T | undefined> {
+  if (signal?.aborted) throw new Error("Result wait aborted");
+  const polling = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(new Error("Result wait aborted"));
+        signal?.addEventListener("abort", onAbort, { once: true });
+      }),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), timeoutMs);
+      }),
+      operation(polling.signal),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+    polling.abort();
+  }
+}
+
+function waitTimeoutText(run: SubagentRunInfo | undefined, sessionId: string, timeoutMs: number): string {
+  const status = run ? subagentFinalText(run) : `Subagent ${sessionId}: status lookup is still pending.`;
+  return `Wait budget exhausted (${timeoutMs / 1000} seconds). ${status} Only the wait ended; the subagent was not cancelled. Do not immediately repeat the same wait; continue independent work or return control to the user. Use a longer wait_timeout when planning a long task.`;
+}
 /**
  * The control tools are declared to the model and activated on registration like `direct` tools,
  * but pi never lets another tool call a `model-only` tool through `ctx.executeTool()`, so a
@@ -221,7 +287,7 @@ export function subagentFinalText(run: SubagentRunInfo): string {
   // model only sees `content`, never `details`, so this is the id it copies into `resume` and
   // `get_subagent_result`. A full UUIDv7 shares its head with every session started around it.
   const id = shortSessionId(run.sessionId);
-  if (run.status === "starting" || run.status === "running") {
+  if (run.status === "queued" || run.status === "starting" || run.status === "running") {
     return `Subagent ${id} is ${run.status}.`;
   }
   // The worktree line follows the status, before the subagent's own words.
@@ -408,7 +474,7 @@ export function createSubagentExtension(
       pi.registerTool(defineTool({
         name: "Agent",
         label: "Agent",
-        description: `Delegate a task to a configured subagent: a full Pi session whose profile decides its tools. Use background mode for work that can run while you continue, foreground mode when you need the result now.\n\nAvailable agent types:\n${agentTypeDescription(profiles)}`,
+        description: `Delegate a task to a configured subagent: a full Pi session whose profile decides its tools. Use background mode for work that can run while you continue, foreground mode when you need the result now. A foreground wait defaults to 30 minutes; set wait_timeout (seconds) for a longer budget, and an exhausted one leaves the child running, its report arriving on its own.\n\nAvailable agent types:\n${agentTypeDescription(profiles)}`,
         promptSnippet: "Delegate a task to an inspectable subagent session. Whenever possible, delegate work to subagents instead of doing it yourself. Read the delegation section of the system prompt for which subagent to pick and when.",
         exposure: SUBAGENT_TOOL_EXPOSURE,
         executionMode: "parallel",
@@ -424,11 +490,38 @@ export function createSubagentExtension(
           resume: Type.Optional(Type.String({ description: "Existing subagent: its 8-character id, as its report shows it (the full session id also works). Continues with its current profile, model, thinking, and context. Omit new-session options." })),
           description: Type.String({ description: "Short activity label shown in the UI." }),
           run_in_background: Type.Optional(Type.Boolean({ description: "Return immediately and notify this session when complete. `plan` should always run in the foreground." })),
+          wait_timeout: waitTimeoutParameter(),
           model: Type.Optional(Type.String({ description: 'Optional provider/modelId override. Append ":<level>" (off, minimal, low, medium, high, xhigh, max) to also set the thinking level for this run, e.g. "provider/model:high".' })),
           isolation: Type.Optional(Type.String({ description: 'Set to "worktree" to run the subagent in an isolated git worktree.' })),
         }),
         async execute(toolCallId, params, signal, onUpdate, ctx) {
+          // Runtime cancellation follows this signal only while the Agent call is attached.
+          // A later parent Stop must not cancel a child whose foreground wait already expired.
+          const childAbort = new AbortController();
+          const onParentAbort = () => childAbort.abort();
+          if (signal?.aborted) childAbort.abort();
+          else signal?.addEventListener("abort", onParentAbort, { once: true });
+          let attached = true;
+          let latestRun: SubagentRunInfo | undefined;
+          const update = (run: SubagentRunInfo) => {
+            latestRun = run;
+            if (attached) onUpdate?.({
+              content: [{ type: "text", text: `${run.profile}: ${run.description} (${run.status})` }],
+              details: subagentToolDetails(run),
+            });
+          };
+          const notifyOnCompletion = (execution: SubagentExecution) => {
+            void execution.completion
+              .then((run) => runtime.notifyParent(run))
+              .catch((error) => {
+                console.error(
+                  "[pi-web] failed to deliver subagent completion:",
+                  error instanceof Error ? error.message : error,
+                );
+              });
+          };
           try {
+            const timeoutMs = waitTimeoutMs(params.wait_timeout);
             const resume = params.resume?.trim();
             if (resume) {
               const creationOptions = [
@@ -447,11 +540,8 @@ export function createSubagentExtension(
                   task: params.prompt,
                   description: params.description,
                   ...(params.run_in_background !== undefined ? { runInBackground: params.run_in_background } : {}),
-                  signal,
-                  onUpdate: (run) => onUpdate?.({
-                    content: [{ type: "text", text: `${run.profile}: ${run.description} (${run.status})` }],
-                    details: subagentToolDetails(run),
-                  }),
+                  signal: childAbort.signal,
+                  onUpdate: update,
                 })
               : await runtime.start({
               parentContext: ctx,
@@ -462,29 +552,26 @@ export function createSubagentExtension(
               ...(params.run_in_background !== undefined ? { runInBackground: params.run_in_background } : {}),
               ...(params.model ? { model: params.model } : {}),
               ...(params.isolation === "worktree" ? { isolation: "worktree" as const } : {}),
-              signal,
-              onUpdate: (run) => onUpdate?.({
-                content: [{ type: "text", text: `${run.profile}: ${run.description} (${run.status})` }],
-                details: subagentToolDetails(run),
-              }),
+              signal: childAbort.signal,
+              onUpdate: update,
                 });
 
             if (execution.run.runInBackground) {
-              void execution.completion
-                .then((run) => runtime.notifyParent(run))
-                .catch((error) => {
-                  console.error(
-                    "[pi-web] failed to deliver subagent completion:",
-                    error instanceof Error ? error.message : error,
-                  );
-                });
+              notifyOnCompletion(execution);
               return {
                 content: [{ type: "text", text: `Subagent started in background. Session ID: ${shortSessionId(execution.run.sessionId)}. Its report arrives on its own when it finishes — do not poll it, call get_subagent_result for it, or wait on it. Do other work that does not need it if you have any; if you have none, stop — no output, no tools — until it arrives. Stopping does not cancel the subagent.` }],
                 details: subagentToolDetails(execution.run),
               };
             }
 
-            const run = await execution.completion;
+            const run = await waitForSubagent(() => execution.completion, timeoutMs, signal);
+            if (!run) {
+              notifyOnCompletion(execution);
+              return {
+                content: [{ type: "text", text: `${waitTimeoutText(latestRun ?? execution.run, shortSessionId(execution.run.sessionId), timeoutMs)} Its completion report will arrive automatically.` }],
+                details: subagentToolDetails(latestRun ?? execution.run),
+              };
+            }
             return {
               content: [{ type: "text", text: subagentFinalText(run) }],
               details: subagentToolDetails(run),
@@ -496,6 +583,9 @@ export function createSubagentExtension(
               details: undefined,
               isError: true,
             };
+          } finally {
+            attached = false;
+            signal?.removeEventListener("abort", onParentAbort);
           }
         },
       }));
@@ -508,6 +598,7 @@ export function createSubagentExtension(
         parameters: Type.Object({
           agent_id: Type.String({ description: "The subagent's 8-character id, as its report shows it (the full session id also works)." }),
           wait: Type.Optional(Type.Boolean({ description: "Only when the user asks you to wait for a run." })),
+          wait_timeout: waitTimeoutParameter(),
         }),
         async execute(_toolCallId, params, signal) {
           // Registers this call so a run that settles under it is not also announced as a
@@ -520,27 +611,38 @@ export function createSubagentExtension(
           }
           const endCollection = runtime.beginResultCollection?.(agentId);
           try {
-            let run = await runtime.get(agentId);
-            if (!run) return { content: [{ type: "text", text: `Subagent not found: ${params.agent_id}` }], details: undefined, isError: true };
-            while (params.wait && (run.status === "starting" || run.status === "running")) {
-              await new Promise<void>((resolve, reject) => {
-                const onAbort = () => {
-                  clearTimeout(timer);
-                  reject(new Error("Result wait aborted"));
+            let run: SubagentRunInfo | null | undefined;
+            if (params.wait) {
+              // The budget is validated before the first lookup, so an invalid one
+              // costs no read and starts nothing.
+              const timeoutMs = waitTimeoutMs(params.wait_timeout);
+              // The last status a lookup answered with, never one invented for a
+              // lookup that has not answered yet.
+              let lastSeen: SubagentRunInfo | null | undefined;
+              const settled = await waitForSubagent(async (pollSignal) => {
+                for (;;) {
+                  const found = await runtime.get(agentId);
+                  pollSignal.throwIfAborted();
+                  lastSeen = found;
+                  if (!found || TERMINAL_SUBAGENT_STATUSES.has(found.status)) return found;
+                  await pollDelay(pollSignal);
+                }
+              }, timeoutMs, signal);
+              if (settled === undefined) {
+                return {
+                  content: [{ type: "text", text: waitTimeoutText(lastSeen ?? undefined, agentId, timeoutMs) }],
+                  details: lastSeen ? subagentToolDetails(lastSeen) : undefined,
                 };
-                const timer = setTimeout(() => {
-                  signal?.removeEventListener("abort", onAbort);
-                  resolve();
-                }, 500);
-                if (signal?.aborted) onAbort();
-                else signal?.addEventListener("abort", onAbort, { once: true });
-              });
+              }
+              run = settled;
+            } else {
               run = await runtime.get(agentId);
-              if (!run) return { content: [{ type: "text", text: `Subagent not found: ${params.agent_id}` }], details: undefined, isError: true };
             }
-            // The parent now holds this result, so the background completion notification must not
-            // deliver the same text again and wake a duplicate turn.
-            if (run.runInBackground && TERMINAL_SUBAGENT_STATUSES.has(run.status)) runtime.markResultConsumed(run);
+            if (!run) return { content: [{ type: "text", text: `Subagent not found: ${params.agent_id}` }], details: undefined, isError: true };
+            // The parent now holds this result, so the completion notification must not
+            // deliver the same text again and wake a duplicate turn — a foreground run whose
+            // wait expired reports on its own as well, so every terminal run is marked.
+            if (TERMINAL_SUBAGENT_STATUSES.has(run.status)) runtime.markResultConsumed(run);
             return {
               content: [{ type: "text", text: subagentFinalText(run) }],
               details: subagentToolDetails(run),
