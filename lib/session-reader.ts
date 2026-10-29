@@ -303,6 +303,28 @@ export async function listSessionSummaries(): Promise<SessionInfo[]> {
   return buildSessionList(await listSessionsIncremental({ deferDetails: true }));
 }
 
+/**
+ * The sidebar's hydration read. A rebuild re-reads every forked and subagent
+ * session and blocks the event loop while it does, so this never waits for one:
+ * a catalogue that is still fresh answers as-is, anything else takes the
+ * previous scan — or, before the first one exists (a restart), the cheap
+ * header/stat listing — and leaves the rebuild to the background, coalesced
+ * with whatever scan is already in flight. The previous scan is held unfresh,
+ * so a caller that does need the rebuild still gets one.
+ */
+export async function listSessionsForHydration(): Promise<SessionInfo[]> {
+  const generation = globalThis.__piSessionListGeneration ?? 0;
+  const cache = globalThis.__piSessionListCache;
+  if (cache && cache.generation === generation && Date.now() - cache.ts < SESSION_LIST_CACHE_TTL_MS) {
+    return cache.data;
+  }
+
+  const previous = cache?.data ?? await listSessionSummaries();
+  globalThis.__piSessionListCache = { data: previous, ts: 0, generation };
+  void listAllSessions().catch(() => undefined);
+  return previous;
+}
+
 export async function listAllSessions(options: { force?: boolean; allowStale?: boolean } = {}): Promise<SessionInfo[]> {
   if (options.force) invalidateSessionListCache();
   const generation = globalThis.__piSessionListGeneration ?? 0;

@@ -39,6 +39,8 @@ interface Fingerprint {
 }
 
 const SUMMARY_HEADER_MAX_BYTES = 64 * 1024;
+/** The header is the first line, so a cold listing reads this much before the rest. */
+const SUMMARY_HEADER_READ_BYTES = 4 * 1024;
 
 /**
  * Where the next scan of a file that only grew picks up. `offset` is just past
@@ -107,14 +109,28 @@ async function readSessionHeaderSummary(filePath: string): Promise<RawEntry | nu
 	let handle: FileHandle | undefined;
 	try {
 		handle = await open(filePath, "r");
-		const buffer = Buffer.allocUnsafe(SUMMARY_HEADER_MAX_BYTES);
+		const buffer = Buffer.allocUnsafe(SUMMARY_HEADER_READ_BYTES);
 		const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
 		if (bytesRead <= 0) return null;
-		const source = buffer.subarray(0, bytesRead).toString("utf8");
-		for (const line of source.split("\n")) {
-			const entry = parseLine(line.replace(/\r$/, ""));
-			if (!entry) continue;
-			return entry.type === "session" ? entry : null;
+		let chunk = buffer.subarray(0, bytesRead);
+		if (!chunk.includes(NEWLINE)) {
+			// No newline in the window, so the header is a long one: read the rest of
+			// the bounded window rather than the whole file.
+			const rest = Buffer.allocUnsafe(SUMMARY_HEADER_MAX_BYTES - SUMMARY_HEADER_READ_BYTES);
+			const more = await handle.read(rest, 0, rest.length, bytesRead);
+			if (more.bytesRead > 0) chunk = Buffer.concat([chunk, rest.subarray(0, more.bytesRead)]);
+		}
+		// Decoded a line at a time, so a header spanning two windows is never cut
+		// through a multibyte character.
+		for (let start = 0; start < chunk.length;) {
+			const end = chunk.indexOf(NEWLINE, start);
+			const line = (end === -1 ? chunk.subarray(start) : chunk.subarray(start, end))
+				.toString("utf8")
+				.replace(/\r$/, "");
+			const entry = parseLine(line);
+			if (entry) return entry.type === "session" ? entry : null;
+			if (end === -1) break;
+			start = end + 1;
 		}
 		return null;
 	} catch {

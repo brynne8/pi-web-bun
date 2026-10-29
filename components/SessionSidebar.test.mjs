@@ -424,6 +424,92 @@ test("the files show the composer bar's picker in one row below the sessions, as
   assert.match(filesPanel, /<span class="project-picker-label">Select project…<\/span>/);
 });
 
+/** The first load's hydration scheduling, from the effect that owns it. */
+function hydrationSnippet() {
+  return between("const scheduleHydration = () => {", "\n    } else {");
+}
+
+test("a hydration whose details have not landed asks again, and stops once they have", async () => {
+  const code = ts.transpileModule(`let attempts = 0;\n${hydrationSnippet()}`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2020 },
+  }).outputText;
+  const timers = [];
+  const forced = [];
+  const stillPending = [true, true, false];
+  const sandbox = {
+    isFirst: true,
+    active: true,
+    loadSessions: async (_showLoading, force) => {
+      if (!force) return true;
+      forced.push(1);
+      return stillPending[forced.length - 1] ?? false;
+    },
+    detailsHydrationTimerRef: { current: null },
+    setTimeout: (fn) => {
+      timers.push(fn);
+      return timers.length;
+    },
+    clearTimeout: () => {},
+    SESSION_DETAILS_HYDRATION_DELAY_MS: 750,
+    SESSION_DETAILS_HYDRATION_ATTEMPTS: 8,
+  };
+  vm.runInNewContext(code, sandbox);
+  const settled = () => new Promise((resolve) => setImmediate(resolve));
+
+  // The summary paint owes its details, so one hydration is scheduled for it.
+  await settled();
+  assert.equal(forced.length, 0);
+  assert.equal(timers.length, 1);
+
+  // The hydration read answers with the previous scan while its rebuild runs in
+  // the background, so the sidebar asks again instead of leaving rows pending.
+  for (let round = 0; round < 2; round += 1) {
+    timers.shift()();
+    await settled();
+    assert.equal(forced.length, round + 1);
+    assert.equal(timers.length, 1);
+  }
+
+  // The details landed: no further hydration is asked for.
+  timers.shift()();
+  await settled();
+  assert.equal(forced.length, 3);
+  assert.equal(timers.length, 0);
+});
+
+test("the hydration retries stop rather than polling for details forever", async () => {
+  const code = ts.transpileModule(`let attempts = 0;\n${hydrationSnippet()}`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2020 },
+  }).outputText;
+  const timers = [];
+  let forced = 0;
+  const sandbox = {
+    isFirst: true,
+    active: true,
+    loadSessions: async (_showLoading, force) => {
+      if (force) forced += 1;
+      return true;
+    },
+    detailsHydrationTimerRef: { current: null },
+    setTimeout: (fn) => {
+      timers.push(fn);
+      return timers.length;
+    },
+    clearTimeout: () => {},
+    SESSION_DETAILS_HYDRATION_DELAY_MS: 750,
+    SESSION_DETAILS_HYDRATION_ATTEMPTS: 8,
+  };
+  vm.runInNewContext(code, sandbox);
+  const settled = () => new Promise((resolve) => setImmediate(resolve));
+  await settled();
+  for (let round = 0; round < 12 && timers.length > 0; round += 1) {
+    timers.shift()();
+    await settled();
+  }
+  assert.equal(forced, 8);
+  assert.equal(timers.length, 0);
+});
+
 test("the running poll keeps the same Set while the running ids stay the same", () => {
   const previous = new Set(["a", "b"]);
   assert.equal(sameIdsOr(previous, ["b", "a"]), previous);

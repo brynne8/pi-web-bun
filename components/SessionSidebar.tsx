@@ -311,6 +311,7 @@ const UNREAD_SESSIONS_STORAGE_KEY = "pi-web:unread-session-ids";
 const LAST_CUSTOM_CWD_STORAGE_KEY = "pi-web:last-custom-cwd";
 const RUNNING_SESSIONS_POLL_MS = 2500;
 const SESSION_DETAILS_HYDRATION_DELAY_MS = 750;
+const SESSION_DETAILS_HYDRATION_ATTEMPTS = 8;
 /** "Archive sessions older than 7 days" in a project's menu. */
 const ARCHIVE_OLDER_THAN_MS = 7 * 24 * 60 * 60 * 1000;
 /** The archive bar's "Delete archived over 30 days ago", by archive time. */
@@ -816,6 +817,21 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     const isFirst = !initialLoadDone.current;
     initialLoadDone.current = true;
     let active = true;
+    let attempts = 0;
+
+    const scheduleHydration = () => {
+      detailsHydrationTimerRef.current = setTimeout(() => {
+        detailsHydrationTimerRef.current = null;
+        if (!active) return;
+        // The hydration read answers with the previous scan while its rebuild
+        // runs in the background, so ask again until the details land.
+        void loadSessions(false, true).then((stillPending) => {
+          if (!active || !stillPending) return;
+          attempts += 1;
+          if (attempts < SESSION_DETAILS_HYDRATION_ATTEMPTS) scheduleHydration();
+        });
+      }, SESSION_DETAILS_HYDRATION_DELAY_MS);
+    };
 
     if (isFirst) {
       // Header/stat metadata is enough to select the URL session and paint the
@@ -824,10 +840,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       // summary has rows whose details a full scan still owes.
       void loadSessions(true, false, true).then((needsDetails) => {
         if (!active || !needsDetails) return;
-        detailsHydrationTimerRef.current = setTimeout(() => {
-          detailsHydrationTimerRef.current = null;
-          if (active) void loadSessions(false, true);
-        }, SESSION_DETAILS_HYDRATION_DELAY_MS);
+        scheduleHydration();
       });
     } else {
       // Every refreshKey bump follows a change the server already invalidated

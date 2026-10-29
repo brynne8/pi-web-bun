@@ -2,13 +2,13 @@ import "katex/dist/katex.min.css";
 import type { Content, Link, Parent, Root } from "mdast";
 import type { Element as HastElement, Root as HastRoot, RootContent as HastContent } from "hast";
 import { defaultUrlTransform, type Options as ReactMarkdownOptions } from "react-markdown";
-import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
 import remarkMath from "remark-math";
+import { rehypeKatexWhenLoaded } from "./markdown-katex";
 import { isProseMathText, remarkProseDisplayMath } from "./markdown-prose-math";
 import type { Plugin } from "unified";
 import type { Extension } from "micromark-util-types";
@@ -810,7 +810,7 @@ export const markdownRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
   rehypeRaw,
   [rehypeSanitize, markdownSanitizeSchema],
   rehypeMatchClobberedIds,
-  [rehypeKatex, { throwOnError: false, strict: false }],
+  rehypeKatexWhenLoaded,
 ];
 
 function hastText(node: HastContent): string {
@@ -846,12 +846,12 @@ export const markdownDocumentRehypePlugins: ReactMarkdownOptions["rehypePlugins"
   rehypeRaw,
   [rehypeSanitize, markdownSanitizeSchema],
   markdownHeadingAnchors,
-  [rehypeKatex, { throwOnError: false, strict: false }],
+  rehypeKatexWhenLoaded,
 ];
 
 export const markdownPreviewRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
   rehypeRaw,
   [rehypeSanitize, markdownSanitizeSchema],
   rehypeMatchClobberedIds,
-  [rehypeKatex, { throwOnError: false, strict: false }],
+  rehypeKatexWhenLoaded,
 ];

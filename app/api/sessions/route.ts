@@ -4,6 +4,7 @@ import {
   attachSessionProjectInfo,
   getSessionListVersion,
   listAllSessions,
+  listSessionsForHydration,
   listSessionSummaries,
   mergeSessionLists,
 } from "@/lib/session-reader";
@@ -28,7 +29,11 @@ export async function GET(req: Request) {
     perf?.span("start");
     const persistedSessionsPromise = summary
       ? listSessionSummaries()
-      : listAllSessions({ force });
+      // `force=1` is the sidebar's hydration read: the previous scan now, the
+      // rebuild in the background.
+      : force
+        ? listSessionsForHydration()
+        : listAllSessions({ force });
     // Capture before awaiting: mutations during the scan still require a later refresh.
     const sessionListVersion = getSessionListVersion();
     const [persistedSessions, runtimeSessions] = await Promise.all([

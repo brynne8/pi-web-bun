@@ -11,6 +11,10 @@ const jiti = createJiti(import.meta.url, {
 });
 const { MarkdownBody } = await jiti.import("./MarkdownBody.tsx");
 const { normalizeDisplayMath, markdownPreviewRemarkPlugins, markdownPreviewRehypePlugins } = await jiti.import("../lib/markdown.ts");
+const { loadKatexPlugin } = await jiti.import("../lib/markdown-katex.ts");
+// KaTeX arrives in a chunk of its own and the render is synchronous, so a test
+// that asserts on rendered math waits for that chunk the way a second frame does.
+await loadKatexPlugin();
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 
 function renderMarkdown(markdown, props = {}) {

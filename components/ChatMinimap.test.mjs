@@ -27,6 +27,9 @@ const jiti = createJiti(import.meta.url, {
   tsconfigPaths: true,
 });
 const { AssistantOutline, AssistantTextPreview, countToolCalls } = await jiti.import("./ChatMinimap.tsx");
+const { loadKatexPlugin } = await jiti.import("../lib/markdown-katex.ts");
+// The minimap renders KaTeX from a chunk of its own and its render is synchronous.
+await loadKatexPlugin();
 
 test("renders math in headings without disabling heading navigation", () => {
   const html = renderToStaticMarkup(

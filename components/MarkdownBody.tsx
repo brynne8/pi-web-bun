@@ -1,11 +1,12 @@
 "use client";
 
-import { createContext, memo, useContext, useMemo, useRef, type ComponentProps, type MouseEvent } from "react";
+import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type MouseEvent } from "react";
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
 import { parsePdfPageFragment, resolveLocalFileHref, shouldOpenLocalFileInApp } from "@/lib/file-links";
 import { encodeFilePathForApi } from "@/lib/file-paths";
 import { isAudioPath, isVideoPath } from "@/lib/file-types";
 import { isExternalMarkdownHref, jumpToMarkdownFragment, markdownAppUrlTransform, markdownDocumentRehypePlugins, markdownRehypePlugins, markdownRemarkPlugins, markdownUrlTransform, markdownUserRemarkPlugins, normalizeDisplayMathIncremental, type DisplayMathCheckpoint } from "@/lib/markdown";
+import { hasMathDelimiter, katexPluginReady, loadKatexPlugin, markdownRehypePluginsWithKatex } from "@/lib/markdown-katex";
 import { splitMarkdownBlocksIncremental, type BlockSplitCheckpoint } from "@/lib/markdown-blocks";
 import { ImagePreview } from "./ImagePreview";
 import { MermaidBlock, CodeBlock } from "./MermaidBlock";
@@ -97,6 +98,22 @@ export const MarkdownBody = memo(function MarkdownBody({ children, className, is
     splitCheckpoint.current = split.checkpoint;
     return split.blocks;
   }, [isStreaming, normalizedMarkdown]);
+  // KaTeX arrives in a chunk of its own: a text that can hold no math never fetches
+  // it, and one that can shows the math as its source until the chunk lands and the
+  // plugin list is swapped for the one carrying the transform, which re-parses
+  // every block (the memoized block sees a new array, so it renders again).
+  const needsKatex = useMemo(() => blocks.some(hasMathDelimiter), [blocks]);
+  const [katexReady, setKatexReady] = useState(katexPluginReady);
+  useEffect(() => {
+    if (katexReady || !needsKatex) return;
+    let alive = true;
+    void loadKatexPlugin().then(() => { if (alive) setKatexReady(true); });
+    return () => { alive = false; };
+  }, [needsKatex, katexReady]);
+  const rehypePlugins = useMemo(() => {
+    const plugins = onNavigateLink ? markdownDocumentRehypePlugins : markdownRehypePlugins;
+    return katexReady && needsKatex ? markdownRehypePluginsWithKatex(plugins) : plugins;
+  }, [onNavigateLink, katexReady, needsKatex]);
   // Stable renderer identities keep stateful blocks mounted across message hover updates.
   const components = useMemo<Components>(() => ({
     code({ className, children, ...props }) {
@@ -210,7 +227,7 @@ export const MarkdownBody = memo(function MarkdownBody({ children, className, is
           markdown={block}
           remarkPlugins={keepLineBreaks ? markdownUserRemarkPlugins : markdownRemarkPlugins}
           urlTransform={onOpenFile ? markdownUrlTransform : markdownAppUrlTransform}
-          rehypePlugins={onNavigateLink ? markdownDocumentRehypePlugins : markdownRehypePlugins}
+          rehypePlugins={rehypePlugins}
           components={components}
         />
       ))}

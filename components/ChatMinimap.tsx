@@ -2,11 +2,11 @@
 
 import { memo, useEffect, useRef, useState, useCallback, useMemo, type RefObject } from "react";
 import ReactMarkdown, { type Options as ReactMarkdownOptions } from "react-markdown";
-import rehypeKatex from "rehype-katex";
 import {
   markdownPreviewRemarkPlugins,
   normalizeDisplayMath,
 } from "@/lib/markdown";
+import { rehypeKatexWhenLoaded } from "@/lib/markdown-katex";
 import { isMessageGroupAnchor } from "@/lib/message-display";
 import { loadMinimapPreviewLocked, saveMinimapPreviewLocked } from "@/lib/minimap-preview-lock";
 import type { AgentMessage, AssistantContentBlock, CustomMessage, TextContent, UserMessage } from "@/lib/types";
@@ -168,9 +168,7 @@ const previewRemarkPlugins = [
   ...(markdownPreviewRemarkPlugins ?? []),
   remarkPreviewOutline,
 ];
-const previewRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
-  [rehypeKatex, { throwOnError: false, strict: false }],
-];
+const previewRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [rehypeKatexWhenLoaded];
 
 function getPreviewHeadingIndex(node: unknown): number | null {
   const properties = (node as { properties?: Record<string, unknown> } | undefined)?.properties;

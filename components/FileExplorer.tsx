@@ -1,7 +1,7 @@
 "use client";
 
-import { forwardRef, useState, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import { forwardRef, memo, useState, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef } from "react";
+import type { MouseEvent as ReactMouseEvent, RefObject } from "react";
 import { getFileIcon, FolderIcon } from "./FileIcons";
 import { DismissButton } from "./DismissButton";
 import {
@@ -20,10 +20,20 @@ import type { FileTreeHiddenReason } from "@/lib/file-tree-visibility";
 import { createExpandedPathsMemory } from "@/lib/file-tree-expansion";
 import { droppedItems } from "@/hooks/useDragDrop";
 import { useI18n } from "@/hooks/useI18n";
+import { getVisibleRowIndices, revealScrollTop } from "@/lib/session-tree";
+import {
+  flattenFileTree,
+  getFileTreeRowOffsets,
+  FILE_TREE_ROW_HEIGHT,
+  EMPTY_NOTE_HEIGHT,
+  type DirResolve,
+  type FileTreeNode,
+  type FlatTreeRow,
+} from "@/lib/file-tree-rows";
 type Translate = ReturnType<typeof useI18n>["t"];
 
-/** Why a listed entry is normally left out; only listings with `hidden=1` report it. */
 type HiddenReason = Exclude<FileTreeHiddenReason, "always">;
+type FileNode = FileTreeNode;
 
 interface FileEntry {
   name: string;
@@ -33,18 +43,6 @@ interface FileEntry {
   /** Where a directory link leads when that is outside the browsable roots. */
   outsideLinkTarget?: string;
   /** That target contains the project or the home folder. */
-  outsideLinkEncloses?: boolean;
-  hidden?: HiddenReason;
-}
-
-interface FileNode {
-  name: string;
-  fullPath: string;
-  isDir: boolean;
-  size: number;
-  children?: FileNode[];
-  loaded?: boolean;
-  outsideLinkTarget?: string;
   outsideLinkEncloses?: boolean;
   hidden?: HiddenReason;
 }
@@ -108,6 +106,13 @@ type UploadPhase = "idle" | "checking" | "uploading";
 // project and back (a session picked in another group) does not fold the tree.
 const expandedPathsByCwd = createExpandedPathsMemory();
 
+/** One directory's listing state, kept beside the tree so the flat rows can include its entries. */
+interface DirLoad {
+  children: FileNode[] | null;
+  loading: boolean;
+  error: string | null;
+}
+
 interface UploadSummary {
   directory: string;
   uploaded: string[];
@@ -120,6 +125,14 @@ interface PendingConflict {
   files: File[];
   conflicts: string[];
   nonReplaceable: string[];
+}
+
+/** The row's own actions, read at event time so a memoized row needs no new callbacks. */
+interface RowHandlers {
+  onOpenFile: (filePath: string, fileName: string, options?: OpenFileOptions) => void;
+  onAllowLink: (fullPath: string, target: string, encloses: boolean) => void;
+  onDropFiles?: (directory: string, items: DroppedItem[]) => void;
+  onDropTargetChange?: (path: string | null) => void;
 }
 
 async function responseError(res: Response, fallback: string): Promise<Error> {
@@ -237,145 +250,39 @@ const HIDDEN_REASON_KEYS = {
   excluded: "files.hiddenExcluded",
 } as const satisfies Record<HiddenReason, string>;
 
-export function TreeNode({
-  node,
-  depth,
-  cwd,
-  onOpenFile,
-  expandedPaths,
-  onToggleExpanded,
-  refreshToken,
-  highlightedPaths,
-  gitStatusByPath,
-  changedDirectoryPaths,
-  showHidden = false,
-  parentHidden,
-  dropTargetPath,
-  onDropFiles,
-  onDropTargetChange,
+/**
+ * One row of the windowed tree (or the search results): the 24px entry line and,
+ * under an open directory that lists nothing, the block that says why. It reads
+ * its handlers at event time and takes only stable props, so a parent re-render
+ * (the 2.5 s running poll, a Git refresh) re-renders nothing that did not change.
+ */
+export const FileRow = memo(function FileRow({
+  row,
+  isDropTarget,
+  highlighted,
+  gitStatus,
+  containsChanges,
+  onToggle,
+  handlers,
   t,
 }: {
-  node: FileNode;
-  depth: number;
-  cwd: string;
-  onOpenFile: (filePath: string, fileName: string, options?: OpenFileOptions) => void;
-  expandedPaths: Set<string>;
-  onToggleExpanded: (fullPath: string, open: boolean) => void;
-  refreshToken?: string;
-  highlightedPaths: Set<string>;
-  gitStatusByPath: Map<string, GitFileStatus>;
-  changedDirectoryPaths: Set<string>;
-  showHidden?: boolean;
-  /** Set inside a hidden directory: Git has no answer there, so its entries inherit the reason. */
-  parentHidden?: HiddenReason;
-  dropTargetPath?: string | null;
-  onDropFiles?: (directory: string, items: DroppedItem[]) => void;
-  onDropTargetChange?: (path: string | null) => void;
+  row: FlatTreeRow;
+  isDropTarget: boolean;
+  highlighted: boolean;
+  gitStatus: GitFileStatus | null;
+  containsChanges: boolean;
+  onToggle: (fullPath: string, open: boolean) => void;
+  handlers: RefObject<RowHandlers>;
   t: Translate;
 }) {
-  const open = expandedPaths.has(node.fullPath);
-  const hidden = node.hidden ?? parentHidden;
-  const isDropTarget = node.isDir && dropTargetPath === node.fullPath;
-  const highlighted = highlightedPaths.has(node.fullPath);
-  const normalizedPath = normalizeFilePathSlashes(node.fullPath);
-  const gitStatus = gitStatusByPath.get(normalizedPath);
-  const containsGitChanges = node.isDir && (
-    gitStatus !== undefined || changedDirectoryPaths.has(normalizedPath)
-  );
-  const [children, setChildren] = useState<FileNode[]>(node.children ?? []);
-  const [loaded, setLoaded] = useState(node.loaded ?? false);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [hovered, setHovered] = useState(false);
-  const [allowedLinkTarget, setAllowedLinkTarget] = useState<string | null>(null);
-  const [allowingLink, setAllowingLink] = useState(false);
-  const [allowLinkError, setAllowLinkError] = useState<string | null>(null);
-  // A link leading outside the project is refused until the operator allows
-  // its target, so it asks for that instead of listing (#748).
-  const pendingLinkTarget = node.outsideLinkTarget && node.outsideLinkTarget !== allowedLinkTarget
-    ? node.outsideLinkTarget
-    : null;
-
-  // A listing that reports the link again (a server restart forgets allowed
-  // targets, or the link was pointed elsewhere) needs a new decision.
-  useEffect(() => {
-    setAllowedLinkTarget(null);
-    setAllowLinkError(null);
-  }, [node.outsideLinkTarget]);
-
-  const loadChildren = useCallback(async (force = false) => {
-    if (loaded && !force) return;
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const entries = await fetchEntries(node.fullPath, showHidden);
-      setChildren(entries);
-      setLoaded(true);
-    } catch (error) {
-      setLoadError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setLoading(false);
-    }
-  }, [loaded, node.fullPath, showHidden]);
-
-  // The switch changes what every listing holds: reload an open directory now
-  // and a collapsed one when it next opens.
-  const listedShowHiddenRef = useRef(showHidden);
-  useEffect(() => {
-    if (listedShowHiddenRef.current === showHidden) return;
-    listedShowHiddenRef.current = showHidden;
-    if (!loaded) return;
-    if (open && !pendingLinkTarget) loadChildren(true);
-    else setLoaded(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showHidden]);
-
-  // A hidden directory left expanded mounts open again when the switch comes
-  // back on, before anything listed it.
-  useEffect(() => {
-    if (node.isDir && open && !loaded && !pendingLinkTarget) loadChildren();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Re-fetch children when the tree refreshes: an open directory now, a
-  // collapsed one when it next opens (a file dropped onto its row).
-  useEffect(() => {
-    if (refreshToken === undefined || !loaded || pendingLinkTarget) return;
-    if (open) loadChildren(true);
-    else setLoaded(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshToken]);
+  const { node, depth, expanded, hidden, loading, pendingLink, block } = row;
+  const pendingLinkTarget = pendingLink ? pendingLink.target : null;
 
   const handleClick = useCallback(() => {
-    if (node.isDir) {
-      const next = !open;
-      onToggleExpanded(node.fullPath, next);
-      if (next && !loaded && !pendingLinkTarget) loadChildren();
-    } else {
-      onOpenFile(node.fullPath, node.name);
-    }
-  }, [node.isDir, node.fullPath, node.name, loaded, open, pendingLinkTarget, loadChildren, onOpenFile, onToggleExpanded]);
-
-  const handleAllowLink = useCallback(async (event: React.MouseEvent) => {
-    event.stopPropagation();
-    if (!pendingLinkTarget) return;
-    // A link to `/`, `~` or a parent of the project opens far more than a
-    // sibling folder, and a cloned repository can contain one.
-    if (node.outsideLinkEncloses && !window.confirm(t("files.allowEnclosingLinkConfirm", { target: pendingLinkTarget }))) {
-      return;
-    }
-    setAllowingLink(true);
-    setAllowLinkError(null);
-    try {
-      await allowOutsideLink(node.fullPath, pendingLinkTarget);
-      setAllowedLinkTarget(pendingLinkTarget);
-      await loadChildren(true);
-    } catch (error) {
-      setAllowLinkError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setAllowingLink(false);
-    }
-  }, [node.fullPath, node.outsideLinkEncloses, pendingLinkTarget, loadChildren, t]);
+    if (node.isDir) onToggle(node.fullPath, !expanded);
+    else handlers.current.onOpenFile(node.fullPath, node.name);
+  }, [node.isDir, node.fullPath, node.name, expanded, onToggle, handlers]);
 
   return (
     <div>
@@ -393,14 +300,14 @@ export function TreeNode({
           event.preventDefault();
           event.stopPropagation();
           event.dataTransfer.dropEffect = "copy";
-          onDropTargetChange?.(node.fullPath);
+          handlers.current.onDropTargetChange?.(node.fullPath);
         } : undefined}
         onDrop={node.isDir ? (event) => {
           if (!event.dataTransfer.types.includes("Files")) return;
           event.preventDefault();
           event.stopPropagation();
-          onDropTargetChange?.(null);
-          onDropFiles?.(node.fullPath, droppedItems(event.dataTransfer));
+          handlers.current.onDropTargetChange?.(null);
+          handlers.current.onDropFiles?.(node.fullPath, droppedItems(event.dataTransfer));
         } : undefined}
         style={{
           position: "relative",
@@ -409,7 +316,7 @@ export function TreeNode({
           gap: 4,
           paddingLeft: 8 + depth * 14,
           paddingRight: 8,
-          height: 24,
+          height: FILE_TREE_ROW_HEIGHT,
           cursor: "pointer",
           background: isDropTarget
             ? "color-mix(in srgb, var(--accent) 16%, transparent)"
@@ -426,14 +333,14 @@ export function TreeNode({
           <svg
             width="10" height="10" viewBox="0 0 10 10" fill="none"
             stroke="var(--text-dim)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
-            style={{ flexShrink: 0, transform: open ? "rotate(90deg)" : "none", transition: "transform 0.1s" }}
+            style={{ flexShrink: 0, transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.1s" }}
           >
             <polyline points="3 2 7 5 3 8" />
           </svg>
         )}
         {!node.isDir && <span style={{ width: 10, flexShrink: 0 }} />}
         <span style={{ flexShrink: 0, display: "flex", alignItems: "center", opacity: hidden ? HIDDEN_ENTRY_OPACITY : 1 }}>
-          {node.isDir ? <FolderIcon size={14} open={open} /> : getFileIcon(node.name, 14)}
+          {node.isDir ? <FolderIcon size={14} open={expanded} /> : getFileIcon(node.name, 14)}
         </span>
         <span
           data-hidden-reason={hidden}
@@ -471,7 +378,7 @@ export function TreeNode({
         {!hovered && !node.isDir && gitStatus && (
           <GitStatusBadge status={gitStatus} t={t} />
         )}
-        {!hovered && containsGitChanges && (
+        {!hovered && containsChanges && (
           <span
             title={t("files.containsChangedFiles")}
             aria-label={t("files.containsChangedFiles")}
@@ -493,7 +400,7 @@ export function TreeNode({
           </svg>
         )}
       </div>
-      {node.isDir && open && pendingLinkTarget && (
+      {block?.kind === "notice" && (
         <div
           style={{
             paddingLeft: 8 + (depth + 1) * 14,
@@ -508,15 +415,14 @@ export function TreeNode({
             color: "var(--text-dim)",
           }}
         >
-          <span style={{ wordBreak: "break-all" }}>{t("files.outsideLink", { target: pendingLinkTarget })}</span>
-          {node.outsideLinkEncloses && (
+          <span style={{ wordBreak: "break-all" }}>{t("files.outsideLink", { target: block.target })}</span>
+          {block.encloses && (
             <span style={{ color: "#f59e0b" }}>{t("files.outsideLinkEncloses")}</span>
           )}
           <button
             type="button"
-            onClick={handleAllowLink}
-            disabled={allowingLink}
-            title={t("files.allowOutsideLinkTitle", { target: pendingLinkTarget })}
+            onClick={(event) => { event.stopPropagation(); handlers.current.onAllowLink(node.fullPath, block.target, block.encloses); }}
+            title={t("files.allowOutsideLinkTitle", { target: block.target })}
             style={{
               height: 20,
               padding: "0 8px",
@@ -524,8 +430,7 @@ export function TreeNode({
               border: "1px solid var(--border)",
               borderRadius: 4,
               color: "var(--accent)",
-              cursor: allowingLink ? "default" : "pointer",
-              opacity: allowingLink ? 0.6 : 1,
+              cursor: "pointer",
               fontSize: 11,
               fontWeight: 600,
               whiteSpace: "nowrap",
@@ -533,63 +438,38 @@ export function TreeNode({
           >
             {t("files.allowOutsideLink")}
           </button>
-          {allowLinkError && (
-            <span role="alert" style={{ color: "#f87171", wordBreak: "break-word" }}>{allowLinkError}</span>
+          {block.allowError && (
+            <span role="alert" style={{ color: "#f87171", wordBreak: "break-word" }}>{block.allowError}</span>
           )}
         </div>
       )}
-      {node.isDir && open && !pendingLinkTarget && (
-        <div>
-          {children.map((child) => (
-            <TreeNode
-              key={child.fullPath}
-              node={child}
-              depth={depth + 1}
-              cwd={cwd}
-              onOpenFile={onOpenFile}
-              expandedPaths={expandedPaths}
-              onToggleExpanded={onToggleExpanded}
-              refreshToken={refreshToken}
-              highlightedPaths={highlightedPaths}
-              gitStatusByPath={gitStatusByPath}
-              changedDirectoryPaths={changedDirectoryPaths}
-              showHidden={showHidden}
-              parentHidden={hidden}
-              dropTargetPath={dropTargetPath}
-              onDropFiles={onDropFiles}
-              onDropTargetChange={onDropTargetChange}
-              t={t}
-            />
-          ))}
-          {children.length === 0 && loaded && !loadError && (
-            <div style={{ paddingLeft: 8 + (depth + 1) * 14, fontSize: 11, color: "var(--text-dim)", height: 22, display: "flex", alignItems: "center" }}>
-              empty
-            </div>
-          )}
-          {loadError && (
-            <div role="alert" style={{ paddingLeft: 8 + (depth + 1) * 14, paddingRight: 8, paddingTop: 3, paddingBottom: 3, fontSize: 11, color: "#f87171", wordBreak: "break-word" }}>
-              {loadError}
-            </div>
-          )}
+      {block?.kind === "empty" && (
+        <div style={{ paddingLeft: 8 + (depth + 1) * 14, fontSize: 11, color: "var(--text-dim)", height: EMPTY_NOTE_HEIGHT, display: "flex", alignItems: "center" }}>
+          empty
+        </div>
+      )}
+      {block?.kind === "error" && (
+        <div role="alert" style={{ paddingLeft: 8 + (depth + 1) * 14, paddingRight: 8, paddingTop: 3, paddingBottom: 3, fontSize: 11, color: "#f87171", wordBreak: "break-word" }}>
+          {block.message}
         </div>
       )}
     </div>
   );
-}
+});
 
 type OpenFileOptions = { sourceSessionId?: string | null; modeHint?: "diff" };
 
 type OpenFileHandler = (filePath: string, fileName: string, options?: OpenFileOptions) => void;
 
-function ChangeRow({
+const ChangeRow = memo(function ChangeRow({
   status,
   cwd,
-  onOpenFile,
+  handlers,
   t,
 }: {
   status: GitFileStatus;
   cwd: string;
-  onOpenFile: OpenFileHandler;
+  handlers: RefObject<RowHandlers>;
   t: Translate;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -601,7 +481,7 @@ function ChangeRow({
   const baseName = lastSlash >= 0 ? rel.slice(lastSlash + 1) : rel;
   return (
     <div
-      onClick={() => onOpenFile(status.filePath, name, { modeHint: "diff" })}
+      onClick={() => handlers.current.onOpenFile(status.filePath, name, { modeHint: "diff" })}
       data-file-row-path={status.filePath}
       data-file-row-is-dir="false"
       onMouseEnter={() => setHovered(true)}
@@ -613,7 +493,7 @@ function ChangeRow({
         gap: 6,
         paddingLeft: 10,
         paddingRight: 8,
-        height: 24,
+        height: FILE_TREE_ROW_HEIGHT,
         cursor: "pointer",
         background: hovered ? "var(--bg-hover)" : "transparent",
         borderRadius: 4,
@@ -664,7 +544,158 @@ function ChangeRow({
       </span>
     </div>
   );
+});
+
+/** One row of the explorer's single windowed scroller: a tree entry, a changed file, the changes header, or a one-line note. */
+type DisplayRow =
+  | { kind: "tree"; key: string; row: FlatTreeRow; onToggle: (fullPath: string, open: boolean) => void }
+  | { kind: "change"; key: string; status: GitFileStatus }
+  | { kind: "change-header"; key: string; count: number; additions: number; deletions: number }
+  | { kind: "message"; key: string; text: string; tone?: "error" };
+
+function displayRowHeight(row: DisplayRow): number {
+  if (row.kind === "tree") {
+    if (!row.row.block) return FILE_TREE_ROW_HEIGHT;
+    if (row.row.block.kind === "empty") return FILE_TREE_ROW_HEIGHT + EMPTY_NOTE_HEIGHT;
+    return FILE_TREE_ROW_HEIGHT + (row.row.block.kind === "error" ? 60 : 120);
+  }
+  return FILE_TREE_ROW_HEIGHT;
 }
+
+/** Rows rendered beyond each edge of the viewport. */
+const OVERSCAN_PX = 240;
+
+/** One tree entry as the windowed list and the (small) search results both render it. */
+function renderTreeRow(
+  row: FlatTreeRow,
+  onToggle: (fullPath: string, open: boolean) => void,
+  maps: { gitStatusByPath: Map<string, GitFileStatus>; changedDirectoryPaths: Set<string>; highlightedPaths: Set<string>; dropTargetPath: string | null },
+  handlers: RefObject<RowHandlers>,
+  t: Translate,
+) {
+  const normalizedPath = normalizeFilePathSlashes(row.node.fullPath);
+  const gitStatus = maps.gitStatusByPath.get(normalizedPath) ?? null;
+  const containsChanges = row.node.isDir && (gitStatus !== null || maps.changedDirectoryPaths.has(normalizedPath));
+  const isDropTarget = row.node.isDir && maps.dropTargetPath === row.node.fullPath;
+  const highlighted = maps.highlightedPaths.has(row.node.fullPath);
+  return (
+    <FileRow
+      row={row}
+      isDropTarget={isDropTarget}
+      highlighted={highlighted}
+      gitStatus={gitStatus}
+      containsChanges={containsChanges}
+      onToggle={onToggle}
+      handlers={handlers}
+      t={t}
+    />
+  );
+}
+
+/**
+ * A windowed list: it renders only the rows intersecting the viewport (plus
+ * overscan and any kept-mounted row), absolutely positioned inside a spacer of
+ * the full height, so a 3000-entry directory mounts a few dozen rows. Rows are
+ * `FileRow` / `ChangeRow` (both memoized on stable props), so an idle re-render
+ * (the 2.5 s running poll, a Git refresh) touches none of them. The tree and the
+ * changed-files list are mutually exclusive, so only one is mounted at a time;
+ * `offsetAbove` is where its first row sits inside the sidebar's scroller.
+ */
+export const WindowedList = memo(function WindowedList({
+  rows,
+  scrollTop,
+  viewportHeight,
+  offsetAbove,
+  gitStatusByPath,
+  changedDirectoryPaths,
+  highlightedPaths,
+  dropTargetPath,
+  handlers,
+  cwd,
+  t,
+  listRef,
+}: {
+  rows: DisplayRow[];
+  scrollTop: number;
+  viewportHeight: number;
+  offsetAbove: number;
+  gitStatusByPath: Map<string, GitFileStatus>;
+  changedDirectoryPaths: Set<string>;
+  highlightedPaths: Set<string>;
+  dropTargetPath: string | null;
+  handlers: RefObject<RowHandlers>;
+  cwd: string;
+  t: Translate;
+  listRef: RefObject<HTMLDivElement | null>;
+}) {
+  const offsets = useMemo(() => {
+    const result = new Array<number>(rows.length + 1);
+    result[0] = 0;
+    for (let index = 0; index < rows.length; index += 1) result[index + 1] = result[index] + displayRowHeight(rows[index]);
+    return result;
+  }, [rows]);
+  // A highlighted row (files just uploaded) and the row under a drag stay
+  // mounted even when scrolled away.
+  const keepMounted = useMemo(() => {
+    const indices: number[] = [];
+    rows.forEach((row, index) => {
+      if (row.kind !== "tree") return;
+      if (highlightedPaths.has(row.row.node.fullPath)) indices.push(index);
+      else if (row.row.node.isDir && dropTargetPath === row.row.node.fullPath) indices.push(index);
+    });
+    return indices;
+  }, [rows, highlightedPaths, dropTargetPath]);
+  const effectiveScrollTop = Math.max(0, scrollTop - offsetAbove);
+  const visibleIndices = useMemo(
+    () => getVisibleRowIndices(offsets, effectiveScrollTop, viewportHeight, OVERSCAN_PX, keepMounted),
+    [offsets, effectiveScrollTop, viewportHeight, keepMounted],
+  );
+  const totalHeight = offsets[rows.length] ?? 0;
+  const maps = { gitStatusByPath, changedDirectoryPaths, highlightedPaths, dropTargetPath };
+  return (
+    <div ref={listRef} style={{ position: "relative", height: totalHeight }}>
+      {visibleIndices.map((index) => {
+        const row = rows[index];
+        const top = offsets[index];
+        const height = offsets[index + 1] - top;
+        const wrapper = { position: "absolute" as const, top, left: 0, right: 0, height };
+        if (row.kind === "tree") {
+          return <div key={row.key} style={wrapper}>{renderTreeRow(row.row, row.onToggle, maps, handlers, t)}</div>;
+        }
+        if (row.kind === "change") {
+          return (
+            <div key={row.key} style={wrapper}>
+              <ChangeRow status={row.status} cwd={cwd} handlers={handlers} t={t} />
+            </div>
+          );
+        }
+        if (row.kind === "change-header") {
+          return (
+            <div
+              key={row.key}
+              style={wrapper}
+              aria-label={t("files.changeStats", { count: row.count, additions: row.additions, deletions: row.deletions })}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 6, height: FILE_TREE_ROW_HEIGHT, padding: "0 10px", fontSize: 12 }}>
+                <span style={{ color: "var(--text-dim)" }}>{t("files.changedCount", { count: row.count })}</span>
+                <span style={{ color: GIT_STATUS_COLORS.added, fontFamily: "var(--font-mono)" }}>+{row.additions}</span>
+                <span style={{ color: GIT_STATUS_COLORS.deleted, fontFamily: "var(--font-mono)" }}>-{row.deletions}</span>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div
+            key={row.key}
+            style={{ ...wrapper, display: "flex", alignItems: "center", padding: "0 12px", fontSize: 11, color: row.tone === "error" ? "#f87171" : "var(--text-dim)" }}
+          >
+            {row.text}
+          </div>
+        );
+      })}
+    </div>
+  );
+});
 
 export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({
   cwd,
@@ -685,6 +716,9 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  const [dirLoads, setDirLoads] = useState<Map<string, DirLoad>>(new Map());
+  const [allowedLinkTargets, setAllowedLinkTargets] = useState<Map<string, string>>(new Map());
+  const [linkErrors, setLinkErrors] = useState<Map<string, string>>(new Map());
   const [treeRefreshKey, setTreeRefreshKey] = useState(0);
   const [highlightedPaths, setHighlightedPaths] = useState<Set<string>>(new Set());
   const [gitFiles, setGitFiles] = useState<GitFileStatus[]>([]);
@@ -702,13 +736,89 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [fileDragActive, setFileDragActive] = useState(false);
   const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
+  const [scroll, setScroll] = useState({ scrollTop: 0, viewportHeight: 0, offsetAbove: 0 });
   const fileDragDepthRef = useRef(0);
   const prevCwdRef = useRef<string | null>(null);
   const expandedPathsRef = useRef(expandedPaths);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const aboveRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const dirLoadsRef = useRef(dirLoads);
+  dirLoadsRef.current = dirLoads;
+  const showHiddenRef = useRef(showHidden);
+  showHiddenRef.current = showHidden;
+  const treeRowsRef = useRef<FlatTreeRow[]>([]);
+  const revealDoneRef = useRef("");
   const refreshToken = `${refreshKey ?? 0}:${treeRefreshKey}`;
   const uploadBusy = uploadPhase !== "idle";
   const hasSearchQuery = searchQuery.trim().length > 0;
+
+  const loadDir = useCallback(async (path: string) => {
+    setDirLoads((prev) => {
+      const existing = prev.get(path);
+      if (existing?.loading) return prev;
+      const next = new Map(prev);
+      next.set(path, { children: existing?.children ?? null, loading: true, error: null });
+      return next;
+    });
+    try {
+      const entries = await fetchEntries(path, showHiddenRef.current);
+      setDirLoads((prev) => {
+        const next = new Map(prev);
+        next.set(path, { children: entries, loading: false, error: null });
+        return next;
+      });
+    } catch (loadError) {
+      setDirLoads((prev) => {
+        const next = new Map(prev);
+        next.set(path, { children: null, loading: false, error: loadError instanceof Error ? loadError.message : String(loadError) });
+        return next;
+      });
+    }
+  }, []);
+
+  const handleToggleExpanded = useCallback((fullPath: string, open: boolean) => {
+    setExpandedPaths((prev) => {
+      const next = new Set(prev);
+      if (open) next.add(fullPath); else next.delete(fullPath);
+      return next;
+    });
+    // A directory that last failed to list (or has not been listed) lists now;
+    // the orchestration effect covers the not-yet-attempted case, this retries.
+    if (open) {
+      const load = dirLoadsRef.current.get(fullPath);
+      if (load && load.error !== null && !load.loading) void loadDir(fullPath);
+    }
+  }, [loadDir]);
+
+  const handleSearchToggle = useCallback((fullPath: string, open: boolean) => {
+    setSearchExpanded((prev) => {
+      const next = new Set(prev);
+      if (open) next.add(fullPath); else next.delete(fullPath);
+      return next;
+    });
+  }, []);
+
+  const handleAllowLink = useCallback(async (fullPath: string, target: string, encloses: boolean) => {
+    // A link to `/`, `~` or a parent of the project opens far more than a
+    // sibling folder, and a cloned repository can contain one.
+    if (encloses && !window.confirm(t("files.allowEnclosingLinkConfirm", { target }))) return;
+    try {
+      await allowOutsideLink(fullPath, target);
+      setAllowedLinkTargets((prev) => { const next = new Map(prev); next.set(fullPath, target); return next; });
+      setLinkErrors((prev) => { const next = new Map(prev); next.delete(fullPath); return next; });
+      await loadDir(fullPath);
+    } catch (allowError) {
+      setLinkErrors((prev) => {
+        const next = new Map(prev);
+        next.set(fullPath, allowError instanceof Error ? allowError.message : String(allowError));
+        return next;
+      });
+    }
+  }, [t, loadDir]);
+
+  const handlersRef = useRef<RowHandlers>({ onOpenFile: () => {}, onAllowLink: () => {} });
 
   // Reuse the cached, bounded file index used by @ mentions.
   useEffect(() => {
@@ -798,13 +908,68 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     return directories;
   }, [cwd, gitFiles]);
 
-  const handleToggleExpanded = useCallback((fullPath: string, open: boolean) => {
-    setExpandedPaths((prev) => {
-      const next = new Set(prev);
-      if (open) next.add(fullPath); else next.delete(fullPath);
-      return next;
-    });
-  }, []);
+  // The tree's flat rows: the roots, each open directory's already-loaded
+  // children under it, and the block that says why an open directory lists
+  // nothing (empty, a fetch error, or an outside link awaiting approval).
+  const treeRows = useMemo(() => flattenFileTree(
+    roots,
+    expandedPaths,
+    (node) => dirLoads.get(node.fullPath)?.children ?? null,
+    (node): DirResolve => {
+      const load = dirLoads.get(node.fullPath);
+      const approved = node.outsideLinkTarget !== undefined && allowedLinkTargets.get(node.fullPath) === node.outsideLinkTarget;
+      const pendingLink = node.outsideLinkTarget && !approved
+        ? { target: node.outsideLinkTarget, encloses: Boolean(node.outsideLinkEncloses) }
+        : null;
+      return {
+        loading: load?.loading ?? false,
+        error: load?.error ?? null,
+        pendingLink,
+        allowError: pendingLink ? (linkErrors.get(node.fullPath) ?? null) : null,
+      };
+    },
+  ), [roots, expandedPaths, dirLoads, allowedLinkTargets, linkErrors]);
+  treeRowsRef.current = treeRows;
+
+  const searchRows = useMemo(() => {
+    if (!(fileSearchOpen && hasSearchQuery) || searchLoading || searchError || searchPaths.length === 0) return [];
+    return flattenFileTree(
+      searchRoots,
+      searchExpanded,
+      (node) => node.children ?? null,
+      () => ({ loading: false, error: null, pendingLink: null, allowError: null }),
+    );
+  }, [fileSearchOpen, hasSearchQuery, searchLoading, searchError, searchRoots, searchExpanded]);
+
+  // The windowed tree rows: the tree, or a one-line note while it loads, errors or is empty.
+  const treeDisplayRows = useMemo(() => {
+    const rows: DisplayRow[] = [];
+    if (loading) rows.push({ kind: "message", key: "tree-loading", text: "Loading files..." });
+    else if (error) rows.push({ kind: "message", key: "tree-error", text: error, tone: "error" });
+    else {
+      for (const row of treeRows) rows.push({ kind: "tree", key: `t:${row.key}`, row, onToggle: handleToggleExpanded });
+      if (treeRows.length === 0) rows.push({ kind: "message", key: "tree-none", text: t("files.noFiles") });
+    }
+    return rows;
+  }, [loading, error, treeRows, t, handleToggleExpanded]);
+
+  const treeOffsets = useMemo(() => {
+    const result = new Array<number>(treeDisplayRows.length + 1);
+    result[0] = 0;
+    for (let index = 0; index < treeDisplayRows.length; index += 1) result[index + 1] = result[index] + displayRowHeight(treeDisplayRows[index]);
+    return result;
+  }, [treeDisplayRows]);
+
+  // The windowed changed-files list: its stats header and one row per change.
+  const changeDisplayRows = useMemo(() => {
+    const rows: DisplayRow[] = [{ kind: "change-header", key: "change-header", count: gitFiles.length, additions: gitLineStats.additions, deletions: gitLineStats.deletions }];
+    for (const status of gitFiles) rows.push({ kind: "change", key: `c:${status.filePath}`, status });
+    return rows;
+  }, [gitFiles, gitLineStats]);
+
+  const searchActive = fileSearchOpen && hasSearchQuery;
+  const treeActive = (changesCollapsed || gitFiles.length === 0) && !searchActive;
+  const changedShown = !changesCollapsed && gitFiles.length > 0;
 
   const applyUploadResult = useCallback((data: UploadResponse, directory: string) => {
     const uploaded = data.uploaded ?? [];
@@ -948,6 +1113,10 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     });
   }, [prepareUpload, resetFileDrag, t]);
 
+  const handleDropTargetChange = useCallback((path: string | null) => {
+    setDropTargetPath((prev) => (prev === path ? prev : path));
+  }, []);
+
   const handleExplorerDrop = useCallback((event: React.DragEvent) => {
     if (!event.dataTransfer.types.includes("Files")) return;
     event.preventDefault();
@@ -955,9 +1124,14 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     handleDropFiles(dropTargetPath ?? cwd, droppedItems(event.dataTransfer));
   }, [cwd, dropTargetPath, handleDropFiles]);
 
-  const handleDropTargetChange = useCallback((path: string | null) => {
-    setDropTargetPath((prev) => (prev === path ? prev : path));
-  }, []);
+  // The rows read these at event time through a stable ref, so their memo is
+  // not broken when a callback's own dependencies change.
+  handlersRef.current = {
+    onOpenFile,
+    onAllowLink: handleAllowLink,
+    onDropFiles: handleDropFiles,
+    onDropTargetChange: handleDropTargetChange,
+  };
 
   useEffect(() => {
     onUploadBusyChange?.(uploadBusy);
@@ -992,6 +1166,10 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       setUploadSummary(null);
       setPendingConflict(null);
       setUploadError(null);
+      setDirLoads(new Map());
+      setAllowedLinkTargets(new Map());
+      setLinkErrors(new Map());
+      revealDoneRef.current = "";
     }
 
     setLoading(cwdChanged);
@@ -1010,6 +1188,38 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [cwd, refreshKey, treeRefreshKey, showHidden, treeVisible]);
+
+  // A tree refresh (a run ended, the window refocused, an upload, the button)
+  // or the ignored-files switch reloads every open directory and marks a
+  // collapsed one to list again when it next opens.
+  useEffect(() => {
+    const rows = treeRowsRef.current;
+    setDirLoads((prev) => {
+      const next = new Map<string, DirLoad>();
+      for (const row of rows) {
+        if (!row.expanded) continue;
+        const existing = prev.get(row.key);
+        next.set(row.key, { children: existing?.children ?? null, loading: false, error: null });
+      }
+      return next;
+    });
+    for (const row of rows) {
+      if (!row.expanded || row.pendingLink) continue;
+      void loadDir(row.key);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshToken, showHidden]);
+
+  // List every open directory that has not been listed yet (or since its parent
+  // listed), level by level as each parent's entries arrive.
+  useEffect(() => {
+    for (const row of treeRows) {
+      if (!row.expanded || row.pendingLink) continue;
+      const load = dirLoads.get(row.key);
+      if (load && (load.loading || load.children !== null || load.error !== null)) continue;
+      void loadDir(row.key);
+    }
+  }, [treeRows, dirLoads, loadDir]);
 
   // Files changed outside pi-web (an editor, a terminal) show up once the
   // window is back in front (#1144).
@@ -1042,6 +1252,71 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   useEffect(() => {
     onChangesCountChange?.(gitFiles.length);
   }, [gitFiles, onChangesCountChange]);
+
+  // Track the sidebar's own scroller: its scrollTop and height drive the
+  // window, and the fixed content above the list (upload feedback, the search
+  // box, the search results above the changed list) offsets where row 0 sits.
+  // Measured on scroll, resize and whenever the content above it changes size.
+  const scrollLayoutSignature = [
+    uploadPhase,
+    uploadSummary ? uploadSummary.uploaded.length + uploadSummary.skipped.length + uploadSummary.errors.length : -1,
+    pendingConflict ? pendingConflict.conflicts.length : -1,
+    uploadError ? 1 : 0,
+    fileSearchOpen ? 1 : 0,
+    searchActive && !searchLoading && !searchError ? searchRows.length : -1,
+  ].join("|");
+  useEffect(() => {
+    const root = rootRef.current;
+    const list = listRef.current;
+    const above = aboveRef.current;
+    if (!root || !list) return;
+    const scroller = root.closest(".sidebar-files-scroll") as HTMLElement | null;
+    if (!scroller) return;
+    const measure = () => {
+      const listRect = list.getBoundingClientRect();
+      const scrollerRect = scroller.getBoundingClientRect();
+      const offsetAbove = listRect.top - scrollerRect.top + scroller.scrollTop;
+      const scrollTop = scroller.scrollTop;
+      const viewportHeight = scroller.clientHeight;
+      setScroll((prev) => (
+        prev.scrollTop === scrollTop && prev.viewportHeight === viewportHeight && Math.abs(prev.offsetAbove - offsetAbove) < 0.5
+          ? prev
+          : { scrollTop, viewportHeight, offsetAbove }
+      ));
+    };
+    measure();
+    let frame = 0;
+    const onScroll = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => { frame = 0; measure(); });
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(scroller);
+    if (above) observer?.observe(above);
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      observer?.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [scrollLayoutSignature]);
+
+  // Bring a highlighted row (files just uploaded, or a path a message names)
+  // into view once it is in the tree.
+  useLayoutEffect(() => {
+    if (!treeActive || highlightedPaths.size === 0) return;
+    const root = rootRef.current;
+    if (!root) return;
+    const scroller = root.closest(".sidebar-files-scroll") as HTMLElement | null;
+    if (!scroller || scroller.getClientRects().length === 0) return;
+    const signature = [...highlightedPaths].sort().join("\n");
+    if (revealDoneRef.current === signature) return;
+    const index = treeDisplayRows.findIndex((row) => row.kind === "tree" && highlightedPaths.has(row.row.node.fullPath));
+    if (index < 0) return;
+    const next = revealScrollTop(treeOffsets, index, scroller.scrollTop, scroller.clientHeight);
+    if (next !== null) scroller.scrollTop = scroll.offsetAbove + next;
+    revealDoneRef.current = signature;
+  }, [treeActive, treeDisplayRows, treeOffsets, highlightedPaths, scroll.offsetAbove]);
 
   const showUploadFeedback = uploadBusy || pendingConflict !== null || uploadError !== null || uploadSummary !== null;
 
@@ -1081,6 +1356,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
   return (
     <div
+      ref={rootRef}
       style={{ minHeight: "100%" }}
       onContextMenu={handleRowContextMenu}
       onDragEnter={handleExplorerDragEnter}
@@ -1089,257 +1365,218 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       onDrop={handleExplorerDrop}
     >
       <input ref={uploadInputRef} type="file" multiple hidden onChange={handleUploadInput} />
-      {showUploadFeedback && (
-        <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
-        {uploadBusy && (
-          <div role="status" aria-live="polite" aria-label={uploadPhase === "checking" ? t("files.checking") : t("files.uploading", { progress: uploadProgress })}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 14, color: "var(--text-muted)" }}>
-              {uploadPhase === "checking" ? (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" style={{ animation: "spin 0.8s linear infinite" }} aria-hidden="true">
-                  <path d="M21 12a9 9 0 1 1-5.7-8.4" />
-                </svg>
-              ) : (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M12 16V4" />
-                  <path d="m7 9 5-5 5 5" />
-                  <path d="M5 20h14" />
-                </svg>
-              )}
-              {uploadPhase === "uploading" && <span style={{ fontSize: 10 }}>{uploadProgress}%</span>}
-            </div>
-            {uploadPhase === "uploading" && (
-              <div style={{ height: 3, marginTop: 4, overflow: "hidden", borderRadius: 2, background: "var(--border)" }}>
-                <div style={{ width: `${uploadProgress}%`, height: "100%", background: "var(--text-muted)", transition: "width 120ms ease" }} />
-              </div>
-            )}
-          </div>
-        )}
-
-        {pendingConflict && (
-          <div role="alert" style={{ padding: 7, border: "1px solid color-mix(in srgb, #f59e0b 55%, var(--border))", borderRadius: 4, background: "color-mix(in srgb, #f59e0b 9%, var(--bg-panel))" }}>
-            <div style={{ fontSize: 11, color: "var(--text)", lineHeight: 1.35, overflowWrap: "anywhere" }}>
-              {t("files.conflictSummary", { count: pendingConflict.conflicts.length, countSuffix: pendingConflict.conflicts.length === 1 ? "" : "s", files: pendingConflict.conflicts.join(", ") })}
-            </div>
-            {pendingConflict.nonReplaceable.length > 0 && (
-              <div style={{ marginTop: 3, fontSize: 10, color: "#f59e0b", lineHeight: 1.35, overflowWrap: "anywhere" }}>
-                {t("files.cannotReplace", { files: pendingConflict.nonReplaceable.join(", ") })}
-              </div>
-            )}
-            <div style={{ display: "flex", gap: 5, marginTop: 7 }}>
-              <button type="button" onClick={() => void performUpload(pendingConflict.files, "overwrite", pendingConflict.directory)} style={{ height: 22, padding: "0 7px", border: "1px solid #ef4444", borderRadius: 4, background: "transparent", color: "#ef4444", cursor: "pointer", fontSize: 10 }}>
-                {t("files.replace")}
-              </button>
-              <button type="button" onClick={() => void performUpload(pendingConflict.files, "skip", pendingConflict.directory)} style={{ height: 22, padding: "0 7px", border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--text)", cursor: "pointer", fontSize: 10 }}>
-                {t("files.skipExisting")}
-              </button>
-              <button type="button" onClick={() => setPendingConflict(null)} style={{ height: 22, padding: "0 7px", border: "none", borderRadius: 4, background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontSize: 10 }}>
-                {t("files.cancel")}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {uploadError && (
-          <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 11, lineHeight: 1.35, color: "#f87171" }}>
-            <span style={{ minWidth: 0, flex: 1, overflowWrap: "anywhere" }}>{uploadError}</span>
-            <DismissButton onClick={() => setUploadError(null)} title={t("files.dismissError")} />
-          </div>
-        )}
-
-        {uploadSummary && (
-          <div aria-live="polite">
-            <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 22, fontSize: 11 }}>
-              <div style={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
-                {uploadSummary.uploaded.length > 0 && (
-                  <span title={`${uploadSummary.uploaded.length} uploaded`} aria-label={`${uploadSummary.uploaded.length} uploaded`} style={{ display: "flex", alignItems: "center", gap: 3, color: "#22c55e" }}>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="m5 12 4 4L19 6" />
+      <div ref={aboveRef}>
+        {showUploadFeedback && (
+          <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
+            {uploadBusy && (
+              <div role="status" aria-live="polite" aria-label={uploadPhase === "checking" ? t("files.checking") : t("files.uploading", { progress: uploadProgress })}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 14, color: "var(--text-muted)" }}>
+                  {uploadPhase === "checking" ? (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" style={{ animation: "spin 0.8s linear infinite" }} aria-hidden="true">
+                      <path d="M21 12a9 9 0 1 1-5.7-8.4" />
                     </svg>
-                    <span>{uploadSummary.uploaded.length}</span>
-                  </span>
-                )}
-                {uploadSummary.skipped.length > 0 && (
-                  <span title={`${uploadSummary.skipped.length} skipped`} aria-label={`${uploadSummary.skipped.length} skipped`} style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--text-dim)" }}>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                      <circle cx="12" cy="12" r="9" />
-                      <path d="M8 12h8" />
-                    </svg>
-                    <span>{uploadSummary.skipped.length}</span>
-                  </span>
-                )}
-                {uploadSummary.errors.length > 0 && (
-                  <span title={`${uploadSummary.errors.length} failed`} aria-label={`${uploadSummary.errors.length} failed`} style={{ display: "flex", alignItems: "center", gap: 3, color: "#f87171" }}>
+                  ) : (
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M12 3 2.5 20h19L12 3Z" />
-                      <path d="M12 9v4" />
+                      <path d="M12 16V4" />
+                      <path d="m7 9 5-5 5 5" />
+                      <path d="M5 20h14" />
+                    </svg>
+                  )}
+                  {uploadPhase === "uploading" && <span style={{ fontSize: 10 }}>{uploadProgress}%</span>}
+                </div>
+                {uploadPhase === "uploading" && (
+                  <div style={{ height: 3, marginTop: 4, overflow: "hidden", borderRadius: 2, background: "var(--border)" }}>
+                    <div style={{ width: `${uploadProgress}%`, height: "100%", background: "var(--text-muted)", transition: "width 120ms ease" }} />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {pendingConflict && (
+              <div role="alert" style={{ padding: 7, border: "1px solid color-mix(in srgb, #f59e0b 55%, var(--border))", borderRadius: 4, background: "color-mix(in srgb, #f59e0b 9%, var(--bg-panel))" }}>
+                <div style={{ fontSize: 11, color: "var(--text)", lineHeight: 1.35, overflowWrap: "anywhere" }}>
+                  {t("files.conflictSummary", { count: pendingConflict.conflicts.length, countSuffix: pendingConflict.conflicts.length === 1 ? "" : "s", files: pendingConflict.conflicts.join(", ") })}
+                </div>
+                {pendingConflict.nonReplaceable.length > 0 && (
+                  <div style={{ marginTop: 3, fontSize: 10, color: "#f59e0b", lineHeight: 1.35, overflowWrap: "anywhere" }}>
+                    {t("files.cannotReplace", { files: pendingConflict.nonReplaceable.join(", ") })}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 5, marginTop: 7 }}>
+                  <button type="button" onClick={() => void performUpload(pendingConflict.files, "overwrite", pendingConflict.directory)} style={{ height: 22, padding: "0 7px", border: "1px solid #ef4444", borderRadius: 4, background: "transparent", color: "#ef4444", cursor: "pointer", fontSize: 10 }}>
+                    {t("files.replace")}
+                  </button>
+                  <button type="button" onClick={() => void performUpload(pendingConflict.files, "skip", pendingConflict.directory)} style={{ height: 22, padding: "0 7px", border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--text)", cursor: "pointer", fontSize: 10 }}>
+                    {t("files.skipExisting")}
+                  </button>
+                  <button type="button" onClick={() => setPendingConflict(null)} style={{ height: 22, padding: "0 7px", border: "none", borderRadius: 4, background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontSize: 10 }}>
+                    {t("files.cancel")}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {uploadError && (
+              <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 11, lineHeight: 1.35, color: "#f87171" }}>
+                <span style={{ minWidth: 0, flex: 1, overflowWrap: "anywhere" }}>{uploadError}</span>
+                <DismissButton onClick={() => setUploadError(null)} title={t("files.dismissError")} />
+              </div>
+            )}
+
+            {uploadSummary && (
+              <div aria-live="polite">
+                <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 22, fontSize: 11 }}>
+                  <div style={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
+                    {uploadSummary.uploaded.length > 0 && (
+                      <span title={`${uploadSummary.uploaded.length} uploaded`} aria-label={`${uploadSummary.uploaded.length} uploaded`} style={{ display: "flex", alignItems: "center", gap: 3, color: "#22c55e" }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="m5 12 4 4L19 6" />
+                        </svg>
+                        <span>{uploadSummary.uploaded.length}</span>
+                      </span>
+                    )}
+                    {uploadSummary.skipped.length > 0 && (
+                      <span title={`${uploadSummary.skipped.length} skipped`} aria-label={`${uploadSummary.skipped.length} skipped`} style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--text-dim)" }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
+                          <circle cx="12" cy="12" r="9" />
+                          <path d="M8 12h8" />
+                        </svg>
+                        <span>{uploadSummary.skipped.length}</span>
+                      </span>
+                    )}
+                    {uploadSummary.errors.length > 0 && (
+                      <span title={`${uploadSummary.errors.length} failed`} aria-label={`${uploadSummary.errors.length} failed`} style={{ display: "flex", alignItems: "center", gap: 3, color: "#f87171" }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M12 3 2.5 20h19L12 3Z" />
+                          <path d="M12 9v4" />
+                          <path d="M12 17h.01" />
+                        </svg>
+                        <span>{uploadSummary.errors.length}</span>
+                      </span>
+                    )}
+                  </div>
+                  {uploadSummary.uploaded.length > 0 && onAtMentions && (
+                    <button
+                      type="button"
+                      onClick={addUploadedFilesToChat}
+                      title={uploadSummary.uploaded.length === 1 ? t("files.addUploadedFile") : t("files.addAllUploadedFiles")}
+                      aria-label={uploadSummary.uploaded.length === 1 ? t("files.addUploadedFile") : t("files.addAllUploadedFiles")}
+                      style={{ height: 22, padding: "0 7px", display: "flex", alignItems: "center", justifyContent: "center", gap: 4, flexShrink: 0, border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--accent)", cursor: "pointer", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}
+                    >
+                      <MentionIcon />
+                      {t("files.mention")}
+                    </button>
+                  )}
+                  <DismissButton onClick={() => setUploadSummary(null)} title={t("files.dismissUploadResults")} />
+                </div>
+                {uploadSummary.errors.map((item) => (
+                  <div key={item.name} title={item.error} style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3, minWidth: 0, fontSize: 10, color: "#f87171" }}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 8v5" />
                       <path d="M12 17h.01" />
                     </svg>
-                    <span>{uploadSummary.errors.length}</span>
-                  </span>
-                )}
-              </div>
-              {uploadSummary.uploaded.length > 0 && onAtMentions && (
-                <button
-                  type="button"
-                  onClick={addUploadedFilesToChat}
-                  title={uploadSummary.uploaded.length === 1 ? t("files.addUploadedFile") : t("files.addAllUploadedFiles")}
-                  aria-label={uploadSummary.uploaded.length === 1 ? t("files.addUploadedFile") : t("files.addAllUploadedFiles")}
-                  style={{ height: 22, padding: "0 7px", display: "flex", alignItems: "center", justifyContent: "center", gap: 4, flexShrink: 0, border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--accent)", cursor: "pointer", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}
-                >
-                  <MentionIcon />
-                  {t("files.mention")}
-                </button>
-              )}
-              <DismissButton onClick={() => setUploadSummary(null)} title={t("files.dismissUploadResults")} />
-            </div>
-            {uploadSummary.errors.map((item) => (
-              <div key={item.name} title={item.error} style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3, minWidth: 0, fontSize: 10, color: "#f87171" }}>
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M12 8v5" />
-                  <path d="M12 17h.01" />
-                </svg>
-                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        </div>
-      )}
-
-      {fileSearchOpen && (
-      <div style={{ padding: "2px 8px 6px" }}>
-        <div style={{ position: "relative" }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text-dim)", pointerEvents: "none" }}>
-            <circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />
-          </svg>
-          <input
-            ref={searchInputRef}
-            id="file-search-input"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            onKeyDown={(event) => { if (event.key === "Escape") onFileSearchOpenChange?.(false); }}
-            placeholder={t("sidebar.searchFilesPlaceholder")}
-            aria-label={t("sidebar.searchFiles")}
-            style={{ width: "100%", boxSizing: "border-box", padding: "6px 24px", border: "1px solid var(--border)", borderRadius: 8, outline: "none", background: "var(--bg)", color: "var(--text)", fontFamily: "var(--font-mono)", fontSize: 11 }}
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery("")}
-              title={t("sidebar.clearSearch")}
-              aria-label={t("sidebar.clearSearch")}
-              style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, padding: 0, border: "none", borderRadius: 4, background: "none", color: "var(--text-dim)", cursor: "pointer" }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-dim)"; }}
-            >
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M18 6 6 18" /><path d="m6 6 12 12" />
-              </svg>
-            </button>
-          )}
-        </div>
-        {hasSearchQuery && (
-          <div style={{ paddingTop: 3 }}>
-            {searchLoading && <div role="status" style={{ padding: "6px 2px", fontSize: 10, color: "var(--text-dim)" }}>{t("sidebar.searchingFiles")}</div>}
-            {!searchLoading && searchError && <div role="alert" style={{ padding: "6px 2px", fontSize: 10, color: "#f87171" }}>{t("i18n.networkError")}</div>}
-            {!searchLoading && !searchError && searchPaths.length === 0 && <div style={{ padding: "6px 2px", fontSize: 10, color: "var(--text-dim)" }}>{t("sidebar.noMatchingFiles")}</div>}
-            {!searchLoading && !searchError && searchPaths.length > 0 && (
-              <div>
-                {searchRoots.map((node) => (
-                  <TreeNode
-                    key={`${searchQuery}:${node.fullPath}`}
-                    node={node}
-                    depth={0}
-                    cwd={cwd}
-                    onOpenFile={onOpenFile}
-                    expandedPaths={searchExpanded}
-                    onToggleExpanded={(fullPath, open) => {
-                      setSearchExpanded((prev) => {
-                        const next = new Set(prev);
-                        if (open) next.add(fullPath); else next.delete(fullPath);
-                        return next;
-                      });
-                    }}
-                    highlightedPaths={highlightedPaths}
-                    gitStatusByPath={gitStatusByPath}
-                    changedDirectoryPaths={changedDirectoryPaths}
-                    dropTargetPath={dropTargetPath}
-                    onDropFiles={handleDropFiles}
-                    onDropTargetChange={handleDropTargetChange}
-                    t={t}
-                  />
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
+                  </div>
                 ))}
               </div>
             )}
           </div>
         )}
+
+        {fileSearchOpen && (
+          <div style={{ padding: "2px 8px 6px" }}>
+            <div style={{ position: "relative" }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text-dim)", pointerEvents: "none" }}>
+                <circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />
+              </svg>
+              <input
+                ref={searchInputRef}
+                id="file-search-input"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={(event) => { if (event.key === "Escape") onFileSearchOpenChange?.(false); }}
+                placeholder={t("sidebar.searchFilesPlaceholder")}
+                aria-label={t("sidebar.searchFiles")}
+                style={{ width: "100%", boxSizing: "border-box", padding: "6px 24px", border: "1px solid var(--border)", borderRadius: 8, outline: "none", background: "var(--bg)", color: "var(--text)", fontFamily: "var(--font-mono)", fontSize: 11 }}
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  title={t("sidebar.clearSearch")}
+                  aria-label={t("sidebar.clearSearch")}
+                  style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, padding: 0, border: "none", borderRadius: 4, background: "none", color: "var(--text-dim)", cursor: "pointer" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-dim)"; }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* The search results render in full: a query is capped at a handful of
+          matches, so there is nothing to window. */}
+      {searchActive && (
+        <div style={{ padding: "3px 8px 6px" }}>
+          {searchLoading && <div role="status" style={{ padding: "6px 2px", fontSize: 10, color: "var(--text-dim)" }}>{t("sidebar.searchingFiles")}</div>}
+          {!searchLoading && searchError && <div role="alert" style={{ padding: "6px 2px", fontSize: 10, color: "#f87171" }}>{t("i18n.networkError")}</div>}
+          {!searchLoading && !searchError && searchPaths.length === 0 && <div style={{ padding: "6px 2px", fontSize: 10, color: "var(--text-dim)" }}>{t("sidebar.noMatchingFiles")}</div>}
+          {!searchLoading && !searchError && searchPaths.length > 0 && (
+            <div>
+              {searchRows.map((row) => (
+                <div key={row.key}>{renderTreeRow(row, handleSearchToggle, { gitStatusByPath, changedDirectoryPaths, highlightedPaths, dropTargetPath }, handlersRef, t)}</div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
-      {!changesCollapsed && gitFiles.length > 0 && (
+      {/* The changed-files list: windowed, since a large repository lists
+          hundreds. Mutually exclusive with the tree below. */}
+      {changedShown && (
         <div style={{ padding: "0 4px 2px" }}>
-          <div
-            aria-label={t("files.changeStats", {
-              count: gitFiles.length,
-              additions: gitLineStats.additions,
-              deletions: gitLineStats.deletions,
-            })}
-            style={{ display: "flex", alignItems: "center", gap: 6, height: 24, padding: "0 10px", fontSize: 12 }}
-          >
-            <span style={{ color: "var(--text-dim)" }}>
-              {t("files.changedCount", { count: gitFiles.length })}
-            </span>
-            <span style={{ color: GIT_STATUS_COLORS.added, fontFamily: "var(--font-mono)" }}>+{gitLineStats.additions}</span>
-            <span style={{ color: GIT_STATUS_COLORS.deleted, fontFamily: "var(--font-mono)" }}>-{gitLineStats.deletions}</span>
-          </div>
-          {gitFiles.map((status) => (
-            <ChangeRow
-              key={status.filePath}
-              status={status}
-              cwd={cwd}
-              onOpenFile={onOpenFile}
-              t={t}
-            />
-          ))}
+          <WindowedList
+            rows={changeDisplayRows}
+            scrollTop={scroll.scrollTop}
+            viewportHeight={scroll.viewportHeight}
+            offsetAbove={scroll.offsetAbove}
+            gitStatusByPath={gitStatusByPath}
+            changedDirectoryPaths={changedDirectoryPaths}
+            highlightedPaths={highlightedPaths}
+            dropTargetPath={dropTargetPath}
+            handlers={handlersRef}
+            cwd={cwd}
+            t={t}
+            listRef={listRef}
+          />
         </div>
       )}
 
       {(changesCollapsed || gitFiles.length === 0) && (!fileSearchOpen || !hasSearchQuery) && (
         <div style={{ padding: "2px 4px" }}>
-          {loading ? (
-            <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>Loading files...</div>
-          ) : error ? (
-            <div style={{ padding: "8px 12px", fontSize: 11, color: "#f87171" }}>{error}</div>
-          ) : (
-            roots.map((node) => (
-              <TreeNode
-                key={node.fullPath}
-                node={node}
-                depth={0}
-                cwd={cwd}
-                onOpenFile={onOpenFile}
-                expandedPaths={expandedPaths}
-                onToggleExpanded={handleToggleExpanded}
-                refreshToken={refreshToken}
-                highlightedPaths={highlightedPaths}
-                gitStatusByPath={gitStatusByPath}
-                changedDirectoryPaths={changedDirectoryPaths}
-                showHidden={showHidden}
-                dropTargetPath={dropTargetPath}
-                onDropFiles={handleDropFiles}
-                onDropTargetChange={handleDropTargetChange}
-                t={t}
-              />
-            ))
-          )}
-          {!loading && !error && roots.length === 0 && (
-            <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>
-              {t("files.noFiles")}
-            </div>
-          )}
+          <WindowedList
+            rows={treeDisplayRows}
+            scrollTop={scroll.scrollTop}
+            viewportHeight={scroll.viewportHeight}
+            offsetAbove={scroll.offsetAbove}
+            gitStatusByPath={gitStatusByPath}
+            changedDirectoryPaths={changedDirectoryPaths}
+            highlightedPaths={highlightedPaths}
+            dropTargetPath={dropTargetPath}
+            handlers={handlersRef}
+            cwd={cwd}
+            t={t}
+            listRef={listRef}
+          />
         </div>
       )}
+
       {/* Last, pinned to the bottom: at the top it pushed every row down as
           a drag came in, so the row under the pointer changed. Drags pass
           through it to the row it covers. */}
