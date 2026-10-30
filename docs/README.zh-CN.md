@@ -111,17 +111,17 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **属于自己的一套外观，在每套配色之下。** Pi Web 打开就是一套统一的视觉：黑曜石底上的琥珀，所有浮起来的东西共用一种玻璃材质，衬线体写品牌、无衬线体写界面、等宽体只留给数据。控制台就是页面，工具调用读起来像一行带状态点的日志，你自己的发言是暖色渐变气泡，设置的各个分区收进左侧导航。明、暗两套主题属于这套设计；其余配色保留自己的强调色、自己的气泡和语法配色，只共用它的表面与字体。字体取自 Google Fonts。原版提供的是原生界面，由每套配色重新上色。（[说明](./agents/design.md)）
 
-**长时间运行的命令转后台。** shell 命令跑过两分钟就移交成后台任务：agent 继续往下做，命令结束后带着日志文件以一张已完成的卡片回来。它打印的行数超过模型用 `max_output_lines` 设的上限时也会移交，所以一条会把上下文灌爆的命令，不必靠砍短输出来躲。开关在**设置 → 常规 → 后台 bash 任务**，默认关闭；关着的时候就是原版那个 bash 工具，一模一样。只有开关打开时，模型才能看到 `run_in_background` 和 `max_output_lines` 这两个参数。原版的立场是：后台执行该由 pi 自己提供，而不是由网页包装层提供（[#1132](https://github.com/agegr/pi-web/pull/1132)）。（[移交是怎么发生的](./agents/background-bash.md#two-ways-into-the-background)）
+**长时间运行的命令转后台。** shell 命令跑过两分钟就移交成后台任务：agent 继续往下做，命令结束后带着日志文件以一张已完成的卡片回来。它打印的行数超过模型用 `max_output_lines` 设的上限时也会移交，所以一条会把上下文灌爆的命令，不必靠砍短输出来躲。开关在**设置 → 常规 → 后台 bash 任务**，默认关闭；关着的时候就是原版那个 bash 工具，一模一样。原版的立场是：后台执行该由 pi 自己提供，而不是由网页包装层提供（[#1132](https://github.com/agegr/pi-web/pull/1132)）。（[移交是怎么发生的](./agents/background-bash.md#two-ways-into-the-background)）
 
-**跑完的东西不会再看不见。** 后台命令或子代理没法在父会话运行途中报告自己，而在过去也没有任何东西说明有结果在等。已结算的报告汇成一批送达，只把父会话唤醒一次，每份仍保留自己的卡片；在还没有结果、而后台仍在跑的时候，`await_notifications` 会等到下一份报告；等待期间每个轮次都会收到一次提醒。模型已经用 `get_subagent_result` 读过的结果会从这一批里撤下，不会再通知一遍。原版是一份发一条消息，而且要等父会话空闲。（[说明](./agents/pending-notifications.md)）
+**跑完的东西不会再看不见。** 后台命令或子代理没法在父会话运行途中报告自己。已结算的报告汇成一批送达，只把父会话唤醒一次，每份仍保留自己的卡片；在还没有结果、而后台仍在跑的时候，`await_notifications` 会等到下一份报告；等待期间每个轮次都会收到一次提醒。模型已经用 `get_subagent_result` 读过的结果会从这一批里撤下。原版是一份发一条消息，而且要等父会话空闲。（[说明](./agents/pending-notifications.md)）
 
-**断流不再赔上整次运行。** 有些中继会在响应中途掐断 HTTP/2 流，而断流曾经会直接结束运行：回答写到一半就停下，也不会重试。pi 自己的重试表从 1.4.0 起收录了常见的措辞，本分支再补上它还没收的那些，沿用 pi 自己的重试次数与退避，同时仍然把你按下的「停止」、额度被拒、上下文装满当作致命错误处理。原版的立场是浏览器应当和终端里的 pi 重试得一模一样（[#1134](https://github.com/agegr/pi-web/pull/1134)）；本分支从外部读取 pi 的判定，并由一条测试在 pi 改名时把构建跑红。（[重试什么、不重试什么](./agents/sessions.md#agentsession-lifecycle-librpc-managerts)）
+**断流不再赔上整次运行。** 有些中继会在响应中途掐断 HTTP/2 流，运行就连同写到一半的回答一起停下。pi 自己的重试表从 1.4.0 起收录了常见的措辞，本分支再补上它还没收的那些，沿用 pi 自己的重试次数与退避，同时仍然把你按下的「停止」、额度被拒、上下文装满当作致命错误处理。原版的立场是浏览器应当和终端里的 pi 重试得一模一样（[#1134](https://github.com/agegr/pi-web/pull/1134)）。（[重试什么、不重试什么](./agents/sessions.md#agentsession-lifecycle-librpc-managerts)）
 
-**一眼能读懂的 shell 命令。** bash 工具卡片里的命令按 shell 语法高亮，不再是一整条灰字；展开后显示命令本身和它的超时，而不是原始 JSON——于是 `grep -rl "foo" src | xargs rm` 看起来就是一条管道。在后台跑的命令另有 `(background)` 标记。原版会在参数行里随着流量显示出命令的文字（[#1396](https://github.com/agegr/pi-web/pull/1396)），其余部分仍选择不带样式（[#1135](https://github.com/agegr/pi-web/pull/1135)）。（[说明](./agents/sessions.md#tool-execution-events-on-the-sse-stream)）
+**一眼能读懂的 shell 命令。** bash 工具卡片里的命令按 shell 语法高亮，不再是一整条灰字；展开后显示命令本身和它的超时，而不是原始 JSON——于是 `grep -rl "foo" src | xargs rm` 看起来就是一条管道。模型主动要求放到后台跑的命令另有 `(background)` 标记。原版会在参数行里随着流量显示出命令的文字（[#1396](https://github.com/agegr/pi-web/pull/1396)），其余部分仍选择不带样式（[#1135](https://github.com/agegr/pi-web/pull/1135)）。（[说明](./agents/sessions.md#tool-execution-events-on-the-sse-stream)）
 
-**在对话旁边读文件的那一段。** 点开一张已完成的 `read` 卡片，右侧面板就打开这次调用真正返回的那一段：Markdown 按 Markdown 渲染、一键就能切回它的源码，源码行号从这次读取起始的那一行接着数，CSV 和 TSV 直接成表格、用的还是文件真实行号。面板显示的是模型拿到的内容，不是文件此刻的样子——不重新请求、也不重新读盘，所以面板和记录可以互相对账。卡片保留自己的输出。原版把 read 的输出留在卡片里，并把那张分隔符表格用在文件预览中（[#1136](https://github.com/agegr/pi-web/pull/1136)、[#1150](https://github.com/agegr/pi-web/pull/1150)）。（[说明](./agents/sessions.md#a-read-card-opens-its-slice-in-the-right-panel-toolcallblock-componentsreadsnapshotviewertsx)）
+**在对话旁边读文件的那一段。** 点开一张已完成的 `read` 卡片，右侧面板就打开这次调用真正返回的那一段：Markdown 按 Markdown 渲染、一键就能切回它的源码，源码行号从这次读取起始的那一行接着数，CSV 和 TSV 直接成表格、用的还是文件真实行号。面板显示的是模型拿到的内容，不是文件此刻的样子——不重新请求、也不重新读盘。卡片保留自己的表头，把文字交给面板。原版把 read 的输出留在卡片里，并把那张分隔符表格用在文件预览中（[#1136](https://github.com/agegr/pi-web/pull/1136)、[#1150](https://github.com/agegr/pi-web/pull/1150)）。（[说明](./agents/sessions.md#a-read-card-opens-its-slice-in-the-right-panel-toolcallblock-componentsreadsnapshotviewertsx)）
 
-**再长的源码行也不会把行号带走。** 在右侧面板里把一行宽代码横向挪动时，行号那一栏钉在原地，不再跟着文字一起滑出去、让你重新找自己刚才停在哪一行。横向滚动条本身只走在代码下面，不会横穿行号。代码字号比原版小一号，源码视图、Diff 视图和读取快照面板一起跟着这一套字号走。原版也在 [#1200](https://github.com/agegr/pi-web/pull/1200) 里把行号钉住了，只是钉在代码自己的滚动容器里，于是横向滚动条仍然从行号下面穿过去。（[说明](./agents/files-and-access.md#the-line-number-gutter-beside-the-code)）
+**再长的源码行也不会把行号带走。** 在右侧面板里把一行宽代码横向挪动时，行号那一栏钉在原地。在源码视图里，横向滚动条只走在代码下面，不会横穿行号。代码字号比原版小一号，源码视图、Diff 视图和读取快照面板一起跟着这一套字号走。原版也在 [#1200](https://github.com/agegr/pi-web/pull/1200) 里把行号钉住了，只是钉在代码自己的滚动容器里，于是横向滚动条仍然从行号下面穿过去。（[说明](./agents/files-and-access.md#the-line-number-gutter-beside-the-code)）
 
 **散文默认折行，代码不折。** Markdown 和纯文本文件的源码视图和 Diff 视图打开时就按面板宽度折行，长句子能一口气读到底，不必拖动横向滚动条去找后半句。源代码则默认不折行，一行一行铺开、横向滚动——和编辑器一致，因为读代码靠的是缩进和列对齐，日志也按这条走。折行按钮仍然可以随手翻转任意一种文件，这个选择会在标签页里保留。原版所有文件都默认不折行。（[说明](./agents/files-and-access.md#which-lines-wrap)）
 
@@ -133,23 +133,23 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **模型没回答的消息，「停止」把它还给你。** 在一次什么都没产出的运行上按「停止」——没有一个字、没有一段思考、没有启动过工具——那条消息就回到输入框里，对话也退回到它之前：记录里不会留着一条没有人回答的消息，再试一次也不需要开分支。已经开始思考的运行算已经有了回答，在那里按「停止」只是停下它。被放弃的提示词仍留在会话文件里，所以分支切换器还能把它显示出来。原版把那条消息连同一条空回复留在原处，而从那条消息编辑就会在你旁边另开一个分支。（[说明](./agents/sessions.md#stop-and-the-prompt-that-got-no-reply-librpc-managerts-hooksuseagentsessionts)）
 
-**工具参数按行显示，不再是一段 JSON。** 参数都是单个值的工具卡片，会一个参数一行地列出来——`write` 写下的路径和正文、子代理的 profile 和 prompt、MCP 工具的 query 和 limit——本身带换行的值保留成一块可以滚动的文本。规则是全部参数都上表，否则一个也不上：只要有一个值是嵌套的，比如 `edit` 的 `edits[]`、或者 MCP 参数里装着列表，这张卡片就照旧显示 JSON，因为一行漏掉子树就等于一个谁也看不见的参数。原版的处理同样是单个值的参数按行显示，但 `write` 保留自己那套看法：只显示文件正文，路径不跟在旁边。（[说明](./agents/sessions.md#tool-execution-events-on-the-sse-stream)）
+**工具参数按行显示，不再是一段 JSON。** 参数都是单个值的工具卡片，会一个参数一行地列出来——`write` 写下的路径和正文、子代理的 profile 和 prompt、MCP 工具的 query 和 limit——本身带换行的值保留成一块可以滚动的文本。规则是全部参数都上表，否则一个也不上：只要有一个值是嵌套的，比如 MCP 参数里装着列表，这张卡片就照旧显示 JSON。原版的处理同样是单个值的参数按行显示，但 `write` 保留自己那套看法：只显示文件正文，路径不跟在旁边。（[说明](./agents/sessions.md#tool-execution-events-on-the-sse-stream)）
 
-**模型写下的文字留在屏幕上，只折叠中间的过程。** 一次运行按片段渲染：它写的文字就在写下的位置显示，中间连着的思考块和工具调用各自折进自己那一组「处理详情」。最后一组下面只有一个结尾，写着这次运行的事：token 数与耗时、这一轮改过的文件、交出全部文字的「复制」，还有运行停在 Provider 报错或输出上限上时的那句原因（[#906](https://github.com/agegr/pi-web/issues/906)）。原版只保留最后一次工具调用之后的文字，并把数字、改动文件清单和失败原因挂到那条回复消息上。（[说明](./agents/sessions.md#a-turn-shows-every-word-it-wrote-only-the-workings-fold-processdetailsgroup-componentschatwindowtsx)）
+**模型写下的文字留在屏幕上，只折叠中间的过程。** 一次运行按片段渲染：它写的文字就在写下的位置显示，中间连着的思考块和工具调用各自折进自己那一组「处理详情」。最后一组下面只有一个结尾，写着这次运行的事：token 数与耗时、这一轮改过的文件、交出全部文字的「复制」；运行停在 Provider 报错或输出上限上时，那句原因就写在它上面一行（[#906](https://github.com/agegr/pi-web/issues/906)）。原版只保留最后一次工具调用之后的文字，并把数字、改动文件清单和失败原因挂到那条回复消息上。（[说明](./agents/sessions.md#a-turn-shows-every-word-it-wrote-only-the-workings-fold-processdetailsgroup-componentschatwindowtsx)）
 
 **子代理的报告按 Markdown 渲染。** `Agent` 或 `get_subagent_result` 的结果会把标题、列表、表格和围栏代码真的渲染出来，字号仍是这张卡片自己那一号，不再把子代理写下的标记符号直接摆给你看。其他工具的输出仍是原始文本——在那里 `*` 和 `#` 只是字符，不是标题。后台运行的通知和子代理自己的标签页本来就已经按 Markdown 渲染，这一份报告在两处读起来是同一个样子。原版是把报告原样打印。（[说明](./agents/subagents.md#the-report-on-screen)）
 
 **思考过程按 Markdown 渲染。** 展开的思考块走的是和回复同一套 Markdown 流水线：标题、列表、表格和围栏代码都渲染出来，不再把标记符号直接摆给你看，写成链接的路径也能在应用里打开。字号仍是这张卡片一贯的那一号。原版的处理是把整段思考当成一串保留换行的纯文本，长了就切成好几段（[#1196](https://github.com/agegr/pi-web/pull/1196)）。（[说明](./agents/sessions.md#thinking-renders-as-markdown-at-the-cards-own-size-thinkingblock-componentsmessageviewtsx)）
 
-**子代理由 profile 配置，不由模型猜。** 子代理的思考档位、轮次上限、是否继承这段对话，都由它的 profile 决定，于是一次运行可以从产出它的那份 profile 复现。`model` 是调用方唯一还能指定的参数，因为换某个模型跑一次是常见且明确的需求，而工具描述里列着每个 profile 自己的模型。要让子代理看哪些文件，就写在 `prompt` 里，它用自己的 `read` 去打开，被委派出去的会话因此只占它真正需要的上下文。原版另外接受调用上的 `input_files` 列表（[#1138](https://github.com/agegr/pi-web/pull/1138)）。（[说明](./agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）
+**子代理由 profile 配置，不由模型猜。** 子代理的思考档位、轮次上限、是否继承这段对话，都由它的 profile 决定，于是一次运行可以从产出它的那份 profile 复现。`model` 是调用方唯一还能指定的参数，思考档位就跟着这同一个引用走（写成 `x:high`），工具描述里列着每个 profile 自己的模型。要让子代理看哪些文件，就写在 `prompt` 里，它用自己的 `read` 去打开。原版另外接受调用上的 `input_files` 列表（[#1138](https://github.com/agegr/pi-web/pull/1138)）。（[说明](./agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）
 
-**委派规则自己成块。** 目标一清楚就该委派——这句话现在单独成块，作为 `<delegation>` 出现在系统提示的末尾，不再混在所有工具共用的那一串规则里，于是它读起来是 `Agent` 的策略，不是又一条泛泛的建议。它给 `explore` 和 `plan` 各写了规则——面对陌生的代码库要建立理解，或一处改动波及尚未摸清、必须小心处理的代码，就用 `explore`；需要先想清楚步骤的大型复杂任务，就用 `plan`，而且绝不和它所规划的工作同时进行，plan 也应该始终在前台运行——其余启用的子代理只列名字。它随每一次运行的提示发出，**系统提示**面板也能看到，包括被插件改写了提示的会话。原版把委派建议放在工具的 prompt guidelines 里，由 Pi 追加到扁平的 `<rules>` 列表。（[说明](./agents/subagents.md#delegation-policy)）
+**委派规则自己成块。** 目标一清楚就该委派——这句话现在单独成块，作为 `<delegation>` 出现在系统提示的末尾，读起来是 `Agent` 自己的策略。它给 `explore` 和 `plan` 各写了规则——面对陌生的代码库要建立理解，或一处改动波及尚未摸清、必须小心处理的代码，就用 `explore`；需要先想清楚步骤的大型复杂任务，就用 `plan`，而且绝不和它所规划的工作同时进行，plan 也应该始终在前台运行——其余启用的子代理只列名字。它随每一次运行的提示发出，**系统提示**面板也能看到，包括被插件改写了提示的会话。原版把委派建议放在工具的 prompt guidelines 里，由 Pi 追加到扁平的 `<rules>` 列表。（[说明](./agents/subagents.md#delegation-policy)）
 
-**模型可以停掉它委派出去的运行。** `abort_subagent` 让发起子代理的 agent 结束一个它不再想要的运行。后台运行不受父会话上「停止」的影响，而在此之前，除了删掉会话没有任何东西能结束它。这次运行进行到哪儿都留在它自己的记录里，事后可以读，也可以用 `resume` 接着往下跑；被模型停掉的运行不会再额外报一条说自己被停了。原版把同样的停止写成一个没有界面入口的服务端调用，而且给模型的是三个子代理工具，不是五个。（[说明](./agents/subagents.md#stopping-a-run)）
+**模型可以停掉它委派出去的运行。** `abort_subagent` 让发起子代理的 agent 结束一个它不再想要的运行。后台运行不受父会话上「停止」的影响。这次运行进行到哪儿都留在它自己的记录里，事后可以读，也可以用 `resume` 接着往下跑；被模型停掉的运行不会再额外报一条说自己被停了。原版把同样的停止写成一个没有界面入口的服务端调用，而且给模型的是三个子代理工具，不是五个。（[说明](./agents/subagents.md#stopping-a-run)）
 
 **模型能重新查到自己的子代理。** 一次 `list_subagent_runs` 调用就把本会话委派出去的子代理列成 TSV——id、profile、状态、最后活动时间和标签，正在运行的在最前面。它不会等待、启动或抓取结果，所以查一个忘了的运行不会把它唤醒。默认给的是真正需要看的那张进程表：正在运行的全部，加上最近一小时里失败、被停止或被中断的；更早的退出和成功完成的只用一行计数带过、不占篇幅，想看它们或看全部就传 `status`。原版不让模型列出本会话的子代理。（[说明](./agents/subagents.md#listing-delegated-runs)）
 
-**子代理用短 id 称呼。** 每份报告、每次停止和转向的回答、每一行运行列表，用的都是会话 id 的最后八位，`Agent` 的 `resume`、`get_subagent_result`、`steer_subagent`、`abort_subagent` 也都认这个写法，完整 id 仍然可用。会话 id 是有序 UUIDv7，头部就是启动时间，尾部才是区分两次运行的唯一部分，也是唯一值得在调用之间抄下来的部分。两次运行尾部相同时会被拒绝，不会替你猜。原版打印完整 UUID，也只接受完整 UUID。（[说明](./agents/subagents.md#short-subagent-ids)）
+**子代理用短 id 称呼。** 每份报告、每次停止和转向的回答、每一行运行列表，用的都是会话 id 的最后八位，`Agent` 的 `resume`、`get_subagent_result`、`steer_subagent`、`abort_subagent` 也都认这个写法，完整 id 仍然可用。会话 id 的尾部才是区分两次运行的唯一部分，也是唯一值得在调用之间抄下来的部分。两次运行尾部相同时会被拒绝，不会替你猜。原版打印完整 UUID，也只接受完整 UUID。（[说明](./agents/subagents.md#short-subagent-ids)）
 
 **内置子代理跟随会话的 Code mode。** Explore、Plan 和 General purpose 启动时沿用父会话正在用的 Code mode，不再永远直接调用工具；于是开着 Code mode 的会话不会在一委派出去就把它丢掉。工具权限不变，这三个配置也仍然只读——但在磁盘上放一个同名文件照样可以整体替换其中一个。原版把这三个的 Code mode 默认关着，而「设置 › 子代理」早就能按配置单独改它（[#1097](https://github.com/agegr/pi-web/pull/1097)），只是你不改就一直是关。（[说明](./agents/subagents.md)）
 
@@ -157,13 +157,11 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **文中的 shell 变量不再被当成公式。** 一个单独的 `$`，只要后面还有另一个 `$`，就会开一个公式，所以一句讲 `$HOME` 和 `$PATH` 的话会以数学斜体显示出来，夹在两个美元符号中间的中文句子也一样。这个分支会看两个定界符中间是什么——shell 变量名、只有 CJK 文本才有的标点、若干个汉字——并把那段文字原样留下，而 `$E=mc^2$`、`$PV=nRT$` 和一个短汉字量名仍按公式渲染。原版的数学解析只看定界符，它唯一的开关是把行内公式整个关掉，而不是只关掉那些其实是文字的一对（[remark-math](https://github.com/remarkjs/remark-math)）。（[说明](./agents/sessions.md#math-delimiters-and-prose-that-only-looks-like-a-formula)）
 
-**文件行自己的右键菜单。** 在项目文件树里右键某一行——在 Git 改动清单里右键也一样——这一行会给出这个文件自己的操作：把路径插入聊天、下载这个文件、撤销它未提交的改动（已暂存的一并取消暂存并还原内容），在访达 / 文件资源管理器 / 文件管理器里看到它，而且是选中这个文件本身，不只是打开它所在的目录。只有 Git 能还原的改动才有这一项——新增的文件、重命名、冲突都不算——而且它会先问一句再动手，因为它丢弃的内容不会保留。原版的处理是把前两项做成悬停时浮在文件名上的按钮；它通往文件管理器的入口只打开工作区所在目录，没有按文件的入口（[#907](https://github.com/agegr/pi-web/pull/907)）。（[说明](./agents/files-and-access.md#a-rows-own-actions)）
+**文件行自己的右键菜单。** 在项目文件树里右键某一行——在 Git 改动清单里右键也一样——这一行会给出这个文件自己的操作：把路径插入聊天、下载这个文件、撤销它未提交的改动（已暂存的一并取消暂存并还原内容），在访达 / 文件资源管理器 / 文件管理器里看到它，而且是选中这个文件本身，不只是打开它所在的目录。只有 Git 能还原的改动才有这一项——新增的文件、重命名、冲突都不算——而且它会先问一句再动手。原版的处理是把前两项做成悬停时浮在文件名上的按钮；它通往文件管理器的入口只打开工作区所在目录，没有按文件的入口（[#907](https://github.com/agegr/pi-web/pull/907)）。（[说明](./agents/files-and-access.md#a-rows-own-actions)）
 
 **删除会带走会话在别处留下的东西。** 隔离运行的 subagent 在自己的 git worktree 里工作，它的会话文件因此记在那个 worktree 路径下，自成目录。删除父会话时会通读整个 sessions 根目录去找这样的子会话，连它一起删，并把留下来的重新挂到最近一个仍然存在的祖先。被删空的东西也跟着走：它清空的目录，还有你在应用外删掉某个项目目录之后侧栏仍替它保有的位置和名称。原版寻找子会话、也寻找该改挂谁，只看被删文件所在的那些目录。（[说明](./agents/sessions.md#session-sidebar-project-groups-pins-and-archive)）
 
 **你自己取的名字，撑得过「生成标题」。** 在侧边栏里、或者用 `/name` 给会话取过名字之后，再按「生成标题」，你的名字原样不动：按钮会说明它保留了你取的名字。应用归不到自己名下的名字同样保留——pi TUI 取的、扩展取的、旧版本取的，都一样。只有没有名字的会话，或者名字本来就是「生成标题」自己取的，才会得到一个新名字。原版用模型写下的标题盖掉这个会话原本被叫做什么。（[说明](./agents/sessions.md#auto-naming-never-replaces-a-name-a-person-set-post-apisessionsidauto-name)）
-
-**解析不了的 settings 文件会报出自己的路径。** 读取全局 `settings.json` 的那些面板在报错时把文件路径一并带上，于是这条诊断直接指向要修的文件，而不是只把解析器的话重复一遍。文件原地不动：pi 读的是同一个文件，它继续报同一个错，并且拒绝一切写入，直到你手动把它修好。原版已在 [#1349](https://github.com/agegr/pi-web/pull/1349) 接受了这一条：它的报错同样带文件名。（[说明](./agents/tools.md)）
 
 **Code mode 默认开着，设置自成一页。** 会话一开始就能用 Code mode——模型写一小段脚本来调用工具——除非你的设置另有说法；它的设置都在同一页：始终开启或自动、内置工具是否同时声明给模型、工具列表能花多少 token、沙箱自检，以及当前会话可用的工具名。每个服务器自己的工具公开方式仍然留在那个服务器旁边。原版要等 MCP 服务器连上才打开 Code mode，设置也放在 MCP 那一页。（[说明](./agents/tools.md#settings--tools)）
 
