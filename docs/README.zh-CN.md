@@ -133,7 +133,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **模型没回答的消息，「停止」把它还给你。** 在一次什么都没产出的运行上按「停止」——没有一个字、没有一段思考、没有启动过工具——那条消息就回到输入框里，对话也退回到它之前：记录里不会留着一条没有人回答的消息，再试一次也不需要开分支。已经开始思考的运行算已经有了回答，在那里按「停止」只是停下它。被放弃的提示词仍留在会话文件里，所以分支切换器还能把它显示出来。原版把那条消息连同一条空回复留在原处，而从那条消息编辑就会在你旁边另开一个分支。（[说明](./agents/sessions.md#stop-and-the-prompt-that-got-no-reply-librpc-managerts-hooksuseagentsessionts)）
 
-**工具参数按行显示，不再是一段 JSON。** 参数都是单个值的工具卡片，会一个参数一行地列出来——`write` 写下的路径和正文、子代理的 profile 和 prompt、MCP 工具的 query 和 limit——本身带换行的值保留成一块可以滚动的文本。规则是全部参数都上表，否则一个也不上：只要有一个值是嵌套的，比如 MCP 参数里装着列表，这张卡片就照旧显示 JSON。原版的处理同样是单个值的参数按行显示，但 `write` 保留自己那套看法：只显示文件正文，路径不跟在旁边。（[说明](./agents/sessions.md#tool-execution-events-on-the-sse-stream)）
+**`write` 卡片把路径和它写下的正文并排显示。** 参数都是单个值的工具卡片会一个参数一行地列出来，本身带换行的值保留成一块可以滚动的文本；这里连 `write` 也上表，它给出的两行就是文件路径和写下的正文。规则是全部参数都上表，否则一个也不上：只要有一个值是嵌套的，比如 MCP 参数里装着列表，这张卡片就照旧显示 JSON。行表本身是上游从本分支收走的（[#1324](https://github.com/agegr/pi-web/pull/1324)），而原版把 `write` 排除在外：那张卡片只显示文件正文，路径不跟在旁边。（[说明](./agents/sessions.md#tool-execution-events-on-the-sse-stream)）
 
 **模型写下的文字留在屏幕上，只折叠中间的过程。** 一次运行按片段渲染：它写的文字就在写下的位置显示，中间连着的思考块和工具调用各自折进自己那一组「处理详情」。最后一组下面只有一个结尾，写着这次运行的事：token 数与耗时、这一轮改过的文件、交出全部文字的「复制」；运行停在 Provider 报错或输出上限上时，那句原因就写在它上面一行（[#906](https://github.com/agegr/pi-web/issues/906)）。原版只保留最后一次工具调用之后的文字，并把数字、改动文件清单和失败原因挂到那条回复消息上。（[说明](./agents/sessions.md#a-turn-shows-every-word-it-wrote-only-the-workings-fold-processdetailsgroup-componentschatwindowtsx)）
 
