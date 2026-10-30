@@ -136,15 +136,19 @@ export async function agentState(session: MockSession) {
   };
 }
 
+// The subagent tools are one group: a session with subagents off hides all of them, and one
+// with no pinned selection has all of them active, as a real session registers them together.
+const SUBAGENT_TOOL_NAMES = ["Agent", "get_subagent_result", "steer_subagent", "abort_subagent", "list_subagent_runs"];
+
 export function toolsFor(session: MockSession) {
   const pinned = readSessionToolSelectionFromEntries(session.entries);
-  const defaults = new Set(["read", "bash", "edit", "write", "Agent", "get_subagent_result", "steer_subagent"]);
+  const defaults = new Set(["read", "bash", "edit", "write", ...SUBAGENT_TOOL_NAMES]);
   return toolsCatalog
-    .filter((tool) => settings.subagentsEnabled || !["Agent", "get_subagent_result", "steer_subagent"].includes(tool.name))
+    .filter((tool) => settings.subagentsEnabled || !SUBAGENT_TOOL_NAMES.includes(tool.name))
     .map((tool) => ({
       ...tool,
       active: pinned
-        ? pinned.includes(tool.name) || (pinned.length > 0 && ["Agent", "get_subagent_result", "steer_subagent"].includes(tool.name))
+        ? pinned.includes(tool.name) || (pinned.length > 0 && SUBAGENT_TOOL_NAMES.includes(tool.name))
         : defaults.has(tool.name),
     }));
 }

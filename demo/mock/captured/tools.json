@@ -279,7 +279,7 @@
  },
  {
   "name": "Agent",
-  "description": "Delegate a focused task to a configured subagent. Each subagent runs as a full, inspectable Pi session. Use background mode for independent work and foreground mode when the result is needed immediately.\n\nAvailable agent types:\n- explore: Quickly inspect a codebase without modifying it (Tools: read, grep, find, ls)\n- general-purpose: Handle a focused implementation or investigation task (Tools: read, bash, edit, write, grep, find, ls)\n- plan: Design an implementation plan without modifying files (Tools: read, grep, find, ls)",
+  "description": "Delegate a task to a configured subagent: a full Pi session whose profile decides its tools. Use background mode for work that can run while you continue, foreground mode when you need the result now. A foreground wait defaults to 30 minutes; set wait_timeout (seconds) for a longer budget, and an exhausted one leaves the child running, its report arriving on its own.\n\nAvailable agent types:\n- explore: Quickly inspect a codebase without modifying it (Tools: read, grep, find, ls)\n- general-purpose: Handle a focused implementation or investigation task (Tools: read, bash, edit, write, grep, find, ls)\n- plan: Design an implementation plan without modifying files (Tools: read, grep, find, ls)",
   "parameters": {
    "type": "object",
    "required": [
@@ -297,7 +297,7 @@
     },
     "resume": {
      "type": "string",
-     "description": "Existing subagent session ID to continue instead of creating a new session."
+     "description": "Existing subagent: its 8-character id, as its report shows it (the full session id also works). Continues with its current profile, model, thinking, and context. Omit new-session options."
     },
     "description": {
      "type": "string",
@@ -306,6 +306,12 @@
     "run_in_background": {
      "type": "boolean",
      "description": "Return immediately and notify this session when complete."
+    },
+    "wait_timeout": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 2147483,
+     "description": "Seconds to wait for completion. Default: 1800 (30 minutes). Use a longer budget for long tasks. Applies only to a foreground Agent or get_subagent_result with wait: true; expiry returns status without cancelling the child."
     },
     "model": {
      "type": "string",
@@ -332,7 +338,7 @@
  },
  {
   "name": "get_subagent_result",
-  "description": "Retrieve a subagent session's latest result, such as a report no longer in the conversation. A background run's report arrives on its own when it completes.",
+  "description": "Fetch a subagent's report that is no longer in the conversation, or when the user asks for it. Never call this to check or wait for a run; its report arrives on its own.",
   "parameters": {
    "type": "object",
    "required": [
@@ -341,11 +347,17 @@
    "properties": {
     "agent_id": {
      "type": "string",
-     "description": "Subagent session ID."
+     "description": "The subagent's 8-character id, as its report shows it (the full session id also works)."
     },
     "wait": {
      "type": "boolean",
-     "description": "Wait until the subagent finishes."
+     "description": "Only when the user asks you to wait for a run."
+    },
+    "wait_timeout": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 2147483,
+     "description": "Seconds to wait for completion. Default: 1800 (30 minutes). Use a longer budget for long tasks. Applies only to a foreground Agent or get_subagent_result with wait: true; expiry returns status without cancelling the child."
     }
    }
   },
@@ -369,11 +381,54 @@
    "properties": {
     "agent_id": {
      "type": "string",
-     "description": "Subagent session ID."
+     "description": "The subagent's 8-character id, as its report shows it (the full session id also works)."
     },
     "message": {
      "type": "string",
      "description": "Instruction to inject after the current tool execution."
+    }
+   }
+  },
+  "sourceInfo": {
+   "path": "<inline:pi-web-subagents>",
+   "source": "inline",
+   "scope": "temporary",
+   "origin": "top-level"
+  },
+  "active": true
+ },
+ {
+  "name": "abort_subagent",
+  "description": "Stop a subagent session that is running, queued, or still connecting its servers. Its transcript stays, so it can be read afterwards or continued with `Agent`'s `resume`.",
+  "parameters": {
+   "type": "object",
+   "required": [
+    "agent_id"
+   ],
+   "properties": {
+    "agent_id": {
+     "type": "string",
+     "description": "The subagent's 8-character id, as its report shows it (the full session id also works)."
+    }
+   }
+  },
+  "sourceInfo": {
+   "path": "<inline:pi-web-subagents>",
+   "source": "inline",
+   "scope": "temporary",
+   "origin": "top-level"
+  },
+  "active": true
+ },
+ {
+  "name": "list_subagent_runs",
+  "description": "List the subagents this session delegated, as TSV: agent_id, profile, status, last_activity, description. Use it when you no longer remember which subagents exist. It does not wait for or fetch results. The default view is a process list: active runs, plus runs that failed, were stopped or were interrupted in the last hour, active ones first. Older exits and completed runs are counted in one note unless status asks for them.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "status": {
+     "type": "string",
+     "description": "Which runs to list: \"recent\" (default), \"active\", \"unfinished\", \"completed\", or \"all\"."
     }
    }
   },
