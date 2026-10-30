@@ -488,7 +488,7 @@ test("opens the selected session's event stream even when Strict Mode re-runs ef
   // switch back to a running session.
   const warmSource = source.slice(
     source.indexOf("  // Keep the selected session's stream open even while its agent is idle."),
-    source.indexOf("  // One lease request (holdSessionLivenessLease())"),
+    source.indexOf("  // One lease request: it resets the session's idle countdown (renewIdleTimer())"),
   );
   assert.match(warmSource, /sessionHookMountedRef\.current = true;[\s\S]*?maintainEventsConnected\(sid\);/);
   assert.ok(
@@ -787,7 +787,7 @@ test("keeps a newly sent user message at the top while its response starts", () 
   );
   const scrollEffectSource = source.slice(
     source.indexOf("useLayoutEffect(() => {\n    if (messages.length > 0)"),
-    source.indexOf("// Load model list"),
+    source.indexOf("// Load the model list"),
   );
 
   assert.match(streamUpdateSource, /!pendingScrollToUserRef\.current && isNearBottomRef\.current/);
@@ -849,7 +849,7 @@ test("uses the prompt anchor as the only trailing message spacer", () => {
 test("keeps a detached viewport in place when streaming completes", () => {
   const scrollEffectSource = source.slice(
     source.indexOf("useLayoutEffect(() => {\n    if (messages.length > 0)"),
-    source.indexOf("// Load model list"),
+    source.indexOf("// Load the model list"),
   );
 
   assert.match(scrollEffectSource, /!agentRunningRef\.current && isNearBottomRef\.current[\s\S]*?scrollToBottom\("auto"\)/);
