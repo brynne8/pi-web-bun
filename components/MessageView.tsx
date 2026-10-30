@@ -2383,20 +2383,19 @@ export function formatUsage(usage: {
   return parts;
 }
 
-// "took 12s" as a clock and "12s": the words around the time stay as hidden
-// text, wherever the language puts them.
 /** One count of the stats line; `before`/`after` are copied and read aloud, not shown. */
 export interface StatPart {
   text: string;
-  icon?: "up" | "down" | "clock";
+  icon?: "up" | "down";
   before?: string;
   after?: string;
 }
 
+// The turn's time is text in its own footer (components/TurnFooter.tsx), not a count here, so
+// this holds the two arrows only: upstream draws the time with a clock glyph in its stats line.
 const STAT_ICON_PATHS = {
   up: "M6 10.5V1.5M2.5 5 6 1.5 9.5 5",
   down: "M6 1.5v9M2.5 7 6 10.5 9.5 7",
-  clock: "M6 1.25a4.75 4.75 0 1 0 0 9.5 4.75 4.75 0 1 0 0-9.5M6 3.5V6l1.75 1",
 };
 
 // Unseen but still text: font-size 0 stays in a copied selection, where a
@@ -2414,8 +2413,8 @@ export function UsagePart({ part }: { part: StatPart }) {
     <span>
       {part.before && <span style={HIDDEN_STAT_TEXT}>{part.before}</span>}
       <svg
-        width={part.icon === "clock" ? 10 : 9}
-        height={part.icon === "clock" ? 10 : 9}
+        width={9}
+        height={9}
         viewBox="0 0 12 12"
         fill="none"
         stroke="currentColor"
@@ -2423,7 +2422,7 @@ export function UsagePart({ part }: { part: StatPart }) {
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden
-        style={{ display: "inline", verticalAlign: part.icon === "clock" ? "-0.1em" : "-0.05em", marginRight: part.icon === "clock" ? 3 : 1 }}
+        style={{ display: "inline", verticalAlign: "-0.05em", marginRight: 1 }}
       >
         <path d={STAT_ICON_PATHS[part.icon]} />
       </svg>
