@@ -176,6 +176,21 @@ test("Stop that took a message from the queue sends it and leaves the transcript
   assert.deepEqual(restored, []);
 });
 
+test("Stop that took a parked prompt with its image fills the composer instead of resending it", async () => {
+  const { commands, restored } = await stopAfterSend(
+    { text: "重新弄一下", images: undefined },
+    { queuedMessages: { steering: ["看看这张图"], followUp: [], images: [IMAGE] } },
+  );
+
+  // Nothing is resent: an image cannot be tied back to one of the recalled texts, and a text-only
+  // resend would deliver the words without the picture. The whole batch goes to the composer the
+  // way Recall returns it, and the user sends it once.
+  assert.deepEqual(commands.map((command) => command.type), ["prompt", "abort"]);
+  assert.equal(restored.length, 1);
+  assert.equal(restored[0].text, "看看这张图");
+  assert.deepEqual(restored[0].images, [{ data: IMAGE.data, mimeType: IMAGE.mimeType }]);
+});
+
 /**
  * Mounts on a session the server already reports as running (a reload into a streaming run, or
  * a settled background report that started a turn) and presses Stop without ever sending a

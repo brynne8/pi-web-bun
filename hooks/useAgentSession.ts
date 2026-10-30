@@ -154,10 +154,11 @@ function normalizeQueuedMessages(q?: { steering?: string[]; followUp?: string[] 
   return { steering: q?.steering ?? [], followUp: q?.followUp ?? [] };
 }
 
-/** What the wrapper's `abort` answers with: what pi's queue held at the moment of stopping,
- * and the prompt it took back out of the transcript when the stopped run never answered it. */
+/** What the wrapper's `abort` answers with: what pi's queue held at the moment of stopping
+ * (a prompt parked behind a compaction comes back with the images it was sent with), and the
+ * prompt it took back out of the transcript when the stopped run never answered it. */
 type AbortCommandResult = {
-  queuedMessages?: { steering?: string[]; followUp?: string[] } | null;
+  queuedMessages?: RecalledPrompts | null;
   retractedPrompt?: { entryId?: string; text?: string } | null;
 };
 
@@ -2331,6 +2332,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // down, so clear the composer's queued rows here as handleRecallQueue does.
         setQueuedMessages({ steering: [], followUp: [] });
         if (!sessionHookMountedRef.current || sessionIdRef.current !== sid) return;
+        // A parked prompt's images come back with the batch, and nothing ties an image to one
+        // of these texts any more, so the whole batch goes to the composer rather than being
+        // resent as text that lost its attachments.
+        if (result?.queuedMessages?.images?.length) {
+          restoreRecalledPrompts(result.queuedMessages);
+          return;
+        }
         // pi's Stop puts these texts in the editor for the user to resend; pi-web sends them
         // itself, so a steer its author wrote before stopping gets its answer instead of
         // sitting in the composer or being swallowed by the run that was stopping.
@@ -2361,7 +2369,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to abort:", e);
     }
-  }, [loadSession, opts.chatInputRef]);
+  }, [loadSession, opts.chatInputRef, restoreRecalledPrompts]);
   handleAbortRef.current = handleAbort;
 
   const handleFork = useCallback(async (entryId: string) => {

@@ -1498,9 +1498,12 @@ export class AgentSessionWrapper {
           // pi's CLI puts these texts in the editor; pi-web hands them back so the client
           // can send them to a run of their own (see `handleAbort`). A prompt parked
           // behind the compaction Stop ended comes back the same way.
+          // The parked prompts' images go back with their texts: a resend, or a composer
+          // without them, would lose the attachments, which nothing else still holds.
           const queued = {
             steering: [...recalled.steering, ...queuedAtStop.steering],
             followUp: [...recalled.followUp, ...queuedAtStop.followUp],
+            ...(recalled.images ? { images: recalled.images } : {}),
           };
           if (queued.steering.length > 0 || queued.followUp.length > 0) {
             await this.restoreQueuedCustomMessages(queuedCustomMessages, false);
