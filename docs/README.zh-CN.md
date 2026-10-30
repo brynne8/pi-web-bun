@@ -121,7 +121,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **在对话旁边读文件的那一段。** 点开一张已完成的 `read` 卡片，右侧面板就打开这次调用真正返回的那一段：Markdown 按 Markdown 渲染、一键就能切回它的源码，源码行号从这次读取起始的那一行接着数，CSV 和 TSV 直接成表格、用的还是文件真实行号。面板显示的是模型拿到的内容，不是文件此刻的样子——不重新请求、也不重新读盘，所以面板和记录可以互相对账。卡片保留自己的输出。原版把 read 的输出留在卡片里，并把那张分隔符表格用在文件预览中（[#1136](https://github.com/agegr/pi-web/pull/1136)、[#1150](https://github.com/agegr/pi-web/pull/1150)）。（[说明](./docs/agents/sessions.md#a-read-card-opens-its-slice-in-the-right-panel-toolcallblock-componentsreadsnapshotviewertsx)）
 
-**再长的源码行也不会把行号带走。** 在右侧面板里把一行宽代码横向挪动时，行号那一栏钉在原地，不再跟着文字一起滑出去、让你重新找自己刚才停在哪一行。横向滚动条本身只走在代码下面，不会横穿行号。代码字号比原版小一号，源码视图、Diff 视图和读取快照面板一起跟着这一套字号走。原版是行号和文字一起滚走。
+**再长的源码行也不会把行号带走。** 在右侧面板里把一行宽代码横向挪动时，行号那一栏钉在原地，不再跟着文字一起滑出去、让你重新找自己刚才停在哪一行。横向滚动条本身只走在代码下面，不会横穿行号。代码字号比原版小一号，源码视图、Diff 视图和读取快照面板一起跟着这一套字号走。原版也在 [#1200](https://github.com/agegr/pi-web/pull/1200) 里把行号钉住了，只是钉在代码自己的滚动容器里，于是横向滚动条仍然从行号下面穿过去。
 
 **散文默认折行，代码不折。** Markdown 和纯文本文件的源码视图和 Diff 视图打开时就按面板宽度折行，长句子能一口气读到底，不必拖动横向滚动条去找后半句。源代码则默认不折行，一行一行铺开、横向滚动——和编辑器一致，因为读代码靠的是缩进和列对齐，日志也按这条走。折行按钮仍然可以随手翻转任意一种文件，这个选择会在标签页里保留。原版所有文件都默认不折行。（[说明](./docs/agents/files-and-access.md#which-lines-wrap)）
 
@@ -129,17 +129,17 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **运行时按钮不挪位。** 「停止」放在输入框里，与「引导」和「后续消息」并排，输入框下方那一排在运行中和结束后只有一套摆法——你正要点的东西不会在这次运行结束的一瞬变成别的东西。上下文真的装满时，「压缩」那颗按钮就是「停止压缩」，所以你需要的操作就在手底下。原版的处理是挡住一次运行刚结束时的误点（[#1131](https://github.com/agegr/pi-web/pull/1131)）；本分支把这道守卫留着，而在桌面上，它所要防的那种按钮替换已经不存在了。（[说明](./docs/agents/sessions.md#composer-action-row-nothing-moves-under-the-pointer-at-a-run-boundary)）
 
-**「停止」会回答你排下的消息。** 按下「停止」结束这次运行，还在排队等引导的消息会送进属于它自己的那次运行：模型照着你写下的内容回答，而不是压在它下面一声不响。队列在运行停下之前清空，所以不会有消息被送进一个正在死去的运行、留在那里没有人回答。队列空了之后再按一次「停止」，结束一切。原版把队列交给 pi，于是那条消息要么继续等一个永远不会来的运行，要么在这次运行的最后一口气里落地、底下什么都没有。（[说明](./docs/agents/sessions.md#stop-and-the-messages-still-queued-librpc-managerts-hooksuseagentsessionts)）
+**「停止」会回答你排下的消息。** 按下「停止」结束这次运行，还在排队等引导的消息会送进属于它自己的那次运行：模型照着你写下的内容回答，而不是压在它下面一声不响。队列在运行停下之前清空，所以不会有消息被送进一个正在死去的运行、留在那里没有人回答。带着附件的那条消息会连图片一起回到输入框，而不是丢了附件被发出去。队列空了之后再按一次「停止」，结束一切。原版把队列交给 pi，于是那条消息要么继续等一个永远不会来的运行，要么在这次运行的最后一口气里落地、底下什么都没有。（[说明](./docs/agents/sessions.md#stop-and-the-messages-still-queued-librpc-managerts-hooksuseagentsessionts)）
 
 **模型没回答的消息，「停止」把它还给你。** 在一次什么都没产出的运行上按「停止」——没有一个字、没有一段思考、没有启动过工具——那条消息就回到输入框里，对话也退回到它之前：记录里不会留着一条没有人回答的消息，再试一次也不需要开分支。已经开始思考的运行算已经有了回答，在那里按「停止」只是停下它。被放弃的提示词仍留在会话文件里，所以分支切换器还能把它显示出来。原版把那条消息连同一条空回复留在原处，而从那条消息编辑就会在你旁边另开一个分支。（[说明](./docs/agents/sessions.md#stop-and-the-prompt-that-got-no-reply-librpc-managerts-hooksuseagentsessionts)）
 
 **工具参数按行显示，不再是一段 JSON。** 参数都是单个值的工具卡片，会一个参数一行地列出来——`write` 写下的路径和正文、子代理的 profile 和 prompt、MCP 工具的 query 和 limit——本身带换行的值保留成一块可以滚动的文本。规则是全部参数都上表，否则一个也不上：只要有一个值是嵌套的，比如 `edit` 的 `edits[]`、或者 MCP 参数里装着列表，这张卡片就照旧显示 JSON，因为一行漏掉子树就等于一个谁也看不见的参数。原版的处理同样是单个值的参数按行显示，但 `write` 保留自己那套看法：只显示文件正文，路径不跟在旁边。
 
-**模型写下的文字留在屏幕上，只折叠中间的过程。** 一次运行按片段渲染：它写的文字就在写下的位置显示，中间连着的思考块和工具调用各自折进自己那一组「处理详情」。最后一组下面只有一个结尾，写着这次运行的事：token 数与耗时、这一轮改过的文件、交出全部文字的「复制」，还有运行停在 Provider 报错或输出上限上时的那句原因（[#906](https://github.com/agegr/pi-web/issues/906)）。各组一律从折叠开始，运行中的一轮边走边折、下一步一出现就把上一步折起来，你亲手展开的那一组会一直开着。原版把最后一次工具调用之前的东西全折进同一个框，只显示它之后的文字，并把数字、改动文件清单和失败原因挂到那条回复消息上。（[说明](./docs/agents/sessions.md#a-turn-shows-every-word-it-wrote-only-the-workings-fold-processdetailsgroup-componentschatwindowtsx)）
+**模型写下的文字留在屏幕上，只折叠中间的过程。** 一次运行按片段渲染：它写的文字就在写下的位置显示，中间连着的思考块和工具调用各自折进自己那一组「处理详情」。最后一组下面只有一个结尾，写着这次运行的事：token 数与耗时、这一轮改过的文件、交出全部文字的「复制」，还有运行停在 Provider 报错或输出上限上时的那句原因（[#906](https://github.com/agegr/pi-web/issues/906)）。原版只保留最后一次工具调用之后的文字，并把数字、改动文件清单和失败原因挂到那条回复消息上。（[说明](./docs/agents/sessions.md#a-turn-shows-every-word-it-wrote-only-the-workings-fold-processdetailsgroup-componentschatwindowtsx)）
 
 **子代理的报告按 Markdown 渲染。** `Agent` 或 `get_subagent_result` 的结果会把标题、列表、表格和围栏代码真的渲染出来，字号仍是这张卡片自己那一号，不再把子代理写下的标记符号直接摆给你看。其他工具的输出仍是原始文本——在那里 `*` 和 `#` 只是字符，不是标题。原版是把报告原样打印。（[说明](./docs/agents/subagents.md#the-report-on-screen)）
 
-**思考过程按 Markdown 渲染。** 展开的思考块走的是和回复同一套 Markdown 流水线：标题、列表、表格和围栏代码都渲染出来，不再把标记符号直接摆给你看，写成链接的路径也能在应用里打开。字号仍是这张卡片一贯的那一号。原版的处理是把整段思考当成一串保留换行的纯文本。（[说明](./docs/agents/sessions.md#thinking-renders-as-markdown-at-the-cards-own-size-thinkingblock-componentsmessageviewtsx)）
+**思考过程按 Markdown 渲染。** 展开的思考块走的是和回复同一套 Markdown 流水线：标题、列表、表格和围栏代码都渲染出来，不再把标记符号直接摆给你看，写成链接的路径也能在应用里打开。字号仍是这张卡片一贯的那一号。原版的处理是把整段思考当成一串保留换行的纯文本，长了就切成好几段（[#1196](https://github.com/agegr/pi-web/pull/1196)）。（[说明](./docs/agents/sessions.md#thinking-renders-as-markdown-at-the-cards-own-size-thinkingblock-componentsmessageviewtsx)）
 
 **委派规则自己成块。** 目标一清楚就该委派——这句话现在单独成块，作为 `<delegation>` 出现在系统提示的末尾，不再混在所有工具共用的那一串规则里，于是它读起来是 `Agent` 的策略，不是又一条泛泛的建议。它给 `explore` 和 `plan` 各写了规则——面对陌生的代码库要建立理解，或一处改动波及尚未摸清、必须小心处理的代码，就用 `explore`；需要先想清楚步骤的大型复杂任务，就用 `plan`，而且绝不和它所规划的工作同时进行，plan 也应该始终在前台运行——其余启用的子代理只列名字。它随每一次运行的提示发出，**系统提示**面板也能看到，包括被插件改写了提示的会话。原版把委派建议放在工具的 prompt guidelines 里，由 Pi 追加到扁平的 `<rules>` 列表。（[说明](./docs/agents/subagents.md#delegation-policy)）
 
@@ -151,7 +151,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **子代理用短 id 称呼。** 每份报告、每次停止和转向的回答、每一行运行列表，用的都是会话 id 的最后八位，`Agent` 的 `resume`、`get_subagent_result`、`steer_subagent`、`abort_subagent` 也都认这个写法，完整 id 仍然可用。会话 id 是有序 UUIDv7，头部就是启动时间，尾部才是区分两次运行的唯一部分，也是唯一值得在调用之间抄下来的部分。两次运行尾部相同时会被拒绝，不会替你猜。原版打印完整 UUID，也只接受完整 UUID。（[说明](./docs/agents/subagents.md#short-subagent-ids)）
 
-**内置子代理跟随会话的 Code mode。** Explore、Plan 和 General purpose 启动时沿用父会话正在用的 Code mode，不再永远直接调用工具；于是开着 Code mode 的会话不会在一委派出去就把它丢掉。工具权限不变，这三个配置也仍然只读——但在磁盘上放一个同名文件照样可以整体替换其中一个。原版把这三个的 Code mode 固定为关闭，而且不给改。（[说明](./docs/agents/subagents.md)）
+**内置子代理跟随会话的 Code mode。** Explore、Plan 和 General purpose 启动时沿用父会话正在用的 Code mode，不再永远直接调用工具；于是开着 Code mode 的会话不会在一委派出去就把它丢掉。工具权限不变，这三个配置也仍然只读——但在磁盘上放一个同名文件照样可以整体替换其中一个。原版把这三个的 Code mode 默认关着，而「设置 › 子代理」早就能按配置单独改它（[#1097](https://github.com/agegr/pi-web/pull/1097)），只是你不改就一直是关。（[说明](./docs/agents/subagents.md)）
 
 **你自己回答的子代理也算一次运行。** 在子代理自己的对话里输入内容，它的运行会像任何一次 `resume` 那样被记录下来：agent 切换器显示它正在运行，`get_subagent_result` 会等它，结果落进它自己的记录，父会话收到完成报告。这是重启把子代理切断之后的回来之路：给它发一行，状态就不再撒谎。原版把输入到子代理里的提示词留在子代理记录之外，于是没有状态、没有结果，也没有报告跟着来。（[说明](./docs/agents/subagents.md#built-in-subagents)）
 
