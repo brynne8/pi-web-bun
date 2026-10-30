@@ -59,6 +59,11 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     await content[id](target).waitFor({ state: "visible" });
   };
   const newTab = async (open) => {
+    // Upstream finds the tab the browser opens (`91e1e174`) by watching CDP targets and opening a
+    // page of its own at the URL the target reported. That needs `newBrowserCDPSession`, which
+    // exists for Chromium only, and this branch drives Apple WebKit (`e2e/browser.mjs`) — so the
+    // Playwright `page` event is what this harness has, and it asserts the tab the browser itself
+    // opened rather than a substitute page at the same URL. See `docs/agents/tests.md`.
     // An explicit timeout: a BrowserContext wait keeps the context's own 30 s default, which
     // `page.setDefaultTimeout` does not reach. The new tab is created by the browser's own
     // process on the modifier click, and on a loaded runner that is not a 30 s promise — the
@@ -70,7 +75,8 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     watch(tab);
     // A cold tab under `next dev` may wait on a compile.
     tab.setDefaultTimeout(60_000);
-    await tab.goto(target.url, { waitUntil: "domcontentloaded" });
+    // A new tab starts on about:blank before it navigates to the link.
+    await tab.waitForURL((url) => url.href !== "about:blank", { waitUntil: "domcontentloaded" });
     return tab;
   };
   const markDocument = (target) => target.evaluate(() => { window.__piNavMarker = "kept"; });
