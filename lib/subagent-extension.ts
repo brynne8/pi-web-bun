@@ -711,7 +711,11 @@ export function createSubagentExtension(
             await runtime.abort(agentId);
             const settled = await waitForSettledRun(runtime, agentId);
             const run = settled ?? before;
-            if (settled?.runInBackground) runtime.markResultConsumed(settled);
+            // The parent holds the outcome whatever the run was dispatched as. A foreground run
+            // used to be unable to notify, which is why this guard named background runs only; a
+            // wait that expires hands one the notifying path (Agent keeps its completion report
+            // coming, #1448), and this call's own answer is the result it was waiting for.
+            if (settled) runtime.markResultConsumed(settled);
             return {
               content: [{ type: "text", text: subagentStopText(run) }],
               details: subagentToolDetails(run),
