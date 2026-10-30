@@ -33,6 +33,9 @@ export async function checkModelContext(page) {
     const sidebar = page.getByRole("button", { name: "Show sidebar", exact: true });
     if (await sidebar.isVisible()) await sidebar.click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
+    // The dialog mounts some time after the click answers. Asking a control inside it whether it
+    // is visible then answers "no" on a loaded runner, which is the phone layout's branch.
+    await settings.waitFor({ state: "visible" });
     const section = settings.getByRole("combobox", { name: "Settings", exact: true });
     if (await section.isVisible()) await section.selectOption("models");
     else await settings.getByRole("button", { name: "Models", exact: true }).click();
