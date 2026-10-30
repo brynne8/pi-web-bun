@@ -1,8 +1,8 @@
 import { isContextOverflow, type AssistantMessage } from "@earendil-works/pi-ai";
 
-// TEMPORARY: pi's RETRYABLE_PROVIDER_ERROR_PATTERN (pi-ai utils/retry.ts) knows Bedrock's
-// "http2 request did not get a response" but not a relay's "Upstream HTTP/2 stream
-// failed", so a dropped stream ends the run. Delete this file and its
+// TEMPORARY: pi's RETRYABLE_PROVIDER_ERROR_PATTERN (pi-ai utils/retry.ts) has covered a relay's
+// "Upstream HTTP/2 stream failed" since 1.4.0 (#4433, #3594) but not the same drop worded
+// "reset", "closed" or "dropped", so those still end the run. Delete this file and its
 // AgentSessionWrapper call once pi's list covers these. This adds cases and widens none:
 // an HTTP/2 *stream* and a failure word in one clause, no period or newline between.
 const UPSTREAM_HTTP2_STREAM_DROP = /http\/?2[ _-]?stream(?!ing)[^.\n]{0,24}?(?:fail|reset|clos|terminat|abort|cancel|drop|broken|error)/i;
