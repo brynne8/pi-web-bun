@@ -185,6 +185,9 @@ export function mergeSessionLists(
     const live = byId.get(session.id);
     // The file's status is settled (a restart's `running` reads as interrupted), so a
     // live wrapper's row is the only place that still knows a queued child is queued.
+    // The sessions route goes further and recomputes the status per response
+    // (`withSubagentDisplayStatus()`, which also settles an orphan), so this overlay is not
+    // what makes that route right; it keeps every other reader of a merged list honest.
     if (live?.relation?.kind === "subagent" && session.relation?.kind === "subagent") {
       byId.set(session.id, { ...session, relation: { ...session.relation, status: live.relation.status } });
       continue;
