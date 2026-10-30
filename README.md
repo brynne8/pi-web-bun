@@ -30,7 +30,7 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 - **Git worktrees**: switch checkouts from the sidebar while keeping sessions from the same repository grouped together.
 - **Web-based configuration**: manage provider login and API keys, models, model tests, plugin packages, and skills without leaving Pi Web.
 - **Code mode on, and a Tools page**: Code mode's choice, mode, tool-list budget and sandbox live under Settings › Tools, beside the names of the tools the open session offers.
-- **English, Simplified Chinese, and Traditional Chinese UI**: Pi Web follows the browser language initially and provides a language switcher in the top bar.
+- **English, Simplified Chinese, and Traditional Chinese UI**: Pi Web follows the browser language initially and provides a language switcher under **Settings › General**.
 
 ## Bun setup
 
@@ -45,7 +45,7 @@ bun run dev
 
 The development server starts at [http://127.0.0.1:30141](http://127.0.0.1:30141). The production server (`bun run start`) and the build (`bun run build`) run on Bun or Node.js alike. The dev server does not, yet: `bun run dev` puts Bun under Vite, and Bun 1.4.4 drops the method of a write request there ([oven-sh/bun#42759](https://github.com/oven-sh/bun/issues/42759)), so every `POST` arrives as a `GET`. Until a Bun release carries the fix, run `npm run dev` on Node.js, or install the fixed build with `bunx bun-pr 46528`.
 
-There is no npm-published package for this fork; run it from a clone as above. `bun.lock` is gitignored, so `bun install` resolves fresh each time — and it stays out of the repository. The tracked `package-lock.json` is what upstream's CI installs from, so a dependency change is recorded with `bun x npm install --package-lock-only` and committed.
+There is no npm-published package for this fork; run it from a clone as above. `bun.lock` is gitignored, so `bun install` resolves fresh each time — and it stays out of the repository. The tracked `package-lock.json` is what CI installs from with `npm ci`, so a dependency change is recorded with `bun x npm install --package-lock-only` and committed.
 
 If no model provider is configured yet, open the **Models** panel to sign in or add an API key. `~/.pi/agent` is created on first use.
 
@@ -76,7 +76,7 @@ One setting, written to `~/.pi/agent/settings.json`:
 { "npmCommand": ["bun"] }
 ```
 
-The pi SDK reads it and adapts its install arguments per package manager (`npm`, `pnpm`, `bun`). Set it through the SDK (`SettingsManager.setNpmCommand(["bun"])`) or the **Settings** panel rather than by hand-editing the file, so the lock pi takes on that file is respected.
+The pi SDK reads it and adapts its install arguments per package manager (`npm`, `pnpm`, `bun`). Set it through the SDK (`SettingsManager.setNpmCommand(["bun"])`) rather than by hand-editing the file, so the lock pi takes on that file is respected. Pi Web reads that key for its own plugin update check and offers no control for it.
 
 ## Differences from upstream
 
@@ -237,7 +237,7 @@ Password authentication does not encrypt the connection. Do not expose Pi Web ov
 
 ### HTTP Proxy
 
-Server-side model and API requests honor the standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables.
+Server-side model and API requests honor the standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables. The commands below start this fork's launcher from a clone; upstream runs the same through `npx @agegr/pi-web@latest`.
 
 On macOS or Linux:
 
@@ -245,7 +245,7 @@ On macOS or Linux:
 HTTP_PROXY=http://127.0.0.1:7890 \
 HTTPS_PROXY=http://127.0.0.1:7890 \
 NO_PROXY=localhost,127.0.0.1 \
-npx @agegr/pi-web@latest
+pi-web
 ```
 
 On Windows PowerShell:
@@ -254,7 +254,7 @@ On Windows PowerShell:
 $env:HTTP_PROXY = "http://127.0.0.1:7890"
 $env:HTTPS_PROXY = "http://127.0.0.1:7890"
 $env:NO_PROXY = "localhost,127.0.0.1"
-npx @agegr/pi-web@latest
+pi-web
 ```
 
 ## Notes
@@ -319,7 +319,7 @@ still take precedence.
 
 ## Development
 
-This section is upstream's, for reference. On Bun use the commands in [Bun setup](#bun-setup) instead.
+This section is upstream's, for reference. In this clone use the commands in [Bun setup](#bun-setup): `npm install` there would rewrite the tracked `package-lock.json`, which this branch commits from `npm install --package-lock-only` instead.
 
 ```bash
 npm install
@@ -348,8 +348,12 @@ components/      React UI components
 hooks/           Client state and interaction hooks
 lib/             Session, agent, model, file, Git, and security logic
 public/          Static assets and PWA files
-bin/             npm CLI entrypoint and launch option parsing
+bin/             The `pi-web` launcher and its CLI: CommonJS, loaded before any build
+                 (`pi-web.cjs`, `pi-web-options.cjs`, `pi-web-commands.cjs`,
+                 `pi-web-update.cjs`, and the process, browser, network, node-args,
+                 vinext and terminal helpers beside it)
 docs/            Focused user and contributor guides
+e2e/             Playwright regression checks on Apple WebKit and their harness
 demo/            Upstream's static browser demo, kept in sync; not published by this fork
 ```
 

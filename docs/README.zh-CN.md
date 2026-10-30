@@ -32,7 +32,7 @@
 - **Git worktree**：从侧边栏切换 checkout，同时把同一仓库不同 worktree 的会话归在一起。
 - **网页配置**：无需离开 Pi Web，即可管理 Provider 登录和 API Key、模型、模型测试、插件包及技能。
 - **Code mode 默认开着，设置单占一页**：Code mode 的选项、模式、工具列表预算和沙箱都在「设置 › 工具」里，旁边就是当前会话可用的工具名。
-- **英文、简体中文和繁体中文界面**：Pi Web 首次打开时跟随浏览器语言，也可从顶部栏切换语言。
+- **英文、简体中文和繁体中文界面**：Pi Web 首次打开时跟随浏览器语言，也可在**设置 › 常规**里切换语言。
 
 ## Bun 安装
 
@@ -47,7 +47,7 @@ bun run dev
 
 开发服务器启动在 [http://127.0.0.1:30141](http://127.0.0.1:30141)。生产服务器（`bun run start`）和构建（`bun run build`）在 Bun 与 Node.js 上都能跑；开发服务器目前还不行：`bun run dev` 让 Vite 跑在 Bun 上，而 Bun 1.4.4 在那里会丢掉写请求的方法（[oven-sh/bun#42759](https://github.com/oven-sh/bun/issues/42759)），每个 `POST` 到达时都成了 `GET`。在带修复的 Bun 发布之前，请用 Node.js 跑 `npm run dev`，或者用 `bunx bun-pr 46528` 装上修复后的构建。
 
-本分支不发布 npm 包，按上面的方式从仓库运行即可。`bun.lock` 已加入忽略列表，每次 `bun install` 都会重新解析依赖，也不要把它提交。真正被跟踪的是 `package-lock.json`：上游 CI 靠它 `npm ci`，以改依赖后用 `bun x npm install --package-lock-only` 记录并提交结果。
+本分支不发布 npm 包，按上面的方式从仓库运行即可。`bun.lock` 已加入忽略列表，每次 `bun install` 都会重新解析依赖，也不要把它提交。真正被跟踪的是 `package-lock.json`：CI 靠它 `npm ci`，以改依赖后用 `bun x npm install --package-lock-only` 记录并提交结果。
 
 如果尚未配置模型 Provider，请打开**模型面板**（Models）登录或添加 API Key。`~/.pi/agent` 会在首次使用时自动创建。
 
@@ -78,7 +78,7 @@ bun run lint                           # 代码检查
 { "npmCommand": ["bun"] }
 ```
 
-pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整安装参数。请通过 SDK（`SettingsManager.setNpmCommand(["bun"])`）或**设置面板**（Settings）设置，而不是手动改文件，以便遵守它自己的锁。
+pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整安装参数。请通过 SDK（`SettingsManager.setNpmCommand(["bun"])`）设置，而不是手动改文件，以便遵守它自己的锁。Pi Web 只为自己的插件更新检查读这个键，界面上没有它的开关。
 
 ## 与原版的区别
 
@@ -235,7 +235,7 @@ PI_WEB_PASSWORD='足够长的随机密码' pi-web --hostname 0.0.0.0
 
 ### HTTP 代理
 
-服务端的模型和 API 请求会读取标准的 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY` 环境变量。
+服务端的模型和 API 请求会读取标准的 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY` 环境变量。下面几条跑的是本分支从仓库启动的那个启动器；原版用的是 `npx @agegr/pi-web@latest`。
 
 macOS 或 Linux：
 
@@ -243,7 +243,7 @@ macOS 或 Linux：
 HTTP_PROXY=http://127.0.0.1:7890 \
 HTTPS_PROXY=http://127.0.0.1:7890 \
 NO_PROXY=localhost,127.0.0.1 \
-npx @agegr/pi-web@latest
+pi-web
 ```
 
 Windows PowerShell：
@@ -252,7 +252,7 @@ Windows PowerShell：
 $env:HTTP_PROXY = "http://127.0.0.1:7890"
 $env:HTTPS_PROXY = "http://127.0.0.1:7890"
 $env:NO_PROXY = "localhost,127.0.0.1"
-npx @agegr/pi-web@latest
+pi-web
 ```
 
 ## 注意事项
@@ -265,7 +265,7 @@ npx @agegr/pi-web@latest
 
 ## 开发
 
-本节沿用原版，仅供参考。在 Bun 下请改用 [Bun 安装](#bun-安装) 中的命令。
+本节沿用原版，仅供参考。在本仓库里请改用 [Bun 安装](#bun-安装) 中的命令：那里的 `npm install` 会重写被跟踪的 `package-lock.json`，而本分支只用 `npm install --package-lock-only` 记录它。
 
 ```bash
 npm install
@@ -294,8 +294,12 @@ components/      React 界面组件
 hooks/           客户端状态和交互 hooks
 lib/             会话、智能体、模型、文件、Git 和安全逻辑
 public/          静态资源和 PWA 文件
-bin/             npm CLI 入口及启动参数解析
+bin/             `pi-web` 启动器及其 CLI：CommonJS，在任何构建之前被加载
+                 （`pi-web.cjs`、`pi-web-options.cjs`、`pi-web-commands.cjs`、
+                 `pi-web-update.cjs`，以及旁边的进程、浏览器、网络、node 参数、
+                 vinext 和终端辅助模块）
 docs/            面向用户和贡献者的专题文档
+e2e/             跑在 Apple WebKit 上的 Playwright 回归检查及其框架
 demo/            上游的静态演示站，为同步上游而保留；本 fork 不发布
 ```
 
