@@ -43,7 +43,7 @@
     "test:e2e": "node e2e/run.mjs",
     "test:e2e:install": "node e2e/install-browser.mjs",
     "test": "node --experimental-strip-types --test \"app/**/*.test.mjs\" \"components/**/*.test.mjs\" \"hooks/**/*.test.mjs\" \"lib/**/*.test.mjs\" \"public/**/*.test.mjs\"",
-    "release": "npm version patch -m \"Release v%s\""
+    "release": "npm version patch --no-git-tag-version"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.4.0",

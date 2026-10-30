@@ -1,33 +1,17 @@
 # Release Checklist
 
-This repo publishes two artifacts for each release:
+This branch releases one artifact: a GitHub Release on `brynne8/pi-web-bun`, cut from a tagged commit. **No npm package is published from this branch** — the README says so in both languages, `package.json` still carries upstream's name `@agegr/pi-web`, and npm Trusted Publishing is bound to `agegr/pi-web` together with a workflow file of that repository, so nothing here can publish that name.
 
-- npm package: `@agegr/pi-web`, published by GitHub Actions (`.github/workflows/publish.yml`) when a `v*` tag is pushed
-- GitHub Release: `agegr/pi-web`
+Upstream publishes `@agegr/pi-web` from GitHub Actions when a `v*` tag is pushed ([`16f195c6`](https://github.com/agegr/pi-web/commit/16f195c6d84a4b341337635faf72a81a3c11c74d)), with its own `docs/release.md` describing that runbook. This branch keeps no `.github/workflows/publish.yml`: a copy of it here would either fail on the Trusted Publisher entry or publish upstream's package from this repository's build.
 
-Use this checklist from a clean `main` checkout.
-
-## 0. One-time Setup: npm Trusted Publishing
-
-The publish workflow authenticates to npm with Trusted Publishing (OIDC). No npm token exists anywhere, so nothing expires or needs rotating.
-
-On npmjs.com, open `@agegr/pi-web` → Settings → Trusted Publisher → GitHub Actions and enter:
-
-- Organization or user: `agegr`
-- Repository: `pi-web`
-- Workflow filename: `publish.yml`
-- Environment: leave empty
-- Permissions: `npm publish` only. The workflow publishes directly; `npm stage publish` (a staged version that waits for a maintainer's 2FA approval) is not used.
-
-Renaming the workflow file breaks publishing until this entry is updated. Settings → Publishing access is set to "Require two-factor authentication and disallow bypass 2fa tokens": Trusted Publishing is not a token and keeps working, and a manual `npm publish` still works with a 2FA prompt.
+Tags carry a `-fork` suffix (`v0.9.0-fork`) so they never collide with upstream's `v<version>` tags — a clone of this branch already holds one of those per upstream release.
 
 ## 1. Preflight
 
 ```bash
-git fetch origin
+git fetch bun && git fetch origin --tags
 git status --short --branch
 git log --oneline --decorate -5
-git rev-list --left-right --count main...origin/main
 gh auth status
 node -e "const p=require('./package.json'); console.log(p.version)"
 gh run list --branch main --workflow ci.yml --limit 1
@@ -36,114 +20,90 @@ gh run list --branch main --workflow ci.yml --limit 1
 Expected:
 
 - `git status` is clean: `npm version` refuses a dirty tree.
-- `main` and `origin/main` are aligned (`0	0`).
+- The branch you are releasing is aligned with its remote.
 - GitHub is authenticated as an account that can push and create releases.
-- CI on the commit you are releasing passed. The publish workflow only builds; it does not lint or test.
+- CI on the commit you are releasing passed. Nothing here builds for you.
 
-Nothing is built locally, so a running dev server on 30141 is safe, and a local `.next/server/route-cache/` cannot leak into the package: CI builds from a fresh checkout.
+Nothing is uploaded, so a running dev server on port 30141 is harmless.
 
-Before bumping, confirm the next version is free (replace `<version>`):
+Before bumping, confirm both names are free (replace `<version>`):
 
 ```bash
-npm view @agegr/pi-web@<version> version --registry https://registry.npmjs.org/   # expect E404
-git ls-remote --tags origin v<version>                                            # expect empty
+git ls-remote --tags bun v<version>-fork   # expect empty
+git tag --list "v<version>*"               # upstream's v<version> may already be here; that is expected
+gh release view v<version>-fork --repo brynne8/pi-web-bun
 ```
 
-## 2. Bump, Commit and Tag
-
-Patch release:
+## 2. Bump the Version
 
 ```bash
 npm run release
 ```
 
-The release script runs:
+which is:
 
 ```bash
-npm version patch -m "Release v%s"
+npm version patch --no-git-tag-version
 ```
 
-It bumps `package.json` and `package-lock.json`, commits them as `Release v<version>`, and creates the annotated tag `v<version>`. Nothing leaves your machine yet.
+`--no-git-tag-version` is deliberate: `npm version` names its tag `v<version>`, which is upstream's namespace (`v0.13.0` exists upstream and in this clone), and the version number itself tracks upstream's, since this branch follows upstream's releases and adds its own version band. So the bump commits and the tag is made separately, one step below.
 
-For a minor (or major) release, name the bump yourself:
+`npm run release` only bumps the patch number. For a minor release, set the version yourself and run the other step by hand:
 
 ```bash
-npm version minor -m "Release v%s"
+npm version <x.y.0> --no-git-tag-version
 ```
 
-Choosing the bump: look at `git log --oneline v<previous>..HEAD`. A batch of `feat:` commits (new UI, new commands, new settings) is a minor; only fixes and small adjustments is a patch. Decide before pushing, since a published version cannot be reused.
+Choosing the bump: look at `git log --oneline v<previous>-fork..HEAD`. A batch of `feat:` commits (new UI, new commands, new settings), or a sync that landed upstream features users can see, is a minor; only fixes and small adjustments is a patch.
 
-Check the result before pushing:
+Check the result before committing:
 
 ```bash
 git show --stat HEAD
-git tag --points-at HEAD
+git status --short
 ```
 
-## 3. Push: CI Publishes to npm
+`package-lock.json` moves with `package.json`, and it is the file upstream's CI installs from, so it belongs in the same commit.
+
+## 3. Commit, Tag and Push
 
 ```bash
-git push origin main v<version>
+git add package.json package-lock.json
+git commit -m "Release v<version>-fork"
+git tag -a v<version>-fork -m "v<version>-fork"
+git push bun <branch> v<version>-fork
 ```
 
-Push the release tag by name. Do not use `git push --tags`: the local checkout holds tags fetched from contributor forks that are not on origin, and `--tags` publishes them (it leaked a stray `v0.10.5`, on a commit that is on no branch, during the v0.11.0 release). If you ever need `--tags`, compare `git tag` with `git ls-remote --tags origin` first.
-
-The tag starts the Publish workflow. It fails at once if the tag is not `v` + the `package.json` version, then runs `npm ci`, `npm run build` and `npm publish --access public`. Follow it:
-
-```bash
-gh run list --workflow publish.yml --limit 1
-gh run watch <run-id> --exit-status
-```
-
-Notes:
-
-- A newly published version may take a few minutes to show up. `npm view @agegr/pi-web@<version> version` can return E404 and `npm view @agegr/pi-web version` can show the previous version even though the workflow log printed `+ @agegr/pi-web@<version>`. This is registry propagation, not a failed publish: do not re-run the workflow. Poll the registry until the version appears:
-
-```bash
-curl -s https://registry.npmjs.org/@agegr%2Fpi-web/<version> | head -c 80   # JSON once it exists, "version not found" before
-npm view @agegr/pi-web dist-tags --registry https://registry.npmjs.org/
-npm view @agegr/pi-web versions --json --registry https://registry.npmjs.org/
-```
-
-- The package carries a provenance statement linking it to the workflow run; the npm page shows it.
-
-If the workflow fails before `npm publish` succeeds, the version is still free:
-
-- A passing cause (npm or GitHub outage): `gh run rerun <run-id>`.
-- A code or config fix: land it on `main`, then move the tag to the fixed commit and push it again. This is safe only while npm does not have the version (check with the `curl` above):
-
-```bash
-git tag -d v<version>
-git push origin :refs/tags/v<version>
-git tag -a v<version> -m "Release v<version>"
-git push origin main v<version>
-```
-
-- An `ENEEDAUTH` or 404 on `npm publish` means the Trusted Publisher entry (step 0) does not match this repository and `publish.yml`.
+Push the release tag by name. Never `git push --tags`: this clone holds upstream's tags and tags fetched from other remotes, and `--tags` would push all of them (upstream's own checklist records the same accident, a stray `v0.10.5` landing during its v0.11.0 release). If you ever need `--tags`, compare `git tag` with `git ls-remote --tags bun` first.
 
 ## 4. Generate Release Notes from Commits
 
-Use the previous release tag as the base.
+Two ranges, because a release of this branch is both things at once:
 
 ```bash
-git log --oneline --decorate v<previous>..v<version>
-git log --format='%h%x09%s%n%b' v<previous>..v<version>
-git diff --stat v<previous>..v<version>
+# what this fork itself changed since the last fork release
+git log --oneline --decorate v<previous>-fork..v<version>-fork --grep=""
+git log --format='%h%x09%s%n%b' v<previous>-fork..v<version>-fork
+
+# what the merge brought in from upstream
+git log --oneline --decorate <previous-upstream-tip>..<new-upstream-tip>
 ```
 
-Write the release notes from those commits, not from memory. Include both Chinese and English sections. Keep commit hashes or PR numbers next to each item when useful.
+Write the notes from those commits, not from memory. Include both Chinese and English sections. Keep commit hashes or PR numbers next to each item when useful.
 
 - Check commands, flags and setting names against `README.md` and the code before writing them down.
-- Thank outside contributors by name: `git log --format='%h %an | %s' v<previous>..v<version>` lists authors, and the previous release's notes show the style.
-- Open with the install/upgrade command (`npm install -g @agegr/pi-web@latest`), as earlier releases did.
-- Write the notes to a file outside the repo (for example `NOTES=$(mktemp)`), or pass them through stdin as shown below. A `release-notes.md` in the repo root is an untracked file in the next release's `git status`.
+- Name the upstream release being tracked (for example "based on upstream v0.13.0") and link it.
+- For an entry copied from upstream's release notes, link upstream's PR rather than restating it as this branch's work — the README's *Differences from upstream* already says who owns what.
+- Thank outside contributors by name: `git log --format='%h %an | %s'` lists authors.
+- Open with how to run this branch from a clone (`bun install && bun run dev`, or the published launcher), not with an `npm install -g` line: there is no package to install.
+- Write the notes to a file outside the repo (`NOTES=$(mktemp)`), or pass them through stdin as below. A `release-notes.md` in the repo root is an untracked file in the next release's `git status`.
 
 Suggested structure:
 
 ```markdown
 ## 中文
 
-基于 `v<previous>..v<version>` 的提交整理。
+基于 upstream v<upstream-version>，区间 `v<previous>-fork..v<version>-fork`。
 
 ### 新增
 
@@ -153,17 +113,13 @@ Suggested structure:
 
 - ...
 
-### 改进
+### 从上游同步
 
-- ...
-
-### 内部调整
-
-- 发布 npm 包 `@agegr/pi-web@<version>`。
+- ...（带原版 PR 链接）
 
 ## English
 
-Prepared from commits in `v<previous>..v<version>`.
+Based on upstream v<upstream-version>, range `v<previous>-fork..v<version>-fork`.
 
 ### Added
 
@@ -173,39 +129,25 @@ Prepared from commits in `v<previous>..v<version>`.
 
 - ...
 
-### Improved
+### Synced from upstream
 
-- ...
-
-### Internal
-
-- Published npm package `@agegr/pi-web@<version>`.
+- ... (link upstream's PR)
 ```
 
 ## 5. Create or Update the GitHub Release
 
-Create a new release:
-
 ```bash
-gh release create v<version> \
-  --repo agegr/pi-web \
+gh release create v<version>-fork \
+  --repo brynne8/pi-web-bun \
   --verify-tag \
-  --title "v<version>" \
+  --title "v<version>-fork" \
   --notes-file "$NOTES"
 ```
 
 If the release already exists and only the notes need updating:
 
 ```bash
-gh release edit v<version> \
-  --repo agegr/pi-web \
-  --notes-file "$NOTES"
-```
-
-You can avoid a temporary file by passing notes through stdin:
-
-```bash
-gh release edit v<version> --repo agegr/pi-web --notes-file - <<'EOF'
+gh release edit v<version>-fork --repo brynne8/pi-web-bun --notes-file - <<'EOF'
 ## 中文
 
 ...
@@ -219,20 +161,15 @@ EOF
 ## 6. Final Verification
 
 ```bash
-gh release view v<version> --repo agegr/pi-web
-gh run list --workflow publish.yml --limit 1
-npm view @agegr/pi-web@<version> version --registry https://registry.npmjs.org/
-npm view @agegr/pi-web dist-tags --registry https://registry.npmjs.org/
+gh release view v<version>-fork --repo brynne8/pi-web-bun
 git status --short --branch
 git log --oneline --decorate -3
-git ls-remote --tags origin
+git ls-remote --tags bun | grep "v<version>"
 ```
 
 Expected:
 
 - GitHub Release exists and is not a draft unless intentionally published as one.
-- The Publish run for `v<version>` succeeded.
-- npm exact version resolves and `latest` points at it (allow a few minutes, see step 3).
-- `git ls-remote --tags origin` shows no tag you did not mean to publish.
-- `main` is aligned with `origin/main`.
-- `HEAD` points at the release commit and `v<version>` tag.
+- No npm command to run: nothing was published, and `npm view @agegr/pi-web` answering with some version says nothing about this release.
+- `git ls-remote --tags bun` shows the `-fork` tag and nothing else you did not mean to push.
+- The released branch is aligned with its remote, and `HEAD` points at the release commit and its tag.
