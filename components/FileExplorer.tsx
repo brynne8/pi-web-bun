@@ -944,7 +944,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   // The windowed tree rows: the tree, or a one-line note while it loads, errors or is empty.
   const treeDisplayRows = useMemo(() => {
     const rows: DisplayRow[] = [];
-    if (loading) rows.push({ kind: "message", key: "tree-loading", text: "Loading files..." });
+    if (loading) rows.push({ kind: "message", key: "tree-loading", text: t("files.loading") });
     else if (error) rows.push({ kind: "message", key: "tree-error", text: error, tone: "error" });
     else {
       for (const row of treeRows) rows.push({ kind: "tree", key: `t:${row.key}`, row, onToggle: handleToggleExpanded });
@@ -1428,7 +1428,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 22, fontSize: 11 }}>
                   <div style={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
                     {uploadSummary.uploaded.length > 0 && (
-                      <span title={`${uploadSummary.uploaded.length} uploaded`} aria-label={`${uploadSummary.uploaded.length} uploaded`} style={{ display: "flex", alignItems: "center", gap: 3, color: "#22c55e" }}>
+                      <span title={t("files.uploadedCount", { count: uploadSummary.uploaded.length })} aria-label={t("files.uploadedCount", { count: uploadSummary.uploaded.length })} style={{ display: "flex", alignItems: "center", gap: 3, color: "#22c55e" }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                           <path d="m5 12 4 4L19 6" />
                         </svg>
@@ -1436,7 +1436,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                       </span>
                     )}
                     {uploadSummary.skipped.length > 0 && (
-                      <span title={`${uploadSummary.skipped.length} skipped`} aria-label={`${uploadSummary.skipped.length} skipped`} style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--text-dim)" }}>
+                      <span title={t("files.skippedCount", { count: uploadSummary.skipped.length })} aria-label={t("files.skippedCount", { count: uploadSummary.skipped.length })} style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--text-dim)" }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
                           <circle cx="12" cy="12" r="9" />
                           <path d="M8 12h8" />
@@ -1445,7 +1445,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                       </span>
                     )}
                     {uploadSummary.errors.length > 0 && (
-                      <span title={`${uploadSummary.errors.length} failed`} aria-label={`${uploadSummary.errors.length} failed`} style={{ display: "flex", alignItems: "center", gap: 3, color: "#f87171" }}>
+                      <span title={t("files.failedCount", { count: uploadSummary.errors.length })} aria-label={t("files.failedCount", { count: uploadSummary.errors.length })} style={{ display: "flex", alignItems: "center", gap: 3, color: "#f87171" }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                           <path d="M12 3 2.5 20h19L12 3Z" />
                           <path d="M12 9v4" />
@@ -1495,7 +1495,12 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 id="file-search-input"
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                onKeyDown={(event) => { if (event.key === "Escape") onFileSearchOpenChange?.(false); }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  // Handled here: the debug panel and other document listeners leave this Escape alone.
+                  event.preventDefault();
+                  onFileSearchOpenChange?.(false);
+                }}
                 placeholder={t("sidebar.searchFilesPlaceholder")}
                 aria-label={t("sidebar.searchFiles")}
                 style={{ width: "100%", boxSizing: "border-box", padding: "6px 24px", border: "1px solid var(--border)", borderRadius: 8, outline: "none", background: "var(--bg)", color: "var(--text)", fontFamily: "var(--font-mono)", fontSize: 11 }}
