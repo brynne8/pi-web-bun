@@ -335,16 +335,17 @@ try {
     assert.equal(await page.getByText(text(4949), { exact: true }).count(), 0);
     // The minimap numbers turns from the session's first, not the loaded page's (#791):
     // e0..e4949 hold 2475 user messages, so the turn asking text(4998) is 2500.
-    const readMinimapTurn = async (screenshot) => {
-      const node = page.locator("[data-minimap-node-index='0']");
+    const readMinimapPreview = async ({ nodeIndex, rowText, screenshot }) => {
+      const node = page.locator(`[data-minimap-node-index='${nodeIndex}']`);
       await node.waitFor();
       const rect = await node.boundingBox();
       assert.ok(rect);
       await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
       const preview = page.locator("[data-minimap-preview-box]");
-      const turn = preview.locator("[data-minimap-preview-index]").filter({ hasText: text(4998) });
       const read = async () => ({
-        number: await turn.locator("span[aria-hidden='true']").first().textContent(),
+        number: rowText === undefined ? null
+          : await preview.locator("[data-minimap-preview-index]").filter({ hasText: rowText })
+            .locator("span[aria-hidden='true']").first().textContent(),
         earlier: await preview.locator("[data-minimap-preview-earlier]").textContent(),
       });
       const result = await read();
@@ -354,7 +355,21 @@ try {
       return result;
     };
     if (viewport.width > 600) {
-      assert.deepEqual(await readMinimapTurn("minimap-turns-first-page.png"), { number: "2500", earlier: "Earlier turns not loaded: 2475. Click to load" });
+      // The preview lists the hovered turn and a fixed window of its neighbours, so each number
+      // is read on a turn whose window holds it: the unloaded count on the oldest loaded turn,
+      // the numbered row on the newest.
+      // The nodes exist a tick after the sentinel does: the minimap draws nothing until its own
+      // scroll state has been measured, so a count taken straight from the DOM reads zero turns.
+      await page.locator("[data-minimap-node-index]").first().waitFor();
+      const lastNode = await page.evaluate(() => Math.max(
+        ...[...document.querySelectorAll("[data-minimap-node-index]")]
+          .map((element) => Number(element.dataset.minimapNodeIndex)),
+      ));
+      assert.ok(lastNode > 0, "The minimap must show more than one loaded turn");
+      const oldest = await readMinimapPreview({ nodeIndex: 0, screenshot: "minimap-earlier-first-page.png" });
+      assert.equal(oldest.earlier, "Earlier turns not loaded: 2475. Click to load");
+      const newest = await readMinimapPreview({ nodeIndex: lastNode, rowText: text(4998), screenshot: "minimap-turns-first-page.png" });
+      assert.equal(newest.number, "2500");
     }
 
     // Exercise the real IntersectionObserver and prepend path, twice.
