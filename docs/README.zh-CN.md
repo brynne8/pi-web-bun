@@ -137,7 +137,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **模型写下的文字留在屏幕上，只折叠中间的过程。** 一次运行按片段渲染：它写的文字就在写下的位置显示，中间连着的思考块和工具调用各自折进自己那一组「处理详情」。最后一组下面只有一个结尾，写着这次运行的事：token 数与耗时、这一轮改过的文件、交出全部文字的「复制」，还有运行停在 Provider 报错或输出上限上时的那句原因（[#906](https://github.com/agegr/pi-web/issues/906)）。原版只保留最后一次工具调用之后的文字，并把数字、改动文件清单和失败原因挂到那条回复消息上。（[说明](./docs/agents/sessions.md#a-turn-shows-every-word-it-wrote-only-the-workings-fold-processdetailsgroup-componentschatwindowtsx)）
 
-**子代理的报告按 Markdown 渲染。** `Agent` 或 `get_subagent_result` 的结果会把标题、列表、表格和围栏代码真的渲染出来，字号仍是这张卡片自己那一号，不再把子代理写下的标记符号直接摆给你看。其他工具的输出仍是原始文本——在那里 `*` 和 `#` 只是字符，不是标题。原版是把报告原样打印。（[说明](./docs/agents/subagents.md#the-report-on-screen)）
+**子代理的报告按 Markdown 渲染。** `Agent` 或 `get_subagent_result` 的结果会把标题、列表、表格和围栏代码真的渲染出来，字号仍是这张卡片自己那一号，不再把子代理写下的标记符号直接摆给你看。其他工具的输出仍是原始文本——在那里 `*` 和 `#` 只是字符，不是标题。后台运行的通知和子代理自己的标签页本来就已经按 Markdown 渲染，这一份报告在两处读起来是同一个样子。原版是把报告原样打印。（[说明](./docs/agents/subagents.md#the-report-on-screen)）
 
 **思考过程按 Markdown 渲染。** 展开的思考块走的是和回复同一套 Markdown 流水线：标题、列表、表格和围栏代码都渲染出来，不再把标记符号直接摆给你看，写成链接的路径也能在应用里打开。字号仍是这张卡片一贯的那一号。原版的处理是把整段思考当成一串保留换行的纯文本，长了就切成好几段（[#1196](https://github.com/agegr/pi-web/pull/1196)）。（[说明](./docs/agents/sessions.md#thinking-renders-as-markdown-at-the-cards-own-size-thinkingblock-componentsmessageviewtsx)）
 
