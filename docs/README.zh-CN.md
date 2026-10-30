@@ -121,13 +121,13 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **在对话旁边读文件的那一段。** 点开一张已完成的 `read` 卡片，右侧面板就打开这次调用真正返回的那一段：Markdown 按 Markdown 渲染、一键就能切回它的源码，源码行号从这次读取起始的那一行接着数，CSV 和 TSV 直接成表格、用的还是文件真实行号。面板显示的是模型拿到的内容，不是文件此刻的样子——不重新请求、也不重新读盘。卡片保留自己的表头，把文字交给面板。原版把 read 的输出留在卡片里，并把那张分隔符表格用在文件预览中（[#1136](https://github.com/agegr/pi-web/pull/1136)、[#1150](https://github.com/agegr/pi-web/pull/1150)）。（[说明](./agents/sessions.md#a-read-card-opens-its-slice-in-the-right-panel-toolcallblock-componentsreadsnapshotviewertsx)）
 
-**再长的源码行也不会把行号带走。** 在右侧面板里把一行宽代码横向挪动时，行号那一栏钉在原地。在源码视图里，横向滚动条只走在代码下面，不会横穿行号。代码字号比原版小一号，源码视图、Diff 视图和读取快照面板一起跟着这一套字号走。原版也在 [#1200](https://github.com/agegr/pi-web/pull/1200) 里把行号钉住了，只是钉在代码自己的滚动容器里，于是横向滚动条仍然从行号下面穿过去。（[说明](./agents/files-and-access.md#the-line-number-gutter-beside-the-code)）
+**行号在代码的滚动区之外。** 在右侧面板里把一行宽代码横向挪动时，行号那一栏钉在原地。在源码视图里，横向滚动条只走在代码下面，不会横穿行号。代码字号比原版小一号，源码视图、Diff 视图和读取快照面板一起跟着这一套字号走。原版也在 [#1200](https://github.com/agegr/pi-web/pull/1200) 里把行号钉住了，只是钉在代码自己的滚动容器里，于是横向滚动条仍然从行号下面穿过去。（[说明](./agents/files-and-access.md#the-line-number-gutter-beside-the-code)）
 
 **散文默认折行，代码不折。** Markdown 和纯文本文件的源码视图和 Diff 视图打开时就按面板宽度折行，长句子能一口气读到底，不必拖动横向滚动条去找后半句。源代码则默认不折行，一行一行铺开、横向滚动——和编辑器一致，因为读代码靠的是缩进和列对齐，日志也按这条走。折行按钮仍然可以随手翻转任意一种文件，这个选择会在标签页里保留。原版所有文件都默认不折行。（[说明](./agents/files-and-access.md#which-lines-wrap)）
 
 **再长的文件也能滚动，并且一直有颜色。** 源码视图只渲染视口附近的那些行，不再一次渲染全部，于是多大的文件滚动起来标签页都不会卡，屏幕上的行无论文件多长都保持语法高亮。文件内查找——工具栏的放大镜，或指针在查看器内时按 ⌘/Ctrl+F——搜索全部已加载的行，而不只是渲染出来的窗口，匹配落在很靠下时也会滚动到眼前。原版渲染每一行，并在一千行之后停止高亮。（[说明](./agents/files-and-access.md#long-files-a-window-of-lines-and-find-across-all-of-them)）
 
-**运行时按钮不挪位。** 「停止」放在输入框里，与「引导」和「后续消息」并排，输入框下方那一排在运行中和结束后只有一套摆法——你正要点的东西不会在这次运行结束的一瞬变成别的东西。上下文真的装满时，「压缩」那颗按钮就是「停止压缩」，所以你需要的操作就在手底下。原版的处理是挡住一次运行刚结束时的误点（[#1131](https://github.com/agegr/pi-web/pull/1131)）；本分支把这道守卫留着，而在桌面上，它所要防的那种按钮替换已经不存在了。（[说明](./agents/sessions.md#composer-action-row-nothing-moves-under-the-pointer-at-a-run-boundary)）
+**运行时按钮不挪位。** 「停止」放在输入框里，与「引导」和「后续消息」并排，输入框下方那一排在运行中和结束后只有一套摆法——你正要点的东西不会在这次运行结束的一瞬变成别的东西。原版的处理是挡住一次运行刚结束时的误点（[#1131](https://github.com/agegr/pi-web/pull/1131)）；本分支把这道守卫留着，而在桌面上，它所要防的那种按钮替换已经不存在了。（[说明](./agents/sessions.md#composer-action-row-nothing-moves-under-the-pointer-at-a-run-boundary)）
 
 **「停止」会回答你排下的消息。** 按下「停止」结束这次运行，还在排队等引导的消息会送进属于它自己的那次运行：模型照着你写下的内容回答，而不是压在它下面一声不响。队列在运行停下之前清空，所以不会有消息被送进一个正在死去的运行、留在那里没有人回答。带着附件的那条消息会连图片一起回到输入框，而不是丢了附件被发出去。队列空了之后再按一次「停止」，结束一切。原版的「停止」只收回它自己的召回覆盖的那一段：挡在压缩后面的提示词（[#1426](https://github.com/agegr/pi-web/pull/1426)）和服务端根本没收到的发送（[#1457](https://github.com/agegr/pi-web/pull/1457)）；队列里剩下的仍交给 pi，那条消息就继续等一个永远不会来的运行。（[说明](./agents/sessions.md#stop-and-the-messages-still-queued-librpc-managerts-hooksuseagentsessionts)）
 
@@ -141,7 +141,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **思考过程按 Markdown 渲染。** 展开的思考块走的是和回复同一套 Markdown 流水线：标题、列表、表格和围栏代码都渲染出来，不再把标记符号直接摆给你看，写成链接的路径也能在应用里打开。字号仍是这张卡片一贯的那一号。原版的处理是把整段思考当成一串保留换行的纯文本，长了就切成好几段（[#1196](https://github.com/agegr/pi-web/pull/1196)）。（[说明](./agents/sessions.md#thinking-renders-as-markdown-at-the-cards-own-size-thinkingblock-componentsmessageviewtsx)）
 
-**子代理由 profile 配置，不由模型猜。** 子代理的思考档位、轮次上限、是否继承这段对话，都由它的 profile 决定，于是一次运行可以从产出它的那份 profile 复现。`model` 是调用方唯一还能指定的参数，思考档位就跟着这同一个引用走（写成 `x:high`），工具描述里列着每个 profile 自己的模型。要让子代理看哪些文件，就写在 `prompt` 里，它用自己的 `read` 去打开。原版另外接受调用上的 `input_files` 列表（[#1138](https://github.com/agegr/pi-web/pull/1138)）。（[说明](./agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）
+**一次子代理调用不带文件清单。** `Agent` 收的参数只有 `subagent_type`、`prompt`、`description`、`run_in_background`、`resume`、`model` 和 `isolation`：要让子代理看哪些文件，就写在 `prompt` 里，它用自己的 `read` 去打开。思考档位、轮次上限、是否继承这段对话都由 profile 决定，思考档位跟着模型引用一起写（写成 `x:high`）。原版在调用上保留 `input_files` 列表，和它从同一个 PR 拿到的 profile 参数并列（[#1138](https://github.com/agegr/pi-web/pull/1138)）。（[说明](./agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）
 
 **委派规则自己成块。** 目标一清楚就该委派——这句话现在单独成块，作为 `<delegation>` 出现在系统提示的末尾，读起来是 `Agent` 自己的策略。它给 `explore` 和 `plan` 各写了规则——面对陌生的代码库要建立理解，或一处改动波及尚未摸清、必须小心处理的代码，就用 `explore`；需要先想清楚步骤的大型复杂任务，就用 `plan`，而且绝不和它所规划的工作同时进行，plan 也应该始终在前台运行——其余启用的子代理只列名字。它随每一次运行的提示发出，**系统提示**面板也能看到，包括被插件改写了提示的会话。原版把委派建议放在工具的 prompt guidelines 里，由 Pi 追加到扁平的 `<rules>` 列表。（[说明](./agents/subagents.md#delegation-policy)）
 
@@ -155,7 +155,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **你自己回答的子代理也算一次运行。** 在子代理自己的对话里输入内容，它的运行会像任何一次 `resume` 那样被记录下来：agent 切换器显示它正在运行，`get_subagent_result` 会等它，结果落进它自己的记录，父会话收到完成报告。这是重启把子代理切断之后的回来之路：给它发一行，状态就不再撒谎。原版把输入到子代理里的提示词留在子代理记录之外，于是没有状态、没有结果，也没有报告跟着来。（[说明](./agents/subagents.md#built-in-subagents)）
 
-**文中的 shell 变量不再被当成公式。** 一个单独的 `$`，只要后面还有另一个 `$`，就会开一个公式，所以一句讲 `$HOME` 和 `$PATH` 的话会以数学斜体显示出来，夹在两个美元符号中间的中文句子也一样。这个分支会看两个定界符中间是什么——shell 变量名、只有 CJK 文本才有的标点、若干个汉字——并把那段文字原样留下，而 `$E=mc^2$`、`$PV=nRT$` 和一个短汉字量名仍按公式渲染。原版的数学解析只看定界符，它唯一的开关是把行内公式整个关掉，而不是只关掉那些其实是文字的一对（[remark-math](https://github.com/remarkjs/remark-math)）。（[说明](./agents/sessions.md#math-delimiters-and-prose-that-only-looks-like-a-formula)）
+**文中的 shell 变量不再被当成公式。** 一个单独的 `$`，只要后面还有另一个 `$`，就会开一个公式，所以一句讲 `$HOME` 和 `$PATH` 的话会以数学斜体显示出来，夹在两个美元符号中间的中文句子也一样。这个分支会看两个定界符中间是什么——shell 变量名、只有 CJK 文本才有的标点、若干个汉字——并把那段文字原样留下，而 `$E=mc^2$`、`$PV=nRT$` 和一个短汉字量名仍按公式渲染。原版照 remark-math 本来的样子运行：任意两个 `$` 就开一个公式，中间是什么它都不读（[remark-math](https://github.com/remarkjs/remark-math)）。（[说明](./agents/sessions.md#math-delimiters-and-prose-that-only-looks-like-a-formula)）
 
 **文件行自己的右键菜单。** 在项目文件树里右键某一行——在 Git 改动清单里右键也一样——这一行会给出这个文件自己的操作：把路径插入聊天、下载这个文件、撤销它未提交的改动（已暂存的一并取消暂存并还原内容），在访达 / 文件资源管理器 / 文件管理器里看到它，而且是选中这个文件本身，不只是打开它所在的目录。只有 Git 能还原的改动才有这一项——新增的文件、重命名、冲突都不算——而且它会先问一句再动手。原版的处理是把前两项做成悬停时浮在文件名上的按钮；它通往文件管理器的入口只打开工作区所在目录，没有按文件的入口（[#907](https://github.com/agegr/pi-web/pull/907)）。（[说明](./agents/files-and-access.md#a-rows-own-actions)）
 
@@ -165,7 +165,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **Code mode 默认开着，设置自成一页。** 会话一开始就能用 Code mode——模型写一小段脚本来调用工具——除非你的设置另有说法；它的设置都在同一页：始终开启或自动、内置工具是否同时声明给模型、工具列表能花多少 token、沙箱自检，以及当前会话可用的工具名。每个服务器自己的工具公开方式仍然留在那个服务器旁边。原版要等 MCP 服务器连上才打开 Code mode，设置也放在 MCP 那一页。（[说明](./agents/tools.md#settings--tools)）
 
-**改动清单不用再看一遍目录树。** 侧边栏的 Git 清单每次刷新都重新从 Git 读，所以它显示的就是此刻的目录树。问 Git 的三个问题——仓库根目录、状态、改动行数——是一起发出的，不是一个接一个；未跟踪文件的行数只数一遍，文件没变就留着这个结果，所以未跟踪文件很多的仓库也能很快作答。原版把同样的问题一个接一个地问，并且每次刷新都把所有未跟踪文件重数一遍。（[说明](./agents/files-and-access.md#when-the-file-tree-reloads)）
+**Git 清单三个问题一起问。** 侧边栏的 Git 清单每次刷新都重新从 Git 读，所以它显示的就是此刻的目录树。仓库根目录、状态清单、改动行数这三个问题是一起发出的，不是一个接一个；未跟踪文件的行数只数一遍，只要它的字节数、时间戳和 inode 说明没变，就沿用这个结果。原版先等仓库根目录答复，再问另外两个，并且每次刷新都把所有未跟踪文件重数一遍。（[说明](./agents/files-and-access.md#when-the-file-tree-reloads)）
 
 **「系统」面板显示模型拿到的那份提示词。** 「系统」面板列出完整的系统提示词，改写过它的插件也属于这份文本：插件自己写的那段话会出现在模型读到它的地方，而不是只留在插件的文件里。原版从记录里重放 pi 自己的那些段落，插件强制的那份提示词在那里从不出现——pi 在这次运行里送出它，记录里仍留着 pi 自己的段落。（[说明](./agents/sessions.md#the-system-panel-shows-the-prompt-the-model-receives)）
 
