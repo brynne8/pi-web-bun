@@ -106,9 +106,22 @@ export interface SettledReportSinkDependencies {
   sleep?(ms: number): Promise<void>;
 }
 
+/**
+ * What a batch's journey is worth to the caller that owes the parent a report:
+ * `sent` when pi holds the batch and its own run stands for these reports, `refused` when a
+ * send came back busy and the batch is waiting out the backoff before another try. Both move
+ * the caller's record of what it still owes, never the batch, so both are idempotent.
+ */
+export interface SettledReportHandoff {
+  /** The batch is pi's now; the caller's "this report is still owed" record can go. */
+  sent(): void;
+  /** A send was refused, so nothing was handed over; the record comes back until one lands. */
+  refused(): void;
+}
+
 export interface SettledReportSink {
   /** Hand a settled report to its parent, appending it to the batch already in the queue. */
-  deliver(sessionId: string, report: SettledReport, onSent?: () => void): Promise<void>;
+  deliver(sessionId: string, report: SettledReport, handoff?: SettledReportHandoff): Promise<void>;
   /**
    * Take a report back because its parent already collected the result: it leaves the batch and
    * the pending index, and a batch left empty is taken out of pi's queue.
@@ -145,7 +158,7 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
   }
 
   /** Queue the batch, appended in place, as one follow-up: only the first attempt may start a turn. */
-  async function sendNote(parent: SettledReportParent, note: SettledReportNote, retry: boolean, onSent?: () => void): Promise<void> {
+  async function sendNote(parent: SettledReportParent, note: SettledReportNote, retry: boolean, handoff?: SettledReportHandoff): Promise<void> {
     const sending = parent.inner.sendCustomMessage({
       customType: SETTLED_REPORTS_CUSTOM_TYPE,
       content: note.blocks,
@@ -158,7 +171,7 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
     }, { deliverAs: "followUp", triggerTurn: !retry });
     // pi marks its run active inside the send, before this promise settles with the
     // turn: the caller's "the parent's own run stands for this now" check goes here.
-    onSent?.();
+    handoff?.sent();
     await sending;
   }
 
@@ -240,16 +253,21 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
    * Deliver the batch, retrying a busy parent on the backoff schedule. Any other failure, and a
    * busy parent that never clears, is dead-lettered; the error is rethrown so the caller logs it.
    */
-  async function deliverBatch(parent: SettledReportParent, sessionId: string, note: SettledReportNote, onSent?: () => void): Promise<void> {
+  async function deliverBatch(parent: SettledReportParent, sessionId: string, note: SettledReportNote, handoff?: SettledReportHandoff): Promise<void> {
     for (let attempt = 1; attempt <= DELIVERY_MAX_ATTEMPTS; attempt++) {
       try {
-        await sendNote(parent, note, attempt > 1, onSent);
+        await sendNote(parent, note, attempt > 1, handoff);
         return;
       } catch (error) {
         if (!isBusy(error) || attempt === DELIVERY_MAX_ATTEMPTS) {
           writeDeadLetter(sessionId, note, attempt, error);
           throw error;
         }
+        // The refused send handed nothing over, whatever that attempt had already announced:
+        // the caller owes this batch again until a send lands, and must not call the task done
+        // while it sits in the backoff. Without this, the parent's run in flight announces the
+        // family as finished and the batch's own run, seconds later, announces it again.
+        handoff?.refused();
         await sleep(retryDelayMs(attempt));
       }
     }
@@ -284,7 +302,7 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
    * has already taken a batch pi still holds back out of that queue, so this cannot queue it twice.
    * A send that fails leaves the note as it is and the next report tries again.
    */
-  async function resendDroppedNote(sessionId: string, parent: SettledReportParent, note: SettledReportNote, onSent?: () => void): Promise<void> {
+  async function resendDroppedNote(sessionId: string, parent: SettledReportParent, note: SettledReportNote, handoff?: SettledReportHandoff): Promise<void> {
     if (note.parent !== parent) {
       // The wrapper the batch was queued on is gone and its queue went with it, so the append, and
       // the freeze that follows it, will happen on this one.
@@ -294,16 +312,17 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
     }
     try {
       // Not a retry: a batch that never landed still owes the parent the turn it was meant to wake.
-      await sendNote(parent, note, false, onSent);
+      await sendNote(parent, note, false, handoff);
       note.requeued++;
     } catch {
       // The parent refused even a queued message, so nothing was handed over: the count stays as it
-      // is and the next report tries again.
+      // is and the next report tries again. No hand-off either way — this call does not sit in a
+      // retry loop, so the report's pending entry goes with it, as it did before.
     }
   }
 
   return {
-    async deliver(sessionId, report, onSent) {
+    async deliver(sessionId, report, handoff) {
       const parent = await resolveParent(sessionId);
       if (!parent) return;
       let note = notes.get(sessionId);
@@ -322,7 +341,7 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
             abandonNote(sessionId, note);
             note = undefined;
           } else {
-            await resendDroppedNote(sessionId, parent, note, onSent);
+            await resendDroppedNote(sessionId, parent, note, handoff);
           }
         }
       }
@@ -354,7 +373,7 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
       if (note.queued) return;
       note.queued = true;
       try {
-        await deliverBatch(parent, sessionId, note, onSent);
+        await deliverBatch(parent, sessionId, note, handoff);
       } catch (error) {
         // The batch never reached pi's queue, so a later report must open a fresh note rather
         // than append to a message that will never be sent.

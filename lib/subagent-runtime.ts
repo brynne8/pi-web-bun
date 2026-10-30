@@ -44,7 +44,7 @@ import { createSubagentMcpPolicyExtension } from "./mcp-read-only-policy";
 import { resolveShellTools } from "./powershell-settings";
 import { isBuiltInSubagentsEnabled, readSubagentSettings } from "./subagent-settings";
 import { pendingTitleFrom } from "./pending-notifications";
-import type { SettledReportSink } from "./settled-report-note";
+import type { SettledReportHandoff, SettledReportSink } from "./settled-report-note";
 import { SubagentQueue } from "./subagent-queue";
 import { isShortSessionId, shortSessionId } from "./session-short-id";
 import { addWorktree, removeWorktree } from "./worktree";
@@ -822,14 +822,20 @@ export function createSubagentController(
 
       const finishQueuedAbort = async () => {
         if (stored.run.status !== "queued") return;
-        const result: SubagentRunInfo = { ...initialRun, status: "aborted", completedAt: new Date().toISOString() };
-        const cleanupError = await cleanupWorktree(parent.cwd, isolatedWorktree);
-        const finalResult = recordResult(sessionManager, cleanupError ? { ...result, worktreeCleanupError: cleanupError } : result);
-        stored.run = finalResult;
-        request.onUpdate?.(finalResult);
-        getSubagentRuns().delete(stored.run.sessionId);
-        dependencies.invalidateSessionList();
-        resolveCompletion(finalResult);
+        try {
+          const result: SubagentRunInfo = { ...initialRun, status: "aborted", completedAt: new Date().toISOString() };
+          const cleanupError = await cleanupWorktree(parent.cwd, isolatedWorktree);
+          const finalResult = recordResult(sessionManager, cleanupError ? { ...result, worktreeCleanupError: cleanupError } : result);
+          stored.run = finalResult;
+          request.onUpdate?.(finalResult);
+          getSubagentRuns().delete(stored.run.sessionId);
+          dependencies.invalidateSessionList();
+          resolveCompletion(finalResult);
+        } finally {
+          // A status write that throws (a full disk) must not leave the run in the map: it
+          // reads as running, and holds its parent's completion notification forever (#1434).
+          if (dropSubagentRun(initialRun.sessionId, stored)) dependencies.invalidateSessionList();
+        }
       };
       let queued: ReturnType<SubagentQueue<SubagentRunInfo>["enqueue"]>;
       try {
@@ -977,12 +983,17 @@ export function createSubagentController(
     };
     const finishQueuedAbort = () => {
       if (stored.run.status !== "queued") return;
-      const result = recordResult(manager, { ...initialRun, status: "aborted", completedAt: new Date().toISOString() });
-      stored.run = result;
-      request.onUpdate?.(result);
-      getSubagentRuns().delete(stored.run.sessionId);
-      dependencies.invalidateSessionList();
-      resolveCompletion(result);
+      try {
+        const result = recordResult(manager, { ...initialRun, status: "aborted", completedAt: new Date().toISOString() });
+        stored.run = result;
+        request.onUpdate?.(result);
+        getSubagentRuns().delete(stored.run.sessionId);
+        dependencies.invalidateSessionList();
+        resolveCompletion(result);
+      } finally {
+        // As in `start()`: the throw must not leave the run held (#1434).
+        if (dropSubagentRun(request.sessionId, stored)) dependencies.invalidateSessionList();
+      }
     };
     let queued: ReturnType<SubagentQueue<SubagentRunInfo>["enqueue"]>;
     try {
@@ -1178,7 +1189,12 @@ export function createSubagentController(
     const notifications = getParentNotifications();
     notifications.add(pending);
     try {
-      await deliverParentNotification(run, () => notifications.delete(pending));
+      await deliverParentNotification(run, {
+        sent: () => notifications.delete(pending),
+        // A send the parent refused handed nothing over, so the report is owed again until one
+        // lands: the entry goes back, and a family in that window announces nothing.
+        refused: () => { notifications.add(pending); },
+      });
     } finally {
       notifications.delete(pending);
     }
@@ -1196,7 +1212,7 @@ export function createSubagentController(
     dependencies.settledReports.withdraw(run.parentSessionId, "subagent", run.sessionId);
   }
 
-  async function deliverParentNotification(run: SubagentRunInfo, onTurnStarted: () => void): Promise<void> {
+  async function deliverParentNotification(run: SubagentRunInfo, handoff: SettledReportHandoff): Promise<void> {
     if (takeResultConsumed(run)) return;
     let parent = dependencies.getSession(run.parentSessionId);
     if (!parent?.isAlive()) {
@@ -1226,9 +1242,13 @@ export function createSubagentController(
       text: subagentNotificationText(run),
       details: subagentToolDetails(run),
     // pi marks its run active inside the send, before the delivery's promise settles
-    // with that turn: from there the parent's own run stands for this result.
-    }, () => {
-      if (parent.isRunning()) onTurnStarted();
+    // with that turn: from there the parent's own run stands for this result. A parent that is
+    // not running only holds the batch in a queue nothing drains, so it stays owed either way.
+    }, {
+      sent: () => {
+        if (parent.isRunning()) handoff.sent();
+      },
+      refused: handoff.refused,
     });
   }
 
