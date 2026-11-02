@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { stripTypeScriptTypes } from "node:module";
 import test from "node:test";
 import vm from "node:vm";
 import { createJiti } from "jiti";
+import { runStripped } from "../lib/__fixtures__/strip-types.mjs";
 
 const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
 const { isHiddenRelation } = await createJiti(import.meta.url).import("../lib/session-family.ts");
@@ -32,10 +32,7 @@ function runHandleAgentEnd({ end, selectedSession, attention }) {
       context.hiddenFinishedSessionIds = updater(context.hiddenFinishedSessionIds);
     },
   });
-  vm.runInContext(
-    stripTypeScriptTypes(`${callbackBody("handleAgentEnd", "\n  // The badge is for an unseen tab")}\nglobalThis.handleAgentEnd = handleAgentEnd;`),
-    context,
-  );
+  runStripped(`${callbackBody("handleAgentEnd", "\n  // The badge is for an unseen tab")}\nglobalThis.handleAgentEnd = handleAgentEnd;`, context);
   context.handleAgentEnd(end);
   return { notifications, hiddenFinishedSessionIds: context.hiddenFinishedSessionIds };
 }
