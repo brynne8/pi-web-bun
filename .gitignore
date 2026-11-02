@@ -29,6 +29,7 @@ bun.lock
 .DS_Store
 *.pem
 /.agents/
+/.impeccable/
 /skills-lock.json
 
 # debug
