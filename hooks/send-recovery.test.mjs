@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mock, test } from "node:test";
+import { mock, test, after } from "node:test";
 import { createRequire } from "node:module";
 import { realpathSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -33,6 +33,19 @@ const { renderHook } = await import(pathToFileURL(shimPath).href);
 const { useAgentSession } = await jiti.import("./useAgentSession.ts");
 const { clearDraft, getDraft, setDraft } = await jiti.import("@/lib/draft-store");
 const { deleteSessionViewSnapshot, getSessionViewSnapshot } = await jiti.import("@/lib/session-view-cache");
+
+// Bun runs the whole suite in one process with one globalThis, so the stubs this file
+// installs are handed back afterwards: a later file's real request would otherwise be
+// answered here, which is how the MCP sign-in flows and the debug page's stream ids broke.
+const originals = {
+  document: globalThis.document,
+  window: globalThis.window,
+  fetch: globalThis.fetch,
+  EventSource: globalThis.EventSource,
+};
+after(() => {
+  Object.assign(globalThis, originals);
+});
 
 globalThis.document ??= Object.assign(new EventTarget(), { visibilityState: "visible" });
 globalThis.window ??= new EventTarget();

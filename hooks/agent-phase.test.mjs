@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mock, test } from "node:test";
+import { mock, test, after } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { realpathSync } from "node:fs";
@@ -27,6 +27,19 @@ const jiti = createJiti(import.meta.url, { tsconfigPaths: true, tryNative: false
 
 const { renderHook } = await import(pathToFileURL(shimPath).href);
 const { useAgentSession } = await jiti.import("./useAgentSession.ts");
+
+// Bun runs the whole suite in one process with one globalThis, so the stubs this file
+// installs are handed back afterwards: a later file's real request would otherwise be
+// answered here.
+const originals = {
+  document: globalThis.document,
+  window: globalThis.window,
+  fetch: globalThis.fetch,
+  EventSource: globalThis.EventSource,
+};
+after(() => {
+  Object.assign(globalThis, originals);
+});
 
 globalThis.document ??= Object.assign(new EventTarget(), { visibilityState: "visible" });
 globalThis.window ??= new EventTarget();

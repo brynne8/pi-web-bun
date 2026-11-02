@@ -237,8 +237,8 @@ test("POST refuses a foreign origin, a body that is not JSON, and a folder with 
 test("POST trusts the folder, and GET then lists it as trusted", async (t) => {
   t.after(() => rm(trustPath, { force: true }));
   const response = await post({ cwd });
-  assert.equal(response.status, 200);
   const status = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(status));
   assert.equal(status.trusted, true);
   assert.equal(status.decisionPath, cwd);
   assert.equal(JSON.parse(await readFile(trustPath, "utf8"))[cwd], true);
