@@ -404,18 +404,6 @@ test("errors come first, then warnings, each in the catalog's order", () => {
   assert.equal(issues[0].text, "Lease · failed · 3s ago", "no HTTP status, none said");
 });
 
-test("the verdict: reading, paused, issues, waiting or OK", () => {
-  const empty = state.EMPTY_DEBUG_SERVER_READING;
-  const warning = { id: "poll", tone: "warning", text: "" };
-  const error = { id: "reader", tone: "error", text: "" };
-  assert.deepEqual(state.debugVerdict(null, server(), []), { kind: "reading", tone: "dim", count: 0 });
-  assert.equal(state.debugVerdict(page({ visibility: { ...page().visibility, state: "hidden" } }), server(), [warning]).kind, "hidden");
-  assert.deepEqual(state.debugVerdict(page(), empty, [warning, error]), { kind: "issues", tone: "error", count: 2 });
-  assert.deepEqual(state.debugVerdict(page(), server(), [warning]), { kind: "issues", tone: "warning", count: 1 });
-  assert.equal(state.debugVerdict(page(), empty, []).kind, "waiting");
-  assert.deepEqual(state.debugVerdict(page(), server(), []), { kind: "ok", tone: "ok", count: 0 });
-});
-
 // ── This page's sources ──
 
 test("the meter: this page's sources against HTTP/1.1's six, the chat's stream apart from a grace one", () => {

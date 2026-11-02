@@ -1,11 +1,9 @@
 "use client";
 
-import { Component, Fragment, useEffect, useMemo, useRef, useState, type ReactNode, type Ref, type RefObject } from "react";
-import { useI18n } from "@/hooks/useI18n";
-import { copyText } from "@/lib/clipboard";
+import { Component, Fragment, useMemo, type ReactNode } from "react";
 import type { DebugClientSession, DebugEventConnectionSnapshot, DebugSessionDetail, DebugSessionSummary, DebugSnapshotResponse } from "@/lib/debug-types";
 import type { SessionInfo, SubagentSessionStatus } from "@/lib/types";
-import { StatusIcon } from "./AgentSessionPanel";
+import { StatusIcon } from "./ActivityAgents";
 import { MCP_SESSION_STATE_KEYS } from "./mcp-config-helpers";
 import { sessionRowTitle } from "./SessionTree";
 import { FolderIcon, SpinnerIcon } from "./SidebarIcons";
@@ -20,22 +18,17 @@ import {
   DEBUG_STATUS_KEYS,
   DEBUG_STREAM_ERROR_KEYS,
   DEBUG_STREAM_STATE_KEYS,
-  DEBUG_TICK_MS,
   EMPTY_DEBUG_SAMPLES,
-  EMPTY_DEBUG_SERVER_READING,
   barFraction,
-  createDebugPoller,
   debugHolderLabel,
   debugHolderTone,
   debugIssues,
-  debugPollSample,
   debugPoolKindCounts,
   debugServerClock,
   debugSessionTitle,
   debugSlotTitle,
   debugStatusState,
   debugTargetSessionId,
-  debugVerdict,
   formatAgo,
   formatBytes,
   formatCountdown,
@@ -50,10 +43,6 @@ import {
   nextLeaseRenewalAt,
   pageAgentStreamCount,
   poolSlots,
-  pushDebugSample,
-  readClientSession,
-  readDebugPage,
-  runningPollSample,
   shortDebugId,
   sparkHeight,
   sparkStats,
@@ -64,7 +53,6 @@ import {
   type DebugPageReading,
   type DebugPool,
   type DebugPoolSlot,
-  type DebugPoller,
   type DebugSample,
   type DebugSamples,
   type DebugServerClock,
@@ -74,33 +62,11 @@ import {
   type DebugStatusState,
   type DebugTitleOf,
   type DebugTone,
-  type DebugVerdict,
   type Translate,
 } from "./debug-panel-state";
 
-/**
- * The activity view's debug read-out: how this page talks to the server (its event stream, its
- * lease, the other streams it holds) and what the server holds for the chat shown and overall.
- * It only reads: the chat's snapshot through a reader of refs, page-level bookkeeping
- * (lib/page-debug.ts), and `GET /api/agent/debug` every 2 s, which starts nothing. Its clocks live
- * here, not in AppShell, so a tick renders the panel alone. The panel lists the server's sessions.
- */
-
-interface Props {
-  /** The chat's snapshot reader, registered by ChatWindow; read in the tick, never in render. */
-  readerRef: RefObject<(() => DebugClientSession) | null>;
-  selectedSessionId: string | null;
-  /** AppShell's session catalog: names and projects for the sessions the server lists. */
-  sessions: readonly SessionInfo[];
-  /**
-   * Inside another panel (the right rail's activity view): no shell of its own, so the host owns
-   * the scroll, the padding and the section heading above it.
-   */
-  embedded?: boolean;
-}
-
-/** Keeps a render error in the panel from taking the page down with it. */
-export class DebugPanelBoundary extends Component<{ fallback: string; children: ReactNode }, { failed: boolean }> {
+/** Keeps a render error in the read-out from taking the page down with it. */
+export class DiagnosticsBoundary extends Component<{ fallback: string; children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
 
   static getDerivedStateFromError() {
@@ -108,7 +74,7 @@ export class DebugPanelBoundary extends Component<{ fallback: string; children: 
   }
 
   componentDidCatch(error: unknown) {
-    console.error("Debug panel failed:", error);
+    console.error("Activity diagnostics failed:", error);
   }
 
   render() {
@@ -124,155 +90,15 @@ export class DebugPanelBoundary extends Component<{ fallback: string; children: 
   }
 }
 
-export function DebugPanel({ readerRef, selectedSessionId, sessions, embedded = false }: Props) {
-  const { t } = useI18n();
-  const selectedRef = useRef(selectedSessionId);
-  selectedRef.current = selectedSessionId;
-  const pollerRef = useRef<DebugPoller | null>(null);
-  const disposedRef = useRef(false);
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // The panel's element, for the tooltip-hold listener below.
-  const panelRef = useRef<HTMLElement | null>(null);
-  // The running poll's last record seen, so each poll is one sample.
-  const lastRunningAtRef = useRef<number | null>(null);
-  const [page, setPage] = useState<DebugPageReading | null>(null);
-  const [server, setServer] = useState<DebugServerReading>(EMPTY_DEBUG_SERVER_READING);
-  const [samples, setSamples] = useState<DebugSamples>(EMPTY_DEBUG_SAMPLES);
-  const [copied, setCopied] = useState(false);
-  // What the view shows while the mouse rests on something with a tooltip: each tick would rewrite
-  // the title under it, and the browser hides and shows again a tooltip whose text changed, so it
-  // flickered every second. Readings go on underneath; the view catches up as the mouse moves off.
-  const [held, setHeld] = useState<HeldView | null>(null);
-  const liveRef = useRef<HeldView>({ page, server, samples });
-  liveRef.current = { page, server, samples };
-
-  useEffect(() => {
-    const section = panelRef.current;
-    if (!section) return;
-    let heldOn: Element | null = null;
-    const onPointerOver = (event: PointerEvent) => {
-      if (event.pointerType !== "mouse") return;
-      const titled = event.target instanceof Element ? event.target.closest("[title]") : null;
-      const target = titled && section.contains(titled) ? titled : null;
-      if (target === heldOn) return;
-      heldOn = target;
-      // Another tooltip: the view as it is now, held from here.
-      setHeld(target ? liveRef.current : null);
-    };
-    const onPointerLeave = () => {
-      heldOn = null;
-      setHeld(null);
-    };
-    section.addEventListener("pointerover", onPointerOver);
-    section.addEventListener("pointerleave", onPointerLeave);
-    return () => {
-      section.removeEventListener("pointerover", onPointerOver);
-      section.removeEventListener("pointerleave", onPointerLeave);
-    };
-  }, []);
-
-  useEffect(() => {
-    disposedRef.current = false;
-    const poller = createDebugPoller({
-      fetch: (url, init) => fetch(url, init),
-      sessionId: () => debugTargetSessionId(readClientSession(readerRef.current).client, selectedRef.current),
-      isVisible: () => document.visibilityState === "visible",
-      onReading: (reading) => {
-        setServer(reading);
-        const sample = debugPollSample(reading);
-        if (sample) setSamples((current) => ({ ...current, poll: pushDebugSample(current.poll, sample) }));
-      },
-    });
-    pollerRef.current = poller;
-    const read = () => {
-      const reading = readDebugPage(readerRef.current, poller.inFlightSince());
-      setPage(reading);
-      const last = reading.runningPoll?.last ?? null;
-      if (last && last.at !== lastRunningAtRef.current) {
-        lastRunningAtRef.current = last.at;
-        const sample = runningPollSample(last);
-        if (sample) setSamples((current) => ({ ...current, running: pushDebugSample(current.running, sample) }));
-      }
-    };
-    read();
-    poller.poll();
-    const tick = window.setInterval(() => {
-      // A hidden page shows nothing: no render each second for it, as the poll pauses too.
-      if (document.visibilityState !== "visible") return;
-      read();
-      // A session picked in the sidebar: ask about it now, not at the next poll.
-      poller.sync();
-    }, DEBUG_TICK_MS);
-    const pollTimer = window.setInterval(() => poller.poll(), DEBUG_POLL_MS);
-    const onVisibilityChange = () => {
-      if (document.visibilityState !== "visible") return;
-      read();
-      poller.poll();
-    };
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => {
-      // Disposed first: an answer still on its way never reaches the state.
-      disposedRef.current = true;
-      poller.dispose();
-      pollerRef.current = null;
-      window.clearInterval(tick);
-      window.clearInterval(pollTimer);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-    };
-  }, [readerRef]);
-
-  useEffect(() => {
-    pollerRef.current?.sync();
-  }, [selectedSessionId]);
-
-  const handleCopy = () => {
-    const payload = { client: page, server: server.reply };
-    void copyText(JSON.stringify(payload, null, 2)).then(() => {
-      if (disposedRef.current) return;
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-      setCopied(true);
-      copyTimerRef.current = setTimeout(() => setCopied(false), 1400);
-    }, () => {});
-  };
-
-  const shown = held ?? { page, server, samples };
-  return (
-    <DebugPanelView
-      page={shown.page}
-      server={shown.server}
-      samples={shown.samples}
-      selectedSessionId={selectedSessionId}
-      sessions={sessions}
-      copied={copied}
-      onCopy={handleCopy}
-      t={t}
-      panelRef={panelRef}
-      embedded={embedded}
-    />
-  );
-}
-
-interface HeldView {
+interface Props {
   page: DebugPageReading | null;
   server: DebugServerReading;
-  samples: DebugSamples;
-}
-
-interface ViewProps {
-  page: DebugPageReading | null;
-  server: DebugServerReading;
-  /** Round trips of the panel's poll and the sidebar's running poll, newest last. */
+  /** Round trips of the read-out's poll and the sidebar's running poll, newest last. */
   samples?: DebugSamples;
   selectedSessionId: string | null;
+  /** AppShell's session catalog: names and projects for the sessions the server lists. */
   sessions: readonly SessionInfo[];
-  copied: boolean;
-  onCopy(): void;
   t: Translate;
-  /** The panel's element, for the tooltip-hold listener; read only in an effect. */
-  panelRef?: Ref<HTMLElement>;
-  /** Inside another panel: the host owns the scroll and the heading above this one. */
-  embedded?: boolean;
 }
 
 /** What every part of the view reads. */
@@ -287,64 +113,72 @@ interface Ctx {
   titleOf: DebugTitleOf;
 }
 
-/** The panel itself, from what DebugPanel read; pure, so tests render it from fixtures. */
-export function DebugPanelView({ page, server, samples = EMPTY_DEBUG_SAMPLES, selectedSessionId, sessions, copied, onCopy, t, panelRef, embedded = false }: ViewProps) {
+/**
+ * The activity view's read-out, in the two parts the rail places apart. It only reads: the page's
+ * own bookkeeping and one `GET /api/agent/debug` answer, which starts nothing and moves no idle
+ * timer. The host owns the headings, the scroll and how often the server is asked; the faults the
+ * same readings carry go above it (`debugFaults`), not inside it.
+ */
+function useDiagnosticsView({ page, server, samples = EMPTY_DEBUG_SAMPLES, selectedSessionId, sessions, t }: Props) {
   const now = page?.at ?? server.receivedAt ?? 0;
   const client = page?.client ?? null;
   const targetSessionId = debugTargetSessionId(client, selectedSessionId);
   const reply = server.reply;
   const clock = reply && server.receivedAt !== null ? debugServerClock(reply.now, server.receivedAt, now) : null;
-  // An answer about the session the panel shows: the poll drops the others, but one may still be
-  // on screen for a second after the chat moved on.
+  // An answer about the session the chat shows: the poll drops the others, but one may still be on
+  // screen for a second after the chat moved on.
   const detail = reply?.session && reply.session.sessionId === targetSessionId ? reply.session : null;
   const myHolder = client?.pageId ?? null;
   const byId = useMemo(() => new Map(sessions.map((session) => [session.id, session])), [sessions]);
-  const titleOf = useMemo<DebugTitleOf>(() => (id) => {
-    const info = byId.get(id);
-    return info ? sessionRowTitle(info) : null;
-  }, [byId]);
+  const titleOf = useMemo(() => debugTitleOf(byId), [byId]);
   const groups = useMemo(() => (reply ? groupDebugSessions(reply.sessions, byId, targetSessionId) : null), [reply, byId, targetSessionId]);
-  const issues = page ? debugIssues({ page, server, detail, t, titleOf }) : [];
-  const verdict = debugVerdict(page, server, issues);
   const ctx: Ctx = { t, now, clock, myHolder, titleOf };
+  return { ctx, page, reply, clock, detail, groups, samples, targetSessionId };
+}
 
+/**
+ * The sessions the server holds something for, each with who holds it and when it is reaped, the
+ * chat's own details under its row. The read-out's part of "what is running", kept where the rail
+ * keeps its running things rather than behind its fold.
+ */
+export function DiagnosticsSessions(props: Props) {
+  const { ctx, page, reply, detail, groups, targetSessionId } = useDiagnosticsView(props);
   return (
-    <section ref={panelRef} className={`debug-panel${embedded ? " is-embedded" : ""}`} aria-label={t("debug.panelLabel")}>
-      <div className="debug-panel-header">
-        {!embedded && (
-          <>
-            <span className="debug-panel-heading" title={t("debug.readOnly")}>{t("debug.title")}</span>
-            {/* Plain text, no live region: a screen reader would read out every change. */}
-            <VerdictView verdict={verdict} t={t} />
-          </>
-        )}
-        <button type="button" className="debug-panel-copy" onClick={onCopy} title={t("debug.copyTitle")}>
-          {copied ? t("debug.copied") : t("debug.copyJson")}
-        </button>
-      </div>
-      {page !== null && (
-        <div className="debug-panel-scroll">
-          {issues.length > 0 && <IssueList issues={issues} />}
-          {/* What this page holds and measures; what the server holds (its totals and the pages
-              connected to it); the sessions it holds, the chat's details under its own row. Three
-              columns on a wide panel, the sessions under the server's on a narrower one, all one
-              above the other on a phone. */}
-          <div className="debug-cols">
-            <PageColumn page={page} samples={samples} reply={reply} ctx={ctx} />
-            <div className="debug-col debug-col-server">
-              <ServerHead reply={reply} ctx={ctx} />
-              <PageList reply={reply} ctx={ctx} />
-            </div>
-            <div className="debug-col debug-col-sessions">
-              <SessionList reply={reply} detail={detail} groups={groups} targetSessionId={targetSessionId} sources={page.sources} ctx={ctx} />
-            </div>
-          </div>
-        </div>
-      )}
-      <style>{DEBUG_PANEL_CSS}</style>
-    </section>
+    <div className="debug-panel debug-sessions">
+      <SessionList
+        reply={reply}
+        detail={detail}
+        groups={groups}
+        targetSessionId={targetSessionId}
+        sources={page?.sources ?? []}
+        ctx={ctx}
+      />
+    </div>
   );
 }
+
+/**
+ * The numbers: what this page holds and measures (its streams, its lease, its round trips) and what
+ * the server holds overall. Nothing here is actionable in the moment, which is why the rail keeps it
+ * behind a fold and asks for it on the slow beat.
+ */
+export function DiagnosticsNumbers(props: Props) {
+  const { ctx, page, reply, samples } = useDiagnosticsView(props);
+  if (page === null) return null;
+  return (
+    <div className="debug-panel debug-numbers">
+      <div className="debug-cols">
+        <PageColumn page={page} samples={samples} reply={reply} ctx={ctx} />
+        <div className="debug-col debug-col-server">
+          <ServerHead reply={reply} ctx={ctx} />
+          <PageList reply={reply} ctx={ctx} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 
 // ── Primitives ──
 
@@ -598,28 +432,56 @@ function StatusSlot({ state, label }: { state: DebugStatusState; label: string }
   );
 }
 
-// ── A. Header and B. Issues ──
+// ── B. Faults, names and the one line a closed read-out shows ──
 
-function VerdictView({ verdict, t }: { verdict: DebugVerdict; t: Translate }) {
-  const text = {
-    reading: () => t("debug.reading"),
-    hidden: () => t("debug.poll.hidden"),
-    issues: () => t("debug.health.issues", { count: verdict.count }),
-    waiting: () => t("debug.poll.waiting"),
-    ok: () => t("debug.health.ok"),
-  }[verdict.kind]();
-  return (
-    <span className={`debug-panel-status is-${verdict.kind === "ok" ? "muted" : verdict.tone}`}>
-      {verdict.kind === "issues" && <Glyph kind={verdict.tone === "error" ? "error" : "warning"} />}
-      {verdict.kind === "ok" && <Dot tone="ok" />}
-      {(verdict.kind === "hidden" || verdict.kind === "waiting") && <Dot tone="dim" ring />}
-      <span className="debug-panel-status-text">{text}</span>
-    </span>
-  );
+/** Names the sessions the read-out lists and its faults mention, from AppShell's session catalog. */
+export function debugTitleOf(byId: ReadonlyMap<string, SessionInfo>): DebugTitleOf {
+  return (id) => {
+    const info = byId.get(id);
+    return info ? sessionRowTitle(info) : null;
+  };
 }
 
-/** One line per fault: its tone's mark, then the sentence, which names what it is about. */
-function IssueList({ issues }: { issues: readonly DebugIssue[] }) {
+/**
+ * The faults worth a line above the read-out, from the readings the read-out draws. The chat's own
+ * details are the ones the server answers for the session shown, the same pairing the read-out uses.
+ */
+export function debugFaults(input: {
+  page: DebugPageReading | null;
+  server: DebugServerReading;
+  selectedSessionId: string | null;
+  titleOf: DebugTitleOf;
+  t: Translate;
+}): DebugIssue[] {
+  const { page, server, selectedSessionId, titleOf, t } = input;
+  if (!page) return [];
+  const target = debugTargetSessionId(page.client, selectedSessionId);
+  const reply = server.reply;
+  const detail = reply?.session && reply.session.sessionId === target ? reply.session : null;
+  return debugIssues({ page, server, detail, t, titleOf });
+}
+
+/**
+ * What a closed read-out says about the chat's own stream, off the page alone: the state the chat
+ * would describe in its own words, so closing the read-out hides nothing that is already known.
+ */
+export function debugStreamSummary(page: DebugPageReading | null, t: Translate): string | null {
+  if (!page) return null;
+  const client = page.client;
+  if (!client) return t("debug.stream.noChat");
+  const connection = client.connection;
+  if (!connection) return t("debug.stream.noConnection");
+  const state = t(DEBUG_STREAM_STATE_KEYS[connection.state] ?? "debug.unknown");
+  const retry = connection.retryDueAt !== null && connection.state !== "connected"
+    && t("debug.stream.retryDue", { time: formatCountdown(connection.retryDueAt - page.at, t) });
+  return join([`${t("debug.section.stream")} ${state}`, retry]);
+}
+
+/**
+ * One line per fault: its tone's mark, then the sentence, which names what it is about. Plain text,
+ * no live region: a screen reader would read out every change.
+ */
+export function IssueList({ issues }: { issues: readonly DebugIssue[] }) {
   return (
     <ul className="debug-issues">
       {issues.map((issue, index) => (
@@ -656,7 +518,7 @@ function PageColumn({ page, samples, reply, ctx }: { page: DebugPageReading; sam
   const pool = poolSlots(page.sources, page.protocol, page.client?.connection?.sessionId ?? null);
   const running = page.runningPoll;
   return (
-    <div className="debug-col debug-col-page">
+    <div className="debug-col">
       <div className="debug-col-head">
         <span className="debug-section-title">{t("debug.section.page")}</span>
       </div>
@@ -1465,7 +1327,8 @@ function SessionRowCells({ summary, mine, remaining, idleTimeoutMs, t, badges, i
 // The session info popover's look (AppShell): the panel's background, a border below. Tones are
 // classes setting `color`, and every mark is drawn in currentColor. No transitions: bars and rings
 // jump once a second. Narrow rules follow the panel's own width, not the window's.
-const DEBUG_PANEL_CSS = `
+/** The read-out's own sheet, injected once by the host that places its two parts. */
+export const DIAGNOSTICS_CSS = `
   .debug-panel {
     --dbg-ok: var(--act-ok, #16a34a);
     --dbg-warn: var(--act-warn, #d97706);
@@ -1473,27 +1336,12 @@ const DEBUG_PANEL_CSS = `
     container-type: inline-size;
     container-name: debug-panel;
     display: flex;
-    height: 100%;
-    min-height: 0;
+    min-width: 0;
     flex-direction: column;
-    background: var(--bg);
-    color: var(--text);
-  }
-  .debug-panel.is-embedded {
-    height: auto;
-    min-height: 0;
-    background: transparent;
-  }
-  .debug-panel.is-embedded .debug-panel-header {
-    padding: 0 0 6px;
-    border-bottom: none;
-    background: transparent;
-    font-size: 11px;
-  }
-  .debug-panel.is-embedded .debug-panel-scroll {
-    overflow: visible;
-    padding: 0;
     gap: 10px;
+    color: var(--text);
+    font-size: 11px;
+    line-height: 1.5;
   }
   .debug-panel .is-ok { color: var(--dbg-ok); }
   .debug-panel .is-warning { color: var(--dbg-warn); }
@@ -1501,64 +1349,6 @@ const DEBUG_PANEL_CSS = `
   .debug-panel .is-accent { color: var(--accent); }
   .debug-panel .is-muted { color: var(--text-muted); }
   .debug-panel .is-dim { color: var(--text-dim); }
-  .debug-panel-header {
-    display: flex;
-    flex-shrink: 0;
-    align-items: center;
-    gap: 12px;
-    min-width: 0;
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--border);
-    font-size: 12px;
-  }
-  .debug-panel-heading {
-    flex-shrink: 0;
-    color: var(--text);
-    cursor: help;
-    font-weight: 700;
-  }
-  .debug-panel-status {
-    display: inline-flex;
-    min-width: 0;
-    align-items: center;
-    gap: 6px;
-    font-variant-numeric: tabular-nums;
-  }
-  .debug-panel-status svg {
-    flex-shrink: 0;
-  }
-  .debug-panel-status-text {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .debug-panel-copy {
-    flex-shrink: 0;
-    margin-left: auto;
-    padding: 2px 8px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: transparent;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 11px;
-  }
-  .debug-panel-copy:hover {
-    background: var(--bg-hover);
-    color: var(--text);
-  }
-  .debug-panel-scroll {
-    display: flex;
-    min-height: 0;
-    flex: 1;
-    flex-direction: column;
-    gap: 12px;
-    overflow: auto;
-    padding: 10px 16px 12px;
-    font-size: 12px;
-    line-height: 1.5;
-  }
   .debug-section-title {
     color: var(--text);
     font-size: 11px;
@@ -1619,12 +1409,11 @@ const DEBUG_PANEL_CSS = `
     overflow-wrap: anywhere;
   }
 
-  /* Three columns when the panel is wide: the page's as wide as its table, the server's and the
-     sessions' each capped, so names never stretch and push the badges to the far edge. */
+  /* The page's measures as wide as its own table, the server's beside it where the read-out has
+     the room, so names never stretch and push the badges to the far edge. */
   .debug-cols {
     display: grid;
-    grid-template-areas: "page server sessions";
-    grid-template-columns: minmax(320px, max-content) minmax(340px, 480px) minmax(360px, 560px);
+    grid-template-columns: minmax(320px, max-content) minmax(0, 1fr);
     gap: 0;
   }
   .debug-col {
@@ -1633,17 +1422,7 @@ const DEBUG_PANEL_CSS = `
     flex-direction: column;
     gap: 8px;
   }
-  .debug-col-page {
-    grid-area: page;
-  }
   .debug-col-server {
-    grid-area: server;
-  }
-  .debug-col-sessions {
-    grid-area: sessions;
-  }
-  .debug-col-server,
-  .debug-col-sessions {
     margin-left: 20px;
     padding-left: 20px;
     border-left: 1px solid var(--border);
@@ -2209,34 +1988,18 @@ const DEBUG_PANEL_CSS = `
     gap: 3px 4px;
   }
 
-  /* Narrower: the sessions under the server's pages, one border down both; the page's column
-     beside them, its height going to the sessions' row rather than opening a gap under the pages. */
-  @container debug-panel (max-width: 1239px) {
+  /* One above the other where the rail is narrower than the page's own table. */
+  @container debug-panel (max-width: 700px) {
     .debug-cols {
-      grid-template-areas: "page server" "page sessions";
-      grid-template-columns: minmax(320px, max-content) minmax(0, 560px);
-      grid-template-rows: auto 1fr;
-    }
-    .debug-col-sessions {
-      padding-top: 10px;
-    }
-  }
-  @container debug-panel (max-width: 760px) {
-    .debug-cols {
-      grid-template-areas: "page" "server" "sessions";
       grid-template-columns: minmax(0, 1fr);
-      grid-template-rows: none;
     }
     .debug-col-server {
       margin-top: 10px;
       padding-top: 10px;
-      border-top: 1px solid var(--border);
-    }
-    .debug-col-server,
-    .debug-col-sessions {
       margin-left: 0;
       padding-left: 0;
       border-left: 0;
+      border-top: 1px solid var(--border);
     }
   }
   @container debug-panel (max-width: 520px) {

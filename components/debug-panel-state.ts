@@ -897,23 +897,6 @@ export function debugIssues({ page, server, detail, t, titleOf }: DebugIssueInpu
   return issues.sort((a, b) => Number(b.tone === "error") - Number(a.tone === "error"));
 }
 
-export interface DebugVerdict {
-  kind: "reading" | "hidden" | "issues" | "waiting" | "ok";
-  tone: DebugTone;
-  count: number;
-}
-
-/** The header's one word: OK, the number of issues, or why there is nothing to judge yet. */
-export function debugVerdict(page: DebugPageReading | null, server: DebugServerReading, issues: readonly DebugIssue[]): DebugVerdict {
-  if (page === null) return { kind: "reading", tone: "dim", count: 0 };
-  if (page.visibility?.state === "hidden") return { kind: "hidden", tone: "dim", count: 0 };
-  if (issues.length > 0) {
-    return { kind: "issues", tone: issues.some((issue) => issue.tone === "error") ? "error" : "warning", count: issues.length };
-  }
-  if (server.receivedAt === null) return { kind: "waiting", tone: "dim", count: 0 };
-  return { kind: "ok", tone: "ok", count: 0 };
-}
-
 // ── Sessions on the server ──
 
 export interface DebugSessionRow {

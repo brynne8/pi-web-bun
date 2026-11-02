@@ -10,15 +10,22 @@ const jiti = createJiti(import.meta.url, {
 const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
-const { DebugPanelView } = await jiti.import("./DebugPanel.tsx");
+const {
+  DiagnosticsNumbers,
+  DiagnosticsSessions,
+  IssueList,
+  debugFaults,
+  debugTitleOf,
+} = await jiti.import("./ActivityDiagnostics.tsx");
 const { EMPTY_DEBUG_SERVER_READING } = await jiti.import("./debug-panel-state.ts");
 const { enLocale } = await jiti.import("@/lib/i18n/messages/en.ts");
 const { zhCNLocale } = await jiti.import("@/lib/i18n/messages/zh-CN.ts");
 const { interpolateMessage } = await jiti.import("@/lib/i18n/format.ts");
-const panelSource = await readFile(new URL("./DebugPanel.tsx", import.meta.url), "utf8");
+const panelSource = await readFile(new URL("./ActivityDiagnostics.tsx", import.meta.url), "utf8");
+const readoutSource = await readFile(new URL("./debug-readout.ts", import.meta.url), "utf8");
 const shellSource = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
 const sidebarSource = await readFile(new URL("./SessionSidebar.tsx", import.meta.url), "utf8");
-const activitySource = await readFile(new URL("./BackgroundTasksPanel.tsx", import.meta.url), "utf8");
+const activitySource = await readFile(new URL("./ActivityPanel.tsx", import.meta.url), "utf8");
 
 const h = React.createElement;
 const SECOND = 1000;
@@ -252,22 +259,31 @@ const catalog = [
   { id: "notes-1", name: "Weekly plan", path: "", cwd: "/work/notes", projectRoot: "/work/notes", created: "", modified: "2026-10-09T00:00:00Z", messageCount: 3, firstMessage: "" },
 ];
 
+/** What the activity view shows from these readings, in the order its sections place them. */
 function render(props = {}) {
-  return decode(renderToStaticMarkup(h(I18nProvider, null, h(DebugPanelView, {
+  const view = {
     page: page(),
     server: server(),
     selectedSessionId: "s1",
     sessions: catalog,
-    copied: false,
-    onCopy() {},
     t,
     ...props,
-  }))));
+  };
+  const issues = debugFaults({
+    page: view.page,
+    server: view.server,
+    selectedSessionId: view.selectedSessionId,
+    titleOf: debugTitleOf(new Map(view.sessions.map((session) => [session.id, session]))),
+    t,
+  });
+  return decode(renderToStaticMarkup(h(I18nProvider, null,
+    issues.length > 0 ? h(IssueList, { issues }) : null,
+    h(DiagnosticsSessions, view),
+    h(DiagnosticsNumbers, view))));
 }
 
-test("a quiet page reads OK: no issue list, the meter's scale in its label, every section", () => {
+test("a quiet page: no issue list, the meter's scale in its label, every section", () => {
   const html = render();
-  assert.match(html, /<span class="debug-panel-status is-muted"><span class="debug-dot is-ok" aria-hidden="true"><\/span><span class="debug-panel-status-text">OK<\/span><\/span>/);
   assert.doesNotMatch(html, /<ul/, "no issues, no list");
   // The meter's name says what its slots count: the slots' own titles are not read inside an image.
   assert.ok(ariaLabels(html).includes("http/1.1 · six connections per origin, shared by all tabs · 2/6 · Agent 1 · File watch 1"), ariaLabels(html).join("\n"));
@@ -278,8 +294,8 @@ test("a quiet page reads OK: no issue list, the meter's scale in its label, ever
   const text = visibleText(html);
   assert.doesNotMatch(text, /six connections|every 15s|timeout 10m|stale after/);
   assert.doesNotMatch(html, /<dl|<dt|debug-panel-footer/);
-  assert.match(html, /<span class="debug-panel-heading" title="Read-only: [^"]+">Debug<\/span>/);
-  assert.match(html, /<button type="button" class="debug-panel-copy"[^>]*>Copy JSON<\/button>/);
+  // The read-out has no header of its own: the rail titles it, offers the copy and counts the faults.
+  assert.doesNotMatch(html, /debug-panel-header|debug-panel-copy|debug-panel-heading/);
   // No live region: a screen reader would read every change out.
   assert.doesNotMatch(html, /role="status"|aria-live/);
 });
@@ -294,9 +310,8 @@ test("the meter names what it holds on h2 and with no protocol known, not a bare
   assert.doesNotMatch(unknown, /<span class="debug-chip is-dim">/);
 });
 
-test("a timeout: the verdict counts it and its sentence is written once", () => {
+test("a timeout: its sentence is written once, above the read-out", () => {
   const html = render({ server: server({ failure: { kind: "timeout", status: null, at: LOCAL - SECOND } }) });
-  assert.match(html, /<span class="debug-panel-status is-warning"><svg[^>]*>.*?<\/svg><span class="debug-panel-status-text">Issues: 1<\/span>/);
   // The tone's mark and the sentence: no mark for what it is about, the sentence names it.
   assert.match(html, /<ul class="debug-issues"><li class="debug-issue is-warning"><svg[^>]*>(?:<path [^>]*><\/path>)+<\/svg><span class="debug-issue-text">/);
   const sentence = `${t("debug.poll.timeout")} · 1s ago`;
@@ -488,20 +503,20 @@ test("sessions on the server: grouped by project, the chat's first and not repea
   assert.match(list, /^<div class="debug-list"><div class="debug-row debug-list-head" aria-hidden="true"><span><\/span><span>Session<\/span><span class="debug-list-head-holders">Held by<\/span><span class="debug-list-head-idle">Reap countdown<\/span><\/div><div class="debug-group">/);
 });
 
-test("a chat that moved on waits for its own answer; a hidden page pauses", () => {
+test("a chat that moved on waits for its own answer; a hidden page reads nothing", () => {
   // The chat moved to s2: the answer about s1 still on screen is not s2's.
   const moved = render({ page: page({ client: client({ sessionId: "s2" }) }), selectedSessionId: "s2" });
   const list = sessionList(moved);
   assert.ok(list.startsWith(`<div class="debug-list"><div class="debug-empty">${t("debug.poll.waiting")}</div>`));
   assert.doesNotMatch(list, /debug-detail/);
 
-  const hidden = render({ page: page({ visibility: { ...page().visibility, state: "hidden" } }) });
-  assert.match(hidden, /<span class="debug-panel-status is-dim"><span class="debug-dot is-dim is-ring" aria-hidden="true"><\/span><span class="debug-panel-status-text">Paused while the page is hidden<\/span>/);
+  // A hidden page is not judged: it shows nothing, and the poll pauses to match (components/
+  // debug-readout.ts skips the tick and the poll while the page is hidden).
 
   // Nor does a hidden page read or render each second; it reads again as it comes back.
-  const tick = panelSource.slice(panelSource.indexOf("const tick = window.setInterval("), panelSource.indexOf("}, DEBUG_TICK_MS);"));
+  const tick = readoutSource.slice(readoutSource.indexOf("const tick = window.setInterval("), readoutSource.indexOf("}, DEBUG_TICK_MS);"));
   assert.match(tick, /^const tick = window\.setInterval\(\(\) => \{\s*\/\/[^\n]*\n\s*if \(document\.visibilityState !== "visible"\) return;\s*read\(\);/);
-  const back = panelSource.slice(panelSource.indexOf("const onVisibilityChange = () => {"), panelSource.indexOf("document.addEventListener(\"visibilitychange\", onVisibilityChange)"));
+  const back = readoutSource.slice(readoutSource.indexOf("const onVisibilityChange = () => {"), readoutSource.indexOf("document.addEventListener(\"visibilitychange\", onVisibilityChange)"));
   assert.match(back, /if \(document\.visibilityState !== "visible"\) return;\s*read\(\);\s*poller\.poll\(\);/);
 });
 
@@ -598,13 +613,12 @@ function closingAfterStop() {
   return server({ reply: answer });
 }
 
-test("notable states show in place and leave the verdict at OK", () => {
+test("notable states show in place and raise no fault", () => {
   const html = render({
     page: page({ client: client({ released: { active: true, count: 1, lastAt: LOCAL - MINUTE }, graceDueAt: LOCAL + 24 * SECOND }) }),
     server: closingAfterStop(),
   });
-  assert.match(html, /<span class="debug-panel-status-text">OK<\/span>/);
-  assert.doesNotMatch(html, /<ul/);
+  assert.doesNotMatch(html, /<ul/, "a state that is only worth knowing is not a fault");
   const list = sessionList(html);
   const row = list.slice(list.indexOf("debug-row is-current"), list.indexOf("debug-detail"));
   assert.match(row, /<span class="debug-status-ring is-closing"><\/span>/);
@@ -669,39 +683,38 @@ test("the sparklines draw the poll samples against the 5 s timeout", () => {
 test("without a chat or with a reader that throws, the panel says so and still shows the server", () => {
   const failed = render({ page: page({ client: null, clientFailed: true }) });
   assert.ok(failed.includes(`<span class="debug-issue-text">${t("debug.stream.readerFailed")}</span>`));
-  assert.match(failed, /Issues: 1/);
   assert.ok(visibleText(failed).includes("Uptime 2h 00m"));
   const none = render({ page: page({ client: null }), selectedSessionId: null });
   assert.ok(visibleText(none).includes(t("debug.stream.noChat")));
   assert.ok(visibleText(none).includes(t("debug.server.noSession")));
+  // Before the page has been read there are no numbers to draw; what the server answered for its
+  // sessions is still the truth about them, so the list does not wait for the page.
   const before = render({ page: null });
-  assert.match(before, /<span class="debug-panel-status-text">Reading…<\/span>/);
-  assert.doesNotMatch(before, /<div class="debug-panel-scroll">/);
+  assert.doesNotMatch(before, /debug-numbers/, "no numbers before the first page reading");
+  assert.ok(visibleText(before).includes("Current chat"));
 });
 
 test("the panel keeps to the theme and to Safari 16.2: tokens, the three state colors, no :has or nesting", () => {
   const colors = new Set((panelSource.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).map((color) => color.toLowerCase()));
   assert.deepEqual([...colors].sort(), ["#16a34a", "#d97706", "#ef4444"]);
   assert.doesNotMatch(panelSource, /AbortSignal\.(any|timeout)|\(\?<[=!]/, "Safari 16.2");
-  const css = panelSource.slice(panelSource.indexOf("const DEBUG_PANEL_CSS"));
+  const css = panelSource.slice(panelSource.indexOf("export const DIAGNOSTICS_CSS"));
   assert.doesNotMatch(css, /:has\(|&|transition/);
   // Rules are flat: only the container queries hold rules inside braces.
   const outside = css.replace(/@container debug-panel \(max-width: \d+px\) \{[^]*?\n {2}\}\n/g, "");
-  // Three columns on a wide panel, each but the page's capped; the sessions under the server's
-  // pages on a narrower one (its height going to their row); one above the other on a phone.
-  assert.match(css, /\.debug-cols \{\s*display: grid;\s*grid-template-areas: "page server sessions";\s*grid-template-columns: minmax\(320px, max-content\) minmax\(340px, 480px\) minmax\(360px, 560px\);/);
-  assert.match(css, /@container debug-panel \(max-width: 1239px\) \{\s*\.debug-cols \{\s*grid-template-areas: "page server" "page sessions";\s*grid-template-columns: minmax\(320px, max-content\) minmax\(0, 560px\);\s*grid-template-rows: auto 1fr;/);
-  assert.match(css, /@container debug-panel \(max-width: 760px\) \{\s*\.debug-cols \{\s*grid-template-areas: "page" "server" "sessions";\s*grid-template-columns: minmax\(0, 1fr\);/);
+  // Two columns where the read-out is wide: the page's as wide as its own table, the server's
+  // taking the rest; one above the other where the rail is narrower than that table.
+  assert.match(css, /\.debug-cols \{\s*display: grid;\s*grid-template-columns: minmax\(320px, max-content\) minmax\(0, 1fr\);/);
+  assert.match(css, /@container debug-panel \(max-width: 700px\) \{\s*\.debug-cols \{\s*grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(css, /\.debug-col-server \{\s*margin-left: 20px;\s*padding-left: 20px;\s*border-left: 1px solid var\(--border\);/);
   // A measure's details wrap in the table instead of widening it.
   assert.match(css, /\.debug-measure-sub,\s*\.debug-measure-empty \{\s*grid-column: 2 \/ -1;\s*width: 0;\s*min-width: 100%;/);
   assert.doesNotMatch(outside, /\{[^}]*\{/, "no nested rule");
   assert.match(css, /container-type: inline-size;\s*container-name: debug-panel;/);
-  // A rail tab fills its panel: no drop-down height, no shadow, no bottom rule.
-  assert.match(css, /\.debug-panel \{\s*--dbg-ok: var\(--act-ok, #16a34a\);\s*--dbg-warn: var\(--act-warn, #d97706\);\s*--dbg-err: var\(--act-err, #ef4444\);\s*container-type: inline-size;\s*container-name: debug-panel;\s*display: flex;\s*height: 100%;\s*min-height: 0;\s*flex-direction: column;\s*background: var\(--bg\);\s*color: var\(--text\);\s*\}/);
-  assert.doesNotMatch(css, /max-height|box-shadow: 0 /);
-  // Embedded in the activity view: the host owns the scroll, the padding and the heading.
-  assert.match(css, /\.debug-panel\.is-embedded \{\s*height: auto;\s*min-height: 0;\s*background: transparent;\s*\}/);
-  assert.match(css, /\.debug-panel\.is-embedded \.debug-panel-scroll \{\s*overflow: visible;\s*padding: 0;\s*gap: 10px;\s*\}/);
+  // The host owns the scroll, the padding, the background and the heading: the read-out takes
+  // none of them, so a section of the rail and a wide read-out are drawn by the same rules.
+  assert.match(css, /\.debug-panel \{\s*--dbg-ok: var\(--act-ok, #16a34a\);\s*--dbg-warn: var\(--act-warn, #d97706\);\s*--dbg-err: var\(--act-err, #ef4444\);\s*container-type: inline-size;\s*container-name: debug-panel;\s*display: flex;\s*min-width: 0;\s*flex-direction: column;\s*gap: 10px;/);
+  assert.doesNotMatch(css, /max-height|box-shadow: 0 |overflow: auto|position: fixed|is-embedded|debug-panel-header|debug-panel-copy/);
   assert.match(css, /@container debug-panel \(max-width: 520px\)/);
   // A rail tab has no Escape: it closes like every other tab. Nothing keeps a session alive.
   assert.doesNotMatch(panelSource, /addEventListener\("keydown"/);
@@ -719,34 +732,47 @@ function between(source, start, end) {
 }
 
 test("a tooltip holds the view still: the mouse on a titled element freezes what the panel shows", () => {
-  const hold = between(panelSource, "const [held, setHeld] = useState<HeldView | null>(null);", "useEffect(() => {\n    disposedRef.current = false;");
+  const hold = between(readoutSource, "const [held, setHeld] = useState<DebugReadoutReading | null>(null);", "useEffect(() => {\n    disposedRef.current = false;");
   assert.match(hold, /if \(event\.pointerType !== "mouse"\) return;/, "touch shows no tooltips");
   assert.match(hold, /event\.target\.closest\("\[title\]"\)/);
   assert.match(hold, /setHeld\(target \? liveRef\.current : null\);/);
   assert.match(hold, /section\.addEventListener\("pointerleave", onPointerLeave\);/);
-  assert.match(panelSource, /const shown = held \?\? \{ page, server, samples \};/);
+  assert.match(readoutSource, /shown: held \?\? \{ page, server, samples \}/);
 });
 
-test("the debug read-out is fused into the rail's activity view, not a tab of its own", () => {
-  // The top bar has no Debug button any more: the button, its ref and its close handler are gone.
-  assert.doesNotMatch(shellSource, /renderDebugButton|debugButtonRef|closeDebugPanel|toggleTopPanel\("debug"/);
+test("the activity view is one panel: faults, agents, commands, sessions, then one fold", () => {
+  // Neither the Debug button nor the Agents button survives in the top bar: both are sections now.
+  assert.doesNotMatch(shellSource, /renderDebugButton|debugButtonRef|closeDebugPanel|toggleTopPanel\("debug"|AgentSessionPanel|toggleTopPanel\("agents"/);
   // One tab the rail always carries, without a close button, ahead of whatever is open.
   assert.match(shellSource, /const panelTabs: Tab\[\] = \[\s*\{\s*id: "bg-tasks",[^]*?kind: "bg-tasks" as const,\s*closable: false,\s*\},/);
   assert.doesNotMatch(shellSource, /id: "debug",/);
-  // The read-out is a section of the activity view, which hands it the chat's reader and catalog.
-  const activity = between(activitySource, "export function BackgroundTasksPanel", "const ACTIVITY_PANEL_CSS");
-  assert.match(activity, /<DebugPanel\s+readerRef=\{debug\.readerRef\}\s+selectedSessionId=\{debug\.selectedSessionId\}\s+sessions=\{debug\.sessions\}\s+embedded\s*\/>/);
-  // Connections and sessions come first: they are the context, one light line each, and a grid of
-  // task cards is the heavy content that would push them out of sight the other way round.
-  const head = between(activitySource, "const head = (", "};");
-  assert.match(head, /className="activity-head"[\s\S]*?className="activity-title"/);
-  const firstReturn = between(activitySource, "return (\n    <div className=\"activity-panel\">", "const ACTIVITY_PANEL_CSS");
-  const connectionsAt = firstReturn.indexOf('t("activity.connections")');
-  const commandsAt = firstReturn.indexOf('t("bgTasks.title")}');
-  assert.ok(connectionsAt !== -1 && commandsAt !== -1, "both sections are titled");
-  assert.ok(connectionsAt < commandsAt, "connections and sessions come before the commands");
-  // The head is shared by the empty and the full state.
-  assert.equal((activitySource.match(/\{head\}/g) ?? []).length, 2);
+  // Its count, and the button's badge, say what runs inside: the session's commands and its subagents.
+  assert.match(shellSource, /const runningSubagents = activeSessionFamily\n\s*\? countRunningSubagents\(activeSessionFamily\.subagents, runningSessionIds\)/);
+  assert.match(shellSource, /const activityRunningCount = bgTaskRunningCount \+ runningSubagents;/);
+  assert.match(shellSource, /label: activityRunningCount > 0\n\s*\? translate\("activity\.tabCount", \{ count: activityRunningCount \}\)\n\s*: translate\("activity\.tab"\),/);
+  // The section order is the order of what a reader can do about each of them.
+  const body = between(activitySource, "return (\n    <div className=\"activity-panel\">", "const ACTIVITY_PANEL_CSS");
+  for (const [before, after] of [
+    ['t("activity.problems")', "<ActivityAgents {...agents} />"],
+    ["<ActivityAgents {...agents} />", 't("bgTasks.title")}'],
+    ['t("bgTasks.title")}', 't("activity.sessions")}'],
+    ['t("activity.sessions")}', 't("activity.diagnostics")}'],
+  ]) {
+    const at = body.indexOf(before);
+    const next = body.indexOf(after, at + 1);
+    assert.ok(at !== -1 && next > at, `${after.slice(0, 28)} comes after ${before.slice(0, 28)}`);
+  }
+  // Only the numbers are foldable, and only they wait for the fold: mounted on opening, and the
+  // slower beat asked for while they are closed. They start open, so the fold is a way to get them
+  // out of the way rather than a door that has to be opened to see them.
+  assert.match(activitySource, /const \[detailsOpen, setDetailsOpen\] = useState\(true\);/, "open by default");
+  assert.match(activitySource, /\{detailsOpen && \(\s*<DiagnosticsBoundary fallback=\{t\("debug\.failed"\)\}>\s*<DiagnosticsNumbers/);
+  assert.match(activitySource, /pollingMs: detailsOpen \? DEBUG_POLL_MS : SLOW_POLL_MS/);
+  // The sessions the server holds are what is running: they are not behind the fold.
+  assert.match(activitySource, /<DiagnosticsSessions\b/);
+  // One host sheet plus the read-out's own, injected once for the panel rather than per part.
+  assert.match(activitySource, /<style>\{ACTIVITY_PANEL_CSS\}<\/style>\s*<style>\{DIAGNOSTICS_CSS\}<\/style>/);
+  assert.doesNotMatch(panelSource, /<style>/);
 
   assert.match(shellSource, /onOpenTask=\{handleOpenBgOutputTab\}/);
   assert.match(shellSource, /const \[bgOutputTabs, setBgOutputTabs\] = useState<\{ taskId: string; label: string \}\[\]>\(\[\]\);/);
@@ -754,8 +780,8 @@ test("the debug read-out is fused into the rail's activity view, not a tab of it
   assert.match(shellSource, /<BgTaskOutputView\s+key=\{activeBgOutputTab\.taskId\}/);
   // No top-bar panel is left to hold open across a switch.
   for (const [name, next] of [["handleCwdChange", "handleSelectSession"], ["handleSelectSession", "handleNewSession"], ["handleNewSession", "hydrateSelectedSession"], ["handleSessionDeleted", "handleOpenFile"]]) {
-    const body = between(shellSource, `const ${name} = useCallback`, `const ${next} = useCallback`);
-    assert.match(body, /setActiveTopPanel\(null\);/, name);
+    const panel = between(shellSource, `const ${name} = useCallback`, `const ${next} = useCallback`);
+    assert.match(panel, /setActiveTopPanel\(null\);/, name);
   }
 });
 
@@ -779,6 +805,6 @@ test("AppShell keeps the chat's reader in a ref, and the debug tab follows the c
   assert.match(register, /debugSnapshotReaderRef\.current = reader;/);
   assert.doesNotMatch(register, /\bset[A-Z]\w*\(/, "registering renders nothing");
   assert.match(shellSource, /onDebugSnapshotReaderChange=\{handleDebugSnapshotReaderChange\}/);
-  assert.match(activitySource, /<DebugPanel\s/);
+  assert.match(activitySource, /<DiagnosticsSessions\s/);
   assert.match(shellSource, /useEffect\(\(\) => \{\s*startPageVisibilityTracking\(\);\s*\}, \[\]\);/);
 });

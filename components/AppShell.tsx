@@ -13,7 +13,6 @@ import type { ProjectTrustFailure } from "./ProjectTrustDialog";
 import { BranchNavigator, hasSessionBranches } from "./BranchNavigator";
 import { SystemPromptPanel } from "./SystemPromptPanel";
 import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
-import { AgentSessionPanel } from "./AgentSessionPanel";
 import type { ReadSnapshot } from "@/lib/read-snapshot";
 import type { BgTaskSummary } from "@/lib/bg-task-types";
 import { filterBgTasksBySession } from "@/lib/bg-task-filter";
@@ -35,8 +34,8 @@ const SubagentViewer = lazy(() =>
 const ReadSnapshotViewer = lazy(() =>
   import("./ReadSnapshotViewer").then((module) => ({ default: module.ReadSnapshotViewer })),
 );
-const BackgroundTasksPanel = lazy(() =>
-  import("./BackgroundTasksPanel").then((module) => ({ default: module.BackgroundTasksPanel })),
+const ActivityPanel = lazy(() =>
+  import("./ActivityPanel").then((module) => ({ default: module.ActivityPanel })),
 );
 const SettingsPanel = lazy(() =>
   import("./SettingsPanel").then((module) => ({ default: module.SettingsPanel })),
@@ -103,7 +102,7 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
 import { formatActiveDuration, formatCompactCount, formatCostShort } from "@/lib/session-stats-format";
 import type { FileViewerState } from "@/lib/file-viewer-state";
 import { PRESET_READ_ONLY, type ToolEntry } from "@/lib/tool-presets";
-import { getAgentsBadge, getFoldedMoreAgentsBadge, getSessionFamily } from "@/lib/session-family";
+import { countRunningSubagents, getSessionFamily } from "@/lib/session-family";
 import { getLastSettingsSection, settingsSectionRequiresProject, type SettingsSection } from "@/lib/settings-navigation";
 
 type SessionCopyField = "file" | "id" | "projectDir" | "gitBranch" | "gitWorktree";
@@ -115,7 +114,6 @@ type AutoNameStatus =
   | { kind: "error"; message: string };
 
 const TOP_BAR_ICON_BUTTON_SIZE = 36;
-const AGENT_PANEL_WIDTH = 420;
 // pi's built-in tools that never change a file; any other tool may (#1144).
 const READ_ONLY_TOOL_NAMES = new Set(PRESET_READ_ONLY);
 const TOOL_END_REFRESH_MS = 1000;
@@ -215,7 +213,6 @@ export function AppShell() {
     () => new Map(sessionsWithSelection.map((session) => [session.id, sessionDisplayTitle(session)])),
     [sessionsWithSelection],
   );
-  const hasSubagentSessions = Boolean(activeSessionFamily?.subagents.length);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const handleRunningSessionIdsChange = useCallback((ids: Set<string>) => {
     setRunningSessionIds((previous) => {
@@ -223,10 +220,6 @@ export function AppShell() {
       return ids;
     });
   }, []);
-  const agentsBadge = activeSessionFamily ? getAgentsBadge(activeSessionFamily.subagents, runningSessionIds) : null;
-  const agentsButtonLabel = agentsBadge?.running
-    ? translate("agentSwitcher.titleRunning", { count: agentsBadge.count })
-    : translate("agentSwitcher.title");
   // The temporary id distinguishes consecutive fresh composers in one cwd.
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
   const [newSessionDraftId, setNewSessionDraftId] = useState("initial");
@@ -283,19 +276,21 @@ export function AppShell() {
     [allBgTasks, selectedSession?.id],
   );
   const bgTaskRunningCount = bgTasks.filter((task) => task.finishedAtMs === null).length;
+  // What the rail counts, on its tab and on the button that opens it: this session's background
+  // commands and the subagents its family has going. The Agents section closed nothing off.
+  const runningSubagents = activeSessionFamily
+    ? countRunningSubagents(activeSessionFamily.subagents, runningSessionIds)
+    : 0;
+  const activityRunningCount = bgTaskRunningCount + runningSubagents;
   const [rightPanelExpanded, setRightPanelExpanded] = useState(false);
   const rightPanelFullWidth = rightPanelOpen && rightPanelExpanded && !isMobile;
   useEffect(() => {
     if (!rightPanelOpen || isMobile) setRightPanelExpanded(false);
   }, [rightPanelOpen, isMobile]);
   const [mobileToolbarMoreOpen, setMobileToolbarMoreOpen] = useState(false);
-  // A narrow phone folds the Agents button into More: the folded button says that subagents run.
-  const foldedMoreAgentsBadge = isNarrowMobile ? getFoldedMoreAgentsBadge(agentsBadge, mobileToolbarMoreOpen) : null;
   const moreControlsLabel = mobileToolbarMoreOpen
     ? translate("chat.close")
-    : foldedMoreAgentsBadge
-      ? translate("chat.moreControlsAgentsRunning", { count: foldedMoreAgentsBadge.count })
-      : translate("chat.moreControls");
+    : translate("chat.moreControls");
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const rightPanelWidthRef = useRef(RIGHT_PANEL_FALLBACK_WIDTH);
@@ -452,7 +447,7 @@ export function AppShell() {
   }, []);
 
   // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "session" | null>(null);
+  const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | "tools" | "session" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   useEffect(() => {
@@ -462,17 +457,11 @@ export function AppShell() {
   }, [sessionHasBranches]);
 
   useEffect(() => {
-    if (!hasSubagentSessions) {
-      setActiveTopPanel((panel) => panel === "agents" ? null : panel);
-    }
-  }, [hasSubagentSessions]);
-
-  useEffect(() => {
     if (rightPanelFullWidth) setActiveTopPanel(null);
   }, [rightPanelFullWidth]);
 
   const toggleTopPanel = useCallback((
-    panel: "agents" | "branches" | "system" | "tools" | "session",
+    panel: "branches" | "system" | "tools" | "session",
     keepMobileToolbarOpen = false,
   ) => {
     if (isMobile) setSidebarOpen(false);
@@ -581,14 +570,6 @@ export function AppShell() {
     if (!activeTopPanel || !topBarRef.current) return;
     const update = () => {
       const topBarRect = topBarRef.current!.getBoundingClientRect();
-      if (activeTopPanel === "agents") {
-        setTopPanelPos({
-          top: topBarRect.bottom,
-          left: topBarRect.left,
-          width: Math.min(AGENT_PANEL_WIDTH, topBarRect.width),
-        });
-        return;
-      }
       setTopPanelPos({ top: topBarRect.bottom, left: topBarRect.left, width: topBarRect.width });
     };
     update();
@@ -619,10 +600,10 @@ export function AppShell() {
   const panelTabs: Tab[] = [
     {
       id: "bg-tasks",
-      label: bgTaskRunningCount > 0
-        ? translate("bgTasks.tabCount", { count: bgTaskRunningCount })
-        : translate("bgTasks.tab"),
-      filePath: translate("bgTasks.tab"),
+      label: activityRunningCount > 0
+        ? translate("activity.tabCount", { count: activityRunningCount })
+        : translate("activity.tab"),
+      filePath: translate("activity.tab"),
       kind: "bg-tasks" as const,
       closable: false,
     },
@@ -1706,33 +1687,40 @@ export function AppShell() {
   };
 
   // While subagents run: their count, ringed by a spinner; otherwise all of them.
-  const renderAgentsBadge = (badge: { count: number; running: boolean }, mobile: boolean) => (
+  // The rail's mark on the button that opens it: how much is running inside, ringed by a spinner
+  // while the session's subagents are among them. The tab inside repeats the same number.
+  const renderActivityBadge = () => (activityRunningCount === 0 ? null : (
     <span
       aria-hidden="true"
       style={{
-        position: "relative",
-        minWidth: 15, height: 15, padding: "0 4px", display: "grid", placeItems: "center",
+        position: "absolute",
+        top: 3,
+        right: 3,
+        minWidth: 13,
+        height: 13,
+        padding: "0 3px",
         borderRadius: 7,
-        background: badge.running ? "color-mix(in srgb, var(--accent) 22%, var(--bg-panel))" : "var(--bg-selected)",
-        color: "var(--accent)",
-        fontSize: 10, lineHeight: 1, fontVariantNumeric: "tabular-nums",
-        fontWeight: badge.running ? 600 : undefined,
-        ...(mobile ? { position: "absolute", top: 3, right: 3, minWidth: 13, height: 13, padding: "0 3px", fontSize: 9 } : {}),
+        background: "var(--accent)",
+        color: "var(--bg)",
+        fontSize: 9,
+        fontWeight: 700,
+        lineHeight: "13px",
+        textAlign: "center",
       }}
     >
-      {badge.running && (
+      {activityRunningCount > 9 ? "9+" : activityRunningCount}
+      {runningSubagents > 0 && (
         <svg
           className="animate-spin motion-reduce:animate-none"
           viewBox="0 0 24 24" fill="none" aria-hidden="true"
           style={{ position: "absolute", top: -3, left: -3, width: "calc(100% + 6px)", height: "calc(100% + 6px)", pointerEvents: "none" }}
         >
-          <circle cx="12" cy="12" r="11" stroke="currentColor" strokeWidth="2" opacity="0.2" />
+          <circle cx="12" cy="12" r="11" stroke="currentColor" strokeWidth="2" opacity="0.3" />
           <path d="M23 12a11 11 0 0 0-11-11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
         </svg>
       )}
-      {badge.count}
     </span>
-  );
+  ));
 
   const renderChatToolbarActions = (mobile: boolean) => {
     if (!mobile && !showChat) return null;
@@ -1880,35 +1868,6 @@ export function AppShell() {
             </button>
           );
         })()}
-        {hasSubagentSessions && agentsBadge && (
-          <button
-            type="button"
-            onClick={() => toggleTopPanel("agents", mobile)}
-            title={agentsButtonLabel}
-            aria-label={agentsButtonLabel}
-            aria-pressed={activeTopPanel === "agents"}
-            style={{
-              position: "relative",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              width: mobile ? TOP_BAR_ICON_BUTTON_SIZE : undefined,
-              height: "100%", padding: mobile ? 0 : "0 12px",
-              background: activeTopPanel === "agents" ? "var(--bg-selected)" : "none",
-              border: "none",
-              borderTop: activeTopPanel === "agents" ? "2px solid var(--accent)" : "2px solid transparent",
-              borderRight: "1px solid var(--border)",
-              color: activeTopPanel === "agents" ? "var(--text)" : "var(--text-muted)",
-              cursor: "pointer", flexShrink: 0, fontSize: 11, whiteSpace: "nowrap",
-              transition: "color 0.1s, background 0.1s",
-            }}
-            data-mobile-toolbar-action={mobile ? "agents" : undefined}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="5" y="7" width="14" height="11" rx="2" /><path d="M9 11h.01M15 11h.01M9 15h6M12 7V4M10 4h4" />
-            </svg>
-            {!mobile && <span>{translate("agentSwitcher.title")}</span>}
-            {renderAgentsBadge(agentsBadge, mobile)}
-          </button>
-        )}
         {sessionHasBranches && (mobile ? (
           <button
             type="button"
@@ -2184,6 +2143,11 @@ export function AppShell() {
 
   const renderMainFileToggle = (mobile: boolean) => {
     const covered = mobile && isNarrowMobile && mobileToolbarMoreOpen;
+    // The badge's number in words: the button's name says what it counts, not only that it is lit.
+    const panelLabel = [
+      translate(rightPanelOpen ? "files.hidePanel" : "files.showPanel"),
+      activityRunningCount > 0 && translate("bgTasks.runningCount", { count: activityRunningCount }),
+    ].filter(Boolean).join(" · ");
     return (
       <button
         type="button"
@@ -2193,8 +2157,8 @@ export function AppShell() {
         aria-controls="file-panel"
         aria-expanded={rightPanelOpen}
         aria-hidden={covered ? true : undefined}
-        title={rightPanelOpen ? translate("files.hidePanel") : translate("files.showPanel")}
-        aria-label={rightPanelOpen ? translate("files.hidePanel") : translate("files.showPanel")}
+        title={panelLabel}
+        aria-label={panelLabel}
         data-mobile-toolbar-file={mobile ? "true" : undefined}
         style={{
           display: "flex", alignItems: "center", justifyContent: "center",
@@ -2213,18 +2177,7 @@ export function AppShell() {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
         </svg>
-        {bgTaskRunningCount > 0 && (
-          <span
-            aria-hidden="true"
-            style={{
-              position: "absolute", top: 3, right: 3, minWidth: 13, height: 13, padding: "0 3px",
-              borderRadius: 7, background: "var(--accent)", color: "var(--bg)",
-              fontSize: 9, fontWeight: 700, lineHeight: "13px", textAlign: "center",
-            }}
-          >
-            {bgTaskRunningCount > 9 ? "9+" : bgTaskRunningCount}
-          </span>
-        )}
+        {renderActivityBadge()}
       </button>
     );
   };
@@ -2440,7 +2393,6 @@ export function AppShell() {
                       <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
                     </svg>
                   )}
-                  {foldedMoreAgentsBadge && renderAgentsBadge(foldedMoreAgentsBadge, true)}
                 </button>
               )}
               {!isNarrowMobile && renderChatToolbarActions(true)}
@@ -2509,17 +2461,6 @@ export function AppShell() {
               overflowY: "auto",
               zIndex: 500,
             }}>
-              {activeTopPanel === "agents" && activeSessionFamily && selectedSession && (
-                <AgentSessionPanel
-                  rootSession={activeSessionFamily.root}
-                  subagents={activeSessionFamily.subagents}
-                  selectedSessionId={selectedSession.id}
-                  runningSessionIds={runningSessionIds}
-                  onSelectSession={handleSelectSession}
-                  openSubagentTabIds={openSubagentTabIds}
-                  onToggleSubagentTab={handleToggleSubagentTab}
-                />
-              )}
               {activeTopPanel === "system" && (
                 <SystemPromptPanel
                   loading={systemInfoLoading}
@@ -2946,16 +2887,23 @@ export function AppShell() {
           ) : null}
           {activeBgTasksTab && (
             <Suspense fallback={null}>
-              <BackgroundTasksPanel
+              <ActivityPanel
                 tasks={bgTasks}
                 sessionTitles={bgTaskSessionTitles}
                 onOpenTask={handleOpenBgOutputTab}
                 onRefresh={refreshBgTasks}
-                debug={{
-                  readerRef: debugSnapshotReaderRef,
-                  selectedSessionId: selectedSession?.id ?? null,
-                  sessions: sessionsWithSelection,
-                }}
+                readerRef={debugSnapshotReaderRef}
+                selectedSessionId={selectedSession?.id ?? null}
+                sessions={sessionsWithSelection}
+                agents={activeSessionFamily && activeSessionFamily.subagents.length > 0 && selectedSession ? {
+                  rootSession: activeSessionFamily.root,
+                  subagents: activeSessionFamily.subagents,
+                  selectedSessionId: selectedSession.id,
+                  runningSessionIds,
+                  onSelectSession: handleSelectSession,
+                  openSubagentTabIds,
+                  onToggleSubagentTab: handleToggleSubagentTab,
+                } : null}
               />
             </Suspense>
           )}
