@@ -7,7 +7,7 @@ import { formatActiveDuration } from "@/lib/session-stats-format";
 import type { BgTaskSummary } from "@/lib/bg-task-types";
 import type { DebugClientSession } from "@/lib/debug-types";
 import type { SessionInfo } from "@/lib/types";
-import { DebugPanel } from "./DebugPanel";
+import { DebugPanel, DebugPanelBoundary } from "./DebugPanel";
 
 /** A task that has written nothing for this long is worth noticing. */
 const STALE_AFTER_MS = 30_000;
@@ -130,12 +130,14 @@ export function BackgroundTasksPanel({
             <div className="activity-section-head">
               <span className="activity-section-title">{t("activity.connections")}</span>
             </div>
-            <DebugPanel
-              readerRef={debug.readerRef}
-              selectedSessionId={debug.selectedSessionId}
-              sessions={debug.sessions}
-              embedded
-            />
+            <DebugPanelBoundary fallback={t("debug.failed")}>
+              <DebugPanel
+                readerRef={debug.readerRef}
+                selectedSessionId={debug.selectedSessionId}
+                sessions={debug.sessions}
+                embedded
+              />
+            </DebugPanelBoundary>
           </section>
           <div className="bg-tasks-empty">{t("bgTasks.empty")}</div>
         </div>
@@ -152,12 +154,14 @@ export function BackgroundTasksPanel({
           <div className="activity-section-head">
             <span className="activity-section-title">{t("activity.connections")}</span>
           </div>
-          <DebugPanel
-            readerRef={debug.readerRef}
-            selectedSessionId={debug.selectedSessionId}
-            sessions={debug.sessions}
-            embedded
-          />
+          <DebugPanelBoundary fallback={t("debug.failed")}>
+            <DebugPanel
+              readerRef={debug.readerRef}
+              selectedSessionId={debug.selectedSessionId}
+              sessions={debug.sessions}
+              embedded
+            />
+          </DebugPanelBoundary>
         </section>
 
         <section className="activity-section">

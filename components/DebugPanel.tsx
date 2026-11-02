@@ -79,12 +79,11 @@ import {
 } from "./debug-panel-state";
 
 /**
- * The right rail's Debug tab: how this page talks to the server (its event stream, its lease, the
- * other streams it holds) and what the server holds for the selected session and overall. It only
- * reads: the chat's snapshot through a reader that reads refs, page-level bookkeeping
- * (lib/page-debug.ts), and `GET /api/agent/debug` every 2 s, which starts, renews and reconnects
- * nothing. Its clocks live here, not in AppShell, so a tick renders the panel alone. The sidebar
- * shows nothing: the panel lists the server's sessions itself.
+ * The activity view's debug read-out: how this page talks to the server (its event stream, its
+ * lease, the other streams it holds) and what the server holds for the chat shown and overall.
+ * It only reads: the chat's snapshot through a reader of refs, page-level bookkeeping
+ * (lib/page-debug.ts), and `GET /api/agent/debug` every 2 s, which starts nothing. Its clocks live
+ * here, not in AppShell, so a tick renders the panel alone. The panel lists the server's sessions.
  */
 
 interface Props {

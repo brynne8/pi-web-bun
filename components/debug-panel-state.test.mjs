@@ -797,57 +797,6 @@ test("an answer that lands after the panel closed reaches nothing", async () => 
   assert.equal(readings.length, 0, "a disposed poller asks nothing more");
 });
 
-// ── Keyboard ──
-
-test("Escape closes the panel only when nothing nearer took it and no dialog is open", () => {
-  const key = (extra = {}) => ({ key: "Escape", defaultPrevented: false, isComposing: false, keyCode: 27, ...extra });
-  assert.equal(state.shouldCloseDebugPanelOnEscape(key(), false), true);
-  assert.equal(state.shouldCloseDebugPanelOnEscape(key({ defaultPrevented: true }), false), false, "a menu or ChatInput's Stop took it");
-  // React's handlers run from `document`, before the panel's listener: one that only stopped it
-  // (the sidebar's session search clearing itself) still took it.
-  assert.equal(state.shouldCloseDebugPanelOnEscape(key({ cancelBubble: true }), false), false, "a nearer handler stopped it");
-  assert.equal(state.shouldCloseDebugPanelOnEscape(key({ isComposing: true }), false), false);
-  assert.equal(state.shouldCloseDebugPanelOnEscape(key({ keyCode: 229 }), false), false, "Safari's IME Escape");
-  assert.equal(state.shouldCloseDebugPanelOnEscape(key(), true), false, "Settings or a dialog is above");
-  assert.equal(state.shouldCloseDebugPanelOnEscape(key({ key: "Enter" }), false), false);
-});
-
-test("the Escape that closes the panel says whether focus was inside it", () => {
-  const element = (name) => ({ name });
-  const copyButton = element("copy");
-  const composer = element("composer");
-  const section = { contains: (other) => other === copyButton };
-  const doc = { activeElement: copyButton, dialog: null, querySelector: (selector) => (selector === '[aria-modal="true"]' ? doc.dialog : null) };
-  const closes = [];
-  const listener = state.createDebugPanelEscapeListener(doc, () => section, (restoreFocus) => closes.push(restoreFocus));
-  const escape = (extra = {}) => {
-    const event = { key: "Escape", defaultPrevented: false, cancelBubble: false, isComposing: false, keyCode: 27, ...extra };
-    event.preventDefault = () => { event.defaultPrevented = true; };
-    listener(event);
-    return event;
-  };
-
-  assert.equal(escape().defaultPrevented, true, "taken, so the window's Stop skips it");
-  doc.activeElement = composer;
-  escape();
-  doc.activeElement = null;
-  escape();
-  assert.deepEqual(closes, [true, false, false], "only focus inside the panel goes back to the Debug button");
-
-  doc.dialog = element("settings");
-  assert.equal(escape().defaultPrevented, false, "a dialog above keeps it");
-  doc.dialog = null;
-  escape({ cancelBubble: true });
-  escape({ key: "Enter" });
-  assert.equal(closes.length, 3);
-
-  // Before the panel's element is there, nothing is inside it.
-  const early = [];
-  doc.activeElement = copyButton;
-  state.createDebugPanelEscapeListener(doc, () => null, (restoreFocus) => early.push(restoreFocus))({ key: "Escape", defaultPrevented: false, preventDefault() {} });
-  assert.deepEqual(early, [false]);
-});
-
 test("codes the server sends read as words where the panel knows them, else as they came", () => {
   assert.equal(state.translateDebugCode("queued", state.DEBUG_RUN_STATUS_KEYS, t), "Queued");
   assert.equal(state.translateDebugCode("running", state.DEBUG_RUN_STATUS_KEYS, t), "Running");
