@@ -68,6 +68,7 @@ import type { McpHost } from "./mcp-host";
 import type { DebugMcpHost, DebugSessionLifecycle, DebugWrapperSnapshot } from "./debug-types";
 import { mcpPromptPreparation, type McpCommandCandidate } from "./mcp-command";
 import { createReadOnlyMcpPolicyExtension, createSubagentMcpPolicyExtension } from "./mcp-read-only-policy";
+import { createOmitEmptyToolsExtension } from "./omit-empty-tools";
 import { createSubagentCompactionGuardExtension } from "./subagent-compaction-guard";
 import { createSubagentSkillsBinding } from "./subagent-skills";
 import { isNestedToolExecutionEvent } from "./agent-event-wire";
@@ -3398,6 +3399,7 @@ export async function startRpcSession(
     }) : undefined;
     const subagentExtensionFactories = [
       createSubagentCompactionGuardExtension(),
+      createOmitEmptyToolsExtension(),
       ...(subagentCodemode ? [subagentCodemode] : []),
       ...(subagentMcp && subagentResources
         ? [...subagentMcp.extensions, createSubagentMcpPolicyExtension(() => subagentResources)]
@@ -3444,6 +3446,7 @@ export async function startRpcSession(
                 () => listSubagentProfiles(sessionCwd),
                 isBuiltInSubagentsEnabled,
               ),
+              createOmitEmptyToolsExtension(),
             ],
             extensionsOverride: (base) => preferUserBashExtension(preferPiWebSubagentExtension(base)),
           },
