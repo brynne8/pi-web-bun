@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createWriteStream, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -11,7 +12,9 @@ import { launchBrowser, newTestContext, noteBrowserError } from "./browser.mjs";
 import { showSidebarFiles, showSidebarSessions } from "./sidebar.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-assert.ok(!existsSync(join(root, ".next/dev/lock")), "Run in a checkout without an active dev server");
+const require = createRequire(import.meta.url);
+const { findVinextCli } = require("../bin/vinext-cli.cjs");
+assert.ok(!existsSync(join(root, ".vinext/dev/lock.json")), "Run in a checkout without an active dev server");
 const artifacts = mkdtempSync(join(tmpdir(), "pi-web-terminal-e2e-"));
 console.log(`Artifacts: ${artifacts}`);
 const agentDir = join(artifacts, "agent");
@@ -41,7 +44,12 @@ const port = probe.address().port;
 await new Promise((resolve) => probe.close(resolve));
 const base = `http://127.0.0.1:${port}`;
 const log = createWriteStream(join(artifacts, "server.log"));
-const server = spawn(process.execPath, [join(root, "node_modules/next/dist/bin/next"), "dev", "-H", "127.0.0.1", "-p", String(port)], {
+// `vinext dev` proxies to the project's Vite CLI, whose flags differ from
+// `vinext start`'s. Both are spawned through the vinext entry rather than a
+// .bin symlink, which may not exist when installed from a tarball.
+const vinextCli = findVinextCli(root);
+assert.ok(vinextCli, "vinext is not installed in this checkout");
+const server = spawn(process.execPath, [vinextCli, "dev", "--host", "127.0.0.1", "--port", String(port)], {
   cwd: root,
   env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_WEB_PASSWORD: "", NEXT_TELEMETRY_DISABLED: "1", HISTFILE: process.platform === "win32" ? "NUL" : "/dev/null", BASH_SILENCE_DEPRECATION_WARNING: "1", SHELL: process.platform === "win32" ? process.env.SHELL : "/bin/bash" },
   stdio: ["ignore", "pipe", "pipe"],

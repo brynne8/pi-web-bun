@@ -13,6 +13,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createWriteStream, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -20,10 +21,12 @@ import { fileURLToPath } from "node:url";
 import { launchBrowser, newTestContext, noteBrowserError } from "./browser.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const require = createRequire(import.meta.url);
+const { findVinextCli } = require("../bin/vinext-cli.cjs");
 const mode = process.env.E2E_SERVER_MODE || "dev";
 assert.ok(mode === "dev" || mode === "start", "E2E_SERVER_MODE must be dev or start");
 assert.ok(
-  mode !== "dev" || !existsSync(join(root, ".next/dev/lock")),
+  mode !== "dev" || !existsSync(join(root, ".vinext/dev/lock.json")),
   "Use a checkout without an active dev server",
 );
 
@@ -147,9 +150,17 @@ try {
   await new Promise((resolve, reject) => probe.close((error) => (error ? reject(error) : resolve())));
   const base = `http://127.0.0.1:${port}`;
 
+  const vinextCli = findVinextCli(root);
+  assert.ok(vinextCli, "vinext is not installed in this checkout");
+  // `vinext dev` proxies to the project's Vite CLI, whose flags differ from
+  // `vinext start`'s. Both are spawned through the vinext entry rather than a
+  // .bin symlink, which may not exist when installed from a tarball.
+  const serverArgs = mode === "dev"
+    ? ["dev", "--host", "127.0.0.1", "--port", String(port)]
+    : ["start", "-H", "127.0.0.1", "-p", String(port)];
   server = spawn(
     process.execPath,
-    [join(root, "node_modules/next/dist/bin/next"), mode, "-H", "127.0.0.1", "-p", String(port)],
+    [vinextCli, ...serverArgs],
     {
       cwd: root,
       env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_WEB_PASSWORD: "", NEXT_TELEMETRY_DISABLED: "1" },
