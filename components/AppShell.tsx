@@ -1363,7 +1363,6 @@ export function AppShell() {
     const remaining = terminalTabs.filter((item) => item.id !== tab.id);
     setTerminalTabs((tabs) => tabs.flatMap((item) => item.id !== tab.id ? [item] : replacement ? [replacement] : []));
     setActiveFileTabId((current) => current !== tab.id ? current : replacement?.id ?? remaining.at(-1)?.id ?? fileTabs.at(-1)?.id ?? lastAgentTabId(agentTabs) ?? lastReadTabId(readTabs) ?? lastBgOutputTabId(bgOutputTabs) ?? "bg-tasks");
-    if (!replacement && !remaining.length && !fileTabs.length && !agentTabs.length && !readTabs.length) setRightPanelOpen(false);
   };
 
   const handleCloseFileTab = useCallback((tabId: string) => {
@@ -1378,7 +1377,6 @@ export function AppShell() {
         if (cur !== tabId) return cur;
         return fileTabs.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(remainingAgents) ?? lastReadTabId(readTabs) ?? lastBgOutputTabId(bgOutputTabs) ?? "bg-tasks";
       });
-      if (fileTabs.length === 0 && terminalTabs.length === 0 && remainingAgents.length === 0 && readTabs.length === 0) setRightPanelOpen(false);
       return;
     }
     if (tabId.startsWith("bg:")) {
@@ -1389,7 +1387,6 @@ export function AppShell() {
         if (cur !== tabId) return cur;
         return fileTabs.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(agentTabs) ?? lastReadTabId(readTabs) ?? lastBgOutputTabId(remainingBg) ?? "bg-tasks";
       });
-      if (fileTabs.length === 0 && terminalTabs.length === 0 && agentTabs.length === 0 && readTabs.length === 0 && remainingBg.length === 0) setRightPanelOpen(false);
       return;
     }
     if (tabId.startsWith("read:")) {
@@ -1399,14 +1396,9 @@ export function AppShell() {
         if (cur !== tabId) return cur;
         return fileTabs.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(agentTabs) ?? lastReadTabId(remainingReads) ?? lastBgOutputTabId(bgOutputTabs) ?? "bg-tasks";
       });
-      if (fileTabs.length === 0 && terminalTabs.length === 0 && agentTabs.length === 0 && remainingReads.length === 0) setRightPanelOpen(false);
       return;
     }
-    setFileTabs((prev) => {
-      const next = prev.filter((t) => t.id !== tabId);
-      if (next.length === 0 && terminalTabs.length === 0 && agentTabs.length === 0 && readTabs.length === 0) setRightPanelOpen(false);
-      return next;
-    });
+    setFileTabs((prev) => prev.filter((t) => t.id !== tabId));
     setActiveFileTabId((cur) => {
       if (cur !== tabId) return cur;
       const remaining = fileTabs.filter((t) => t.id !== tabId);

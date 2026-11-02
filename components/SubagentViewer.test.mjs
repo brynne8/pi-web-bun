@@ -81,10 +81,9 @@ test("AppShell hosts subagent tabs in the right panel next to file and terminal 
   assert.match(appShell, /setActiveFileTabId\(`agent:\$\{sessionId\}`\)/);
   assert.match(appShell, /kind: "agent" as const/);
   assert.match(appShell, /<SubagentViewer[\s\S]*?sessionId=\{activeAgentTab\.sessionId\}[\s\S]*?running=\{runningSessionIds\.has\(activeAgentTab\.sessionId\)\}/);
-  // Closing the last tab of any kind folds the panel: file, terminal, sub-agent
-  // or read snapshot.
-  assert.match(appShell, /if \(fileTabs\.length === 0 && terminalTabs\.length === 0 && remainingAgents\.length === 0 && readTabs\.length === 0\) setRightPanelOpen\(false\)/);
-  assert.match(appShell, /if \(fileTabs\.length === 0 && terminalTabs\.length === 0 && agentTabs\.length === 0 && remainingReads\.length === 0\) setRightPanelOpen\(false\)/);
+  // Closing the last tab of any kind leaves the panel open on the activity view, which
+  // the rail always holds; `ReadSnapshotViewer.test.mjs` pins that no close path folds it.
+  assert.match(appShell, /lastAgentTabId\(remainingAgents\) \?\? lastReadTabId\(readTabs\) \?\? lastBgOutputTabId\(bgOutputTabs\) \?\? "bg-tasks"/);
   // Every project switch (cwd change, session pick, new session) goes through
   // changeFileWorkspace(), which parks the file tabs and drops the agent tabs.
   assert.match(appShell, /setFileTabs\(next\.tabs\);[\s\S]{0,120}setAgentTabs\(\[\]\);/);

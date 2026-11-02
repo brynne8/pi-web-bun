@@ -184,12 +184,10 @@ test("the tab reaches the panel through the same machinery as file, terminal and
   assert.match(appShell, /<ReadSnapshotViewer[\s\S]*?filePath=\{activeReadTab\.snapshot\.filePath\}[\s\S]*?content=\{activeReadTab\.snapshot\.content\}[\s\S]*?offset=\{activeReadTab\.snapshot\.offset\}/);
   // One tab per call: re-opening a call replaces its tab's snapshot rather than adding a tab.
   assert.match(appShell, /prev\.some\(\(tab\) => tab\.toolCallId === toolCallId\)[\s\S]{0,120}prev\.map\(\(tab\) => tab\.toolCallId === toolCallId \? \{ \.\.\.tab, snapshot \} : tab/);
-  // Closing one falls back to another tab of any kind, and closing the last of any kind folds the panel.
+  // Closing one falls back to another tab of any kind; see the next test for what
+  // that fallback ends on, and for why closing tabs never folds the panel.
   assert.match(appShell, /if \(tabId\.startsWith\("read:"\)\) \{/);
   assert.match(appShell, /lastAgentTabId\(agentTabs\) \?\? lastReadTabId\(readTabs\)/);
-  assert.match(appShell, /!agentTabs\.length && !readTabs\.length\) setRightPanelOpen\(false\)/);
-  assert.match(appShell, /remainingAgents\.length === 0 && readTabs\.length === 0\) setRightPanelOpen\(false\)/);
-  assert.match(appShell, /agentTabs\.length === 0 && remainingReads\.length === 0\) setRightPanelOpen\(false\)/);
   // The "no file open" placeholder must not show behind an active snapshot tab.
   assert.match(appShell, /&& !activeAgentTab && !activeReadTab && !activeBgTasksTab && !activeBgOutputTab \? \(/);
   // A snapshot came from this project's chat: a project switch drops them, unparked.
@@ -199,6 +197,23 @@ test("the tab reaches the panel through the same machinery as file, terminal and
   // FileViewer keeps the live-file tabs to itself.
   assert.equal((appShell.match(/<FileViewer/g) ?? []).length, 1);
   assert.match(appShell, /onOpenReadSnapshot=\{handleOpenReadSnapshot\}/);
+});
+
+test("closing tabs never folds the rail: it always holds the activity view", () => {
+  // The rail's first tab is the activity view and it is not closable, so closing the
+  // last file, terminal, sub-agent or snapshot tab leaves something shown. Folding
+  // then hid a panel that had a tab in it, and the hide control became the only way
+  // to see what the rail was opened for. So the close paths only pick the next tab.
+  const closers = appShell.slice(
+    appShell.indexOf("const handleTerminalClosed"),
+    appShell.indexOf("const handleViewFullHistory"),
+  );
+  assert.ok(closers.length > 1000, "the tab-close paths were found");
+  assert.doesNotMatch(closers, /setRightPanelOpen\(/, "closing a tab never folds the panel");
+  // Each of the five paths ends on the activity view instead of on nothing.
+  assert.equal((closers.match(/\?\? "bg-tasks"/g) ?? []).length, 5, "every close path falls back to the activity view");
+  // The hide control is still what folds it.
+  assert.match(appShell, /onClick=\{\(\) => setRightPanelOpen\(false\)\}[\s\S]{0,200}title=\{translate\("files\.hidePanel"\)\}/);
 });
 
 test("a read card opens the panel from its header and keeps its body only as the fallback", () => {
