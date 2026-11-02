@@ -44,7 +44,7 @@ function KindGlyph({ kind, size = 12 }: { kind: "terminal" | "ok" | "error" | "s
 }
 
 /**
- * The right rail's activity view: what this instance is doing right now. Connections and sessions
+ * The right rail's activity view: what the session on screen is doing right now. Connections and sessions
  * come first — they are the context, one light line each — and the commands under them, because a
  * grid of task cards is the heavy content and would push the context out of sight the other way
  * round. One panel, one scroll, one palette: a task card and a stream row read the same because

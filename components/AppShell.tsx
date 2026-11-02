@@ -16,6 +16,7 @@ import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
 import { AgentSessionPanel } from "./AgentSessionPanel";
 import type { ReadSnapshot } from "@/lib/read-snapshot";
 import type { BgTaskSummary } from "@/lib/bg-task-types";
+import { filterBgTasksBySession } from "@/lib/bg-task-filter";
 import { BgTaskOutputView } from "./BgTaskOutputView";
 // The terminal brings @xterm with it, which nothing on the first page needs:
 // its chunk loads when the first terminal tab mounts.
@@ -275,7 +276,13 @@ export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(() => !initialNavigation.sidebarCollapsed);
   const desktopSidebarOpenRef = useRef(!initialNavigation.sidebarCollapsed);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
-  const { tasks: bgTasks, runningCount: bgTaskRunningCount, refresh: refreshBgTasks } = useBgTasks();
+  const { tasks: allBgTasks, refresh: refreshBgTasks } = useBgTasks();
+  // The activity view is this page's: only the session on screen shows its background commands.
+  const bgTasks = useMemo(
+    () => filterBgTasksBySession(allBgTasks, selectedSession?.id),
+    [allBgTasks, selectedSession?.id],
+  );
+  const bgTaskRunningCount = bgTasks.filter((task) => task.finishedAtMs === null).length;
   const [rightPanelExpanded, setRightPanelExpanded] = useState(false);
   const rightPanelFullWidth = rightPanelOpen && rightPanelExpanded && !isMobile;
   useEffect(() => {
