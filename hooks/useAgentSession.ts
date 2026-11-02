@@ -2636,8 +2636,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
 
   /**
-   * Fork this session into a side chat and open its tab: `/side` and the selected-text
-   * popover. `prompt` is its first message, `name` what to call it instead of that
+   * Fork this session into a side chat and open its tab: `/btw`, the only way
+   * in. `prompt` is its first message, `name` what to call it instead of that
    * message's first line. Answers the refusal to show, or null.
    */
   const startSideChat = useCallback(async (prompt: string | null, name?: string): Promise<string | null> => {
@@ -2781,7 +2781,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           return completed;
         }
 
-        case "side": {
+        case "btw": {
           const error = await startSideChat(args || null);
           return complete(error ? { handled: true, error } : { handled: true, action: "openSideChat" });
         }

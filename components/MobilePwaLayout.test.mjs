@@ -15,7 +15,7 @@ test("every class the keyboard-open rules target exists on its component", () =>
   // Every selector the keyboard rules target must exist on the element it
   // means; a renamed class would otherwise leave the rule silently dead.
   assert.match(chatInputSource, /className="chat-input-controls"/);
-  assert.match(chatInputSource, /className=\{compact \? undefined : "chat-input-shell"\}/);
+  assert.match(chatInputSource, /className="chat-input-shell"/);
   assert.match(extensionStatusBarSource, /className=\{`extension-status-shelf/);
   assert.match(chatWindowSource, /className="chat-content /);
   assert.match(newSessionBarSource, /<div className="new-session-context">/);

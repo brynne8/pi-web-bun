@@ -429,7 +429,6 @@ const ACTIVITY_PANEL_CSS = `
   }
   .agent-search:focus { border-color: var(--accent); }
   .agent-empty { padding: 8px; color: var(--text-dim); font-size: 11px; text-align: center; }
-  .agent-error { padding: 4px 6px; color: var(--act-err); font-size: 11px; overflow-wrap: anywhere; }
   .agent-tab {
     display: flex;
     flex-shrink: 0;
@@ -452,7 +451,6 @@ const ACTIVITY_PANEL_CSS = `
   .agent-tab.is-shown { opacity: 1; }
   .agent-tab:hover { background: var(--bg-selected); color: var(--text); }
   .agent-tab.is-shown { color: var(--accent); }
-  .agent-tab:disabled { opacity: 0; cursor: default; }
   .bg-task-error {
     flex-shrink: 0;
     margin: 0 12px;

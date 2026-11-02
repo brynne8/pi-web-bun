@@ -99,7 +99,6 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
 import { formatActiveDuration, formatCompactCount, formatCostShort } from "@/lib/session-stats-format";
 import type { FileViewerState } from "@/lib/file-viewer-state";
 import { PRESET_READ_ONLY, type ToolEntry } from "@/lib/tool-presets";
-import { createSideChat } from "@/lib/side-chat-client";
 import { countRunningSubagents, getSessionFamily, isHiddenRelation, sideChatNameFrom, sideChatTitle } from "@/lib/session-family";
 import { getLastSettingsSection, settingsSectionRequiresProject, type SettingsSection } from "@/lib/settings-navigation";
 
@@ -1330,7 +1329,7 @@ export function AppShell() {
   const handleOpenSubagentTab = useCallback((sessionId: string, label: string, side?: boolean) => {
     setAgentTabs((prev) => {
       if (prev.some((tab) => tab.sessionId === sessionId)) return prev;
-      // Every side chat has the same name, and `/side` can be used again and
+      // Every side chat has the same name, and `/btw` can be used again and
       // again: the lowest number no open tab shows tells them apart.
       let numbered = label;
       for (let number = 2; side && prev.some((tab) => tab.label === numbered); number += 1) numbered = `${label} ${number}`;
@@ -1370,7 +1369,7 @@ export function AppShell() {
     handleOpenSubagentTab(sessionId, label, side);
   };
 
-  // `/side` landed (hooks/useAgentSession): open the forked chat's tab, seed
+  // `/btw` landed (hooks/useAgentSession): open the forked chat's tab, seed
   // its composer when the command carried a prompt, and refresh the list so
   // the family's badge folds the new member in.
   const handleSideSession = useCallback((session: SessionInfo, prompt: string | null) => {
@@ -1378,15 +1377,6 @@ export function AppShell() {
     handleOpenSubagentTab(session.id, sideChatTitle(session, (prompt && sideChatNameFrom(prompt)) || translate("sideChat.title")), true);
     setRefreshKey((key) => key + 1);
   }, [handleOpenSubagentTab, translate]);
-
-  // The switcher's New side chat, on the main agent's row, whichever family member the main chat shows.
-  const handleNewSideChat = useCallback(async (rootSessionId: string) => {
-    const result = await createSideChat(rootSessionId, translate);
-    if ("error" in result) return result.error;
-    if (isMobile) setActiveTopPanel(null);
-    handleSideSession(result.session, null);
-    return null;
-  }, [handleSideSession, isMobile, translate]);
 
   // A side chat's first prompt names it: read the name when a run in an open tab starts or ends.
   const runningSideTabs = agentTabs.filter((tab) => tab.side && runningSessionIds.has(tab.sessionId)).map((tab) => tab.sessionId).join();
@@ -2956,7 +2946,6 @@ export function AppShell() {
                   onSelectSession: handleSelectSession,
                   openSubagentTabIds,
                   onToggleSubagentTab: handleToggleSubagentTab,
-                  onNewSideChat: () => handleNewSideChat(activeSessionFamily.root.id),
                 } : null}
               />
             </Suspense>

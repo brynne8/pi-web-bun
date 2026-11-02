@@ -44,26 +44,10 @@ test("a phone stacks the streaming buttons under the draft instead of beside it"
   // Two buttons in the draft's row leave the placeholder about 150px on a 360px
   // phone. Only a streaming run has those buttons; idle keeps the icon-only send
   // button in the row, and a desktop has width for the row either way.
-  assert.equal(stacksComposerLayout(false, false, false), false);
-  assert.equal(stacksComposerLayout(false, false, true), false);
-  assert.equal(stacksComposerLayout(false, true, false), false);
-  assert.equal(stacksComposerLayout(false, true, true), true);
-  // Quote mode always stacks: it is a short excerpt, whichever platform shows it.
-  assert.equal(stacksComposerLayout(true, false, false), true);
-  assert.equal(stacksComposerLayout(true, true, false), true);
-});
-
-test("a phone stacks the streaming buttons under the draft instead of beside it", () => {
-  // Two buttons in the draft's row leave the placeholder about 150px on a 360px
-  // phone. Only a streaming run has those buttons; idle keeps the icon-only send
-  // button in the row, and a desktop has width for the row either way.
-  assert.equal(stacksComposerLayout(false, false, false), false);
-  assert.equal(stacksComposerLayout(false, false, true), false);
-  assert.equal(stacksComposerLayout(false, true, false), false);
-  assert.equal(stacksComposerLayout(false, true, true), true);
-  // Quote mode always stacks: it is a short excerpt, whichever platform shows it.
-  assert.equal(stacksComposerLayout(true, false, false), true);
-  assert.equal(stacksComposerLayout(true, true, false), true);
+  assert.equal(stacksComposerLayout(false, false), false);
+  assert.equal(stacksComposerLayout(false, true), false);
+  assert.equal(stacksComposerLayout(true, false), false);
+  assert.equal(stacksComposerLayout(true, true), true);
 });
 
 test("follow-up shortcuts preserve newline, IME, mobile and completion behavior", () => {
@@ -509,26 +493,6 @@ test("renders the empty tool preset as Chat only", () => {
   assert.match(html, />Chat only<\/span>/);
 });
 
-test("renders the compact composer with the standard Send button and no session controls", () => {
-  const html = renderToStaticMarkup(
-    React.createElement(
-      I18nProvider,
-      null,
-      React.createElement(ChatInput, {
-        onSend() {},
-        onAbort() {},
-        isStreaming: false,
-        compact: true,
-      }),
-    ),
-  );
-
-  assert.match(html, /<textarea/);
-  assert.match(html, />Send<\/button>/);
-  assert.equal((html.match(/<button\b/g) ?? []).length, 1);
-  assert.doesNotMatch(html, /type="file"|Attach files|Change tool preset/);
-});
-
 test("the attach button takes any file when the chat handles them, and images only otherwise (#1101)", () => {
   const render = (props) => renderToStaticMarkup(
     React.createElement(I18nProvider, null, React.createElement(ChatInput, {
@@ -750,10 +714,10 @@ test("locks built-in command submission until it settles", async () => {
 test("keeps only read-only built-ins available while a run is active", () => {
   assert.equal(canRunBuiltinSlashCommandWhileStreaming("/copy"), true);
   assert.equal(canRunBuiltinSlashCommandWhileStreaming("/session"), true);
-  // /side forks the session at file level, so a side question during a long
+  // /btw forks the session at file level, so a side question during a long
   // parent run is the primary use case (ADR 0007).
-  assert.equal(canRunBuiltinSlashCommandWhileStreaming("/side"), true);
-  assert.equal(canRunBuiltinSlashCommandWhileStreaming("/side why did the test fail?"), true);
+  assert.equal(canRunBuiltinSlashCommandWhileStreaming("/btw"), true);
+  assert.equal(canRunBuiltinSlashCommandWhileStreaming("/btw why did the test fail?"), true);
   assert.equal(canRunBuiltinSlashCommandWhileStreaming("/compact"), false);
   assert.equal(canRunBuiltinSlashCommandWhileStreaming("/auto-compact"), false);
   assert.equal(canRunBuiltinSlashCommandWhileStreaming("/reload"), false);

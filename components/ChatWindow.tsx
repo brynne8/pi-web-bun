@@ -308,7 +308,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     showScrollToBottom,
     sessionIdRef, scrollContainerRef,
     lastUserMsgRef, promptAnchorActive,
-    handleSend, handleAbort, startSideChat, handleFork, handleEditContent, cancelEdit, handleModelChange,
+    handleSend, handleAbort, handleFork, handleEditContent, cancelEdit, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     dismissCompactError,
     handleRecallQueue,
@@ -338,15 +338,9 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     top: number;
     left: number;
   } | null>(null);
-  const [quoteInputOpen, setQuoteInputOpen] = useState(false);
-  const [quoteSubmitting, setQuoteSubmitting] = useState(false);
-  const [quoteError, setQuoteError] = useState<string | null>(null);
   const quotePopoverRef = useRef<HTMLDivElement | null>(null);
-  const quoteChatInputRef = useRef<ChatInputHandle | null>(null);
   const closeQuotedSelection = useCallback(() => {
     setQuotedSelection(null);
-    setQuoteInputOpen(false);
-    setQuoteError(null);
   }, []);
 
   useEffect(() => {
@@ -354,7 +348,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   }, [quoteSelectionEnabled, closeQuotedSelection]);
 
   const captureQuotedSelection = useCallback(() => {
-    if (!quoteSelectionEnabled || quoteInputOpen) return;
+    if (!quoteSelectionEnabled) return;
     const selection = window.getSelection();
     const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
     const root = messageContentRef.current;
@@ -373,12 +367,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       top: Math.min(window.innerHeight - 44, rect.bottom + 8),
       left: Math.max(64, Math.min(window.innerWidth - 64, rect.left + rect.width / 2)),
     });
-  }, [quoteSelectionEnabled, quoteInputOpen]);
-
-  useEffect(() => {
-    if (!quoteInputOpen || !quotedSelection) return;
-    quoteChatInputRef.current?.insertIfEmpty(buildQuotedSelection(quotedSelection.text));
-  }, [quoteInputOpen, quotedSelection]);
+  }, [quoteSelectionEnabled]);
 
   useLayoutEffect(() => {
     const popover = quotePopoverRef.current;
@@ -403,18 +392,18 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       viewport?.removeEventListener("resize", position);
       viewport?.removeEventListener("scroll", position);
     };
-  }, [quotedSelection, quoteInputOpen, quoteError]);
+  }, [quotedSelection]);
 
   useEffect(() => {
     if (!quotedSelection) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (!quoteInputOpen && !quotePopoverRef.current?.contains(event.target as Node)) closeQuotedSelection();
+      if (!quotePopoverRef.current?.contains(event.target as Node)) closeQuotedSelection();
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.isComposing) return;
       event.preventDefault();
       event.stopPropagation();
-      if (!quoteSubmitting) closeQuotedSelection();
+      closeQuotedSelection();
     };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -422,7 +411,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [quotedSelection, quoteInputOpen, quoteSubmitting, closeQuotedSelection]);
+  }, [quotedSelection, closeQuotedSelection]);
 
   const quoteSelectionHere = useCallback(() => {
     if (!quotedSelection) return;
@@ -433,39 +422,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     // (#1319), so the quote would be typed in front of instead of after.
     closeQuotedSelection();
   }, [chatInputRef, quotedSelection, closeQuotedSelection]);
-
-  const askSelectionInSideChat = useCallback(async (prompt: string) => {
-    if (quoteSubmitting || !prompt.trim() || !quotedSelection) return;
-    setQuoteSubmitting(true);
-    setQuoteError(null);
-    try {
-      const refusal = await startSideChat(prompt, quotedSelection.text);
-      if (!refusal) {
-        closeQuotedSelection();
-        return;
-      }
-      quoteChatInputRef.current?.restoreSubmission(prompt);
-      setQuoteError(refusal);
-    } catch (error) {
-      quoteChatInputRef.current?.restoreSubmission(prompt);
-      setQuoteError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setQuoteSubmitting(false);
-    }
-  }, [quotedSelection, quoteSubmitting, closeQuotedSelection, startSideChat]);
-
-  // The composer's Side chat button: its draft goes back on a refusal, as a failed send's does.
-  const askInSideChat = useCallback(async (message: string) => {
-    let refusal: string | null;
-    try {
-      refusal = await startSideChat(message);
-    } catch (error) {
-      refusal = error instanceof Error ? error.message : String(error);
-    }
-    if (!refusal) return;
-    chatInputRef?.current?.restoreSubmission(message);
-    addNotice({ type: "error", message: refusal });
-  }, [addNotice, chatInputRef, startSideChat]);
 
   const initialPromptSentRef = useRef(false);
   useEffect(() => {
@@ -1365,7 +1321,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       ref={chatInputRef}
       onSend={handleSend}
       onAbort={handleAbort}
-      onSideChat={onSideSession && !isHiddenRelation(session?.relation) ? askInSideChat : undefined}
       onSteer={agentRunning ? handleSteer : undefined}
       onFollowUp={agentRunning ? handleFollowUp : undefined}
       onPromptWithStreamingBehavior={agentRunning ? handlePromptWithStreamingBehavior : undefined}
@@ -1556,8 +1511,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       {quoteSelectionEnabled && quotedSelection && createPortal(
         <div
           ref={quotePopoverRef}
-          role={quoteInputOpen ? "dialog" : "toolbar"}
-          aria-label={t(quoteInputOpen ? "chat.newQuoteChat" : "chat.selectionActions")}
+          role="toolbar"
+          aria-label={t("chat.selectionActions")}
           style={{
             position: "fixed",
             top: quotedSelection.top,
@@ -1566,39 +1521,16 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             display: "flex",
             flexWrap: "wrap",
             gap: 3,
-            width: quoteInputOpen ? "min(420px, calc(100vw - 16px))" : undefined,
             maxWidth: "calc(100vw - 16px)",
             maxHeight: "calc(var(--app-viewport-height, 100dvh) - 16px)",
             overflowY: "auto",
-            padding: quoteInputOpen ? 12 : 3,
+            padding: 3,
             border: "1px solid var(--border)",
             borderRadius: 6,
             background: "var(--bg)",
             boxShadow: "0 2px 10px rgba(0,0,0,0.12)",
           }}
         >
-          {quoteInputOpen ? (
-            <fieldset
-              disabled={quoteSubmitting}
-              aria-busy={quoteSubmitting}
-              style={{ width: "100%", minWidth: 0, margin: 0, padding: 0, border: "none", display: "flex", flexDirection: "column", gap: 10 }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600 }}>{t("chat.askInSideChat")}</span>
-                <button type="button" className="file-viewer-icon-button" title={t("i18n.close")} aria-label={t("i18n.close")} disabled={quoteSubmitting} onClick={closeQuotedSelection} style={{ border: "none" }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
-                </button>
-              </div>
-              <ChatInput
-                ref={quoteChatInputRef}
-                compact
-                onSend={askSelectionInSideChat}
-                onAbort={closeQuotedSelection}
-                isStreaming={false}
-              />
-              {quoteError && <div role="alert" style={{ color: "#dc2626", fontSize: 12, overflowWrap: "anywhere" }}>{quoteError}</div>}
-            </fieldset>
-          ) : <>
           <button
             type="button"
             className="file-viewer-icon-button"
@@ -1614,23 +1546,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             </svg>
             <span>{t("chat.quoteSelection")}</span>
           </button>
-          {onSideSession && !isHiddenRelation(session?.relation) && (
-            <button
-              type="button"
-              className="file-viewer-icon-button"
-              title={t("chat.askInSideChat")}
-              aria-label={t("chat.askInSideChat")}
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={() => { setQuoteInputOpen(true); window.getSelection()?.removeAllRanges(); }}
-              style={{ width: "auto", height: 35, flex: "0 0 auto", gap: 5, padding: "0 10px", border: "none", fontSize: 12, fontWeight: 500 }}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M21 12a8 8 0 0 1-8 8H5.5a2 2 0 0 1-1.4-3.4A8 8 0 1 1 21 12z" />
-              </svg>
-              <span>{t("chat.askInSideChat")}</span>
-            </button>
-          )}
-          </>}
         </div>,
         document.body,
       )}

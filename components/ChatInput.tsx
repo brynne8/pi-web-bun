@@ -49,13 +49,9 @@ interface Props {
   onSend: (message: string, images?: AttachedImage[]) => void;
   onAbort: () => void;
   onSteer?: (message: string, images?: AttachedImage[]) => void;
-  /** Sends the draft to a new side chat instead of the running agent. */
-  onSideChat?: (message: string) => void;
   onFollowUp?: (message: string, images?: AttachedImage[]) => void;
   onPromptWithStreamingBehavior?: (message: string, behavior: "steer" | "followUp", images?: AttachedImage[]) => void;
   isStreaming: boolean;
-  /** Text-only composer without the session controls or outer spacing. */
-  compact?: boolean;
   model?: { provider: string; modelId: string } | null;
   isAutoModelSelection?: boolean;
   modelNames?: Record<string, string>;
@@ -314,7 +310,8 @@ const BUILTIN_SLASH_COMMANDS: BuiltinSlashCommand[] = [
   // A side chat forks the session while it runs (ADR 0007): the primary use
   // case is a side question during a long parent run, so it must be offered
   // mid-stream. The fork is file-level, never touching the running agent.
-  { name: "side", description: "chat.commandSide", source: "builtin", availableWhileStreaming: true },
+  // It is the only way in: no button starts a side chat.
+  { name: "btw", description: "chat.commandBtw", source: "builtin", availableWhileStreaming: true },
 ];
 
 function getBuiltinSlashCommand(message: string): BuiltinSlashCommand | undefined {
@@ -376,11 +373,10 @@ export function canClearBuiltinCommandInput(message: string, imageCount: number,
  * them side by side. A phone has no room for the steer and follow-up buttons next
  * to the draft: in one row the two of them take more than half the width and the
  * placeholder is cut to "立即引导 / 排队后...". So while a run streams they move to
- * their own right-aligned row below the draft. Quote mode (`compact`) stacks for
- * its own reason: it is a short excerpt, not a full composer.
+ * their own right-aligned row below the draft.
  */
-export function stacksComposerLayout(compact: boolean, isMobile: boolean, isStreaming: boolean): boolean {
-  return compact || (isMobile && isStreaming);
+export function stacksComposerLayout(isMobile: boolean, isStreaming: boolean): boolean {
+  return isMobile && isStreaming;
 }
 
 const SLASH_SOURCES: SlashCommandSource[] = ["builtin", "extension", "prompt", "skill"];
@@ -684,7 +680,7 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
 // Memoized: its props hold still while a reply streams or a tool runs, and the
 // chat around it re-renders through both.
 export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatInput({
-  onSend, onAbort, onSteer, onSideChat, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, missingCwd, modelScopeWarnings, onModelChange, modelSwitching,
+  onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, missingCwd, modelScopeWarnings, onModelChange, modelSwitching,
   defaultModel, onSetDefaultModel,
   onCompact, onAbortCompaction, isCompacting, compactError, onDismissCompactError, compactResult, toolPreset, onToolPresetChange,
   thinkingLevel, isAutoThinkingSelection = false, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
@@ -697,7 +693,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   draftKey,
   cwd,
   onAttachFiles,
-  compact = false,
 }: Props, ref) {
   const { t } = useI18n();
   const { fontSize } = useChatAppearance();
@@ -947,7 +942,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }));
 
   const processImageFiles = useCallback(async (files: File[]) => {
-    if (compact) return;
     const remaining = Math.max(
       0,
       MAX_ATTACHED_IMAGES - attachedImagesRef.current.length - pendingImageCountRef.current,
@@ -974,7 +968,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     } finally {
       pendingImageCountRef.current -= imageFiles.length;
     }
-  }, [compact]);
+  }, []);
 
   const handleFilePick = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -1125,7 +1119,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     onSend(msg, attachedImages.length ? attachedImages : undefined);
   }, [value, attachedImages, isStreaming, runBuiltinCommand, onSend, clearInput, onAudioUnlock]);
 
-  const slashQuery = !compact && value.startsWith("/") && !/\s/.test(value.slice(1))
+  const slashQuery = value.startsWith("/") && !/\s/.test(value.slice(1))
     ? value.slice(1).toLowerCase()
     : null;
 
@@ -1148,7 +1142,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     : t(slashQuery ? "chat.matches" : "chat.commands", { count: filteredSlashCommands.length });
   const hasInputText = Boolean(value.trim());
   const canQueueStreamingMessage = hasInputText || attachedImages.length > 0;
-  const stackedComposer = stacksComposerLayout(compact, isMobile, isStreaming);
+  const stackedComposer = stacksComposerLayout(isMobile, isStreaming);
   // Warn when images are attached but the selected model is known not to accept
   // image input (#584), including a resolved default. Unknown models stay silent.
   const showImageUnsupportedWarning = (
@@ -1325,13 +1319,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       autoGrowTextarea(ta);
     });
   }, []);
-
-  const sendToSideChat = useCallback(() => {
-    const msg = value.trim();
-    if (!msg || attachedImages.length || !onSideChat) return;
-    clearInput();
-    onSideChat(msg);
-  }, [value, attachedImages, onSideChat, clearInput]);
 
   const sendQueued = useCallback((mode: "steer" | "followup") => {
     const msg = value.trim();
@@ -1561,7 +1548,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = Array.from(e.clipboardData?.items ?? []);
     const imageItems = items.filter((item) => item.type.startsWith("image/"));
-    if (!compact && imageItems.length) {
+    if (imageItems.length) {
       e.preventDefault();
       const files = imageItems.map((item) => item.getAsFile()).filter((f): f is File => f !== null);
       processImageFiles(files);
@@ -1598,7 +1585,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       ta.focus();
       ta.setSelectionRange(start + markdown.length, start + markdown.length);
     });
-  }, [compact, processImageFiles, updateAtQuery]);
+  }, [processImageFiles, updateAtQuery]);
 
   useEffect(() => {
     if (slashQuery === null) {
@@ -1764,30 +1751,30 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     <fieldset
       disabled={builtinCommandPending}
       aria-busy={builtinCommandPending}
-      className={compact ? undefined : "chat-input-shell"}
+      className="chat-input-shell"
       style={{
         // Never taller than the chat: a short window shrinks the queue first (#1428).
-        ...(compact ? { flexShrink: 0 } : { display: "flex", flexDirection: "column", minHeight: 0 }),
+        display: "flex", flexDirection: "column", minHeight: 0,
         minWidth: 0,
         margin: 0,
         border: 0,
         background: "transparent",
-        padding: compact ? 0 : "0 16px 8px",
-        paddingRight: compact ? 0 : isMobile ? 16 : 52, // desktop: 16px base + 36px for ChatMinimap alignment
+        padding: "0 16px 8px",
+        paddingRight: isMobile ? 16 : 52, // desktop: 16px base + 36px for ChatMinimap alignment
         opacity: builtinCommandPending ? 0.5 : 1,
         transition: "opacity 0.15s",
       }}
     >
       {/* Hidden file input. No `capture`: phones still offer the photo library and camera. */}
-      {!compact && <input
+      <input
         ref={fileInputRef}
         type="file"
         accept={onAttachFiles ? undefined : "image/*"}
         multiple
         style={{ display: "none" }}
         onChange={handleFilePick}
-      />}
-      <div style={{ ...(compact ? undefined : { display: "flex", flexDirection: "column", minHeight: 0, width: "100%" }), maxWidth: "var(--chat-content-max-width, 820px)", margin: "0 auto" }}>
+      />
+      <div style={{ display: "flex", flexDirection: "column", minHeight: 0, width: "100%", maxWidth: "var(--chat-content-max-width, 820px)", margin: "0 auto" }}>
         <MissingCwdBanner cwd={missingCwd} />
         <ModelErrorBanner error={modelError} />
         <ModelScopeWarningBanner warnings={modelScopeWarnings} />
@@ -2316,19 +2303,19 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               gap: 8,
               alignItems: stackedComposer ? "stretch" : "center",
               background: "var(--bg)",
-              border: compact ? "none" : `1px solid ${bashMode ? "var(--tool-bg)" : isStreaming && (onSteer || onFollowUp)
+              border: `1px solid ${bashMode ? "var(--tool-bg)" : isStreaming && (onSteer || onFollowUp)
                 ? "rgba(234,179,8,0.4)"
                 : "color-mix(in srgb, var(--border) 70%, transparent)"}`,
-              borderRadius: compact ? 0 : 14,
-              padding: compact ? 0 : isMobile ? "6px 6px 6px 12px" : "10px 10px 10px 14px",
-              boxShadow: compact ? "none" : "0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.10)",
+              borderRadius: 14,
+              padding: isMobile ? "6px 6px 6px 12px" : "10px 10px 10px 14px",
+              boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.10)",
               transition: "border-color 0.15s, background 0.15s, box-shadow 0.15s",
             } as React.CSSProperties}
           >
           <textarea
             ref={textareaRef}
             className="chat-input-textarea"
-            aria-label={compact ? t("chat.askInSideChat") : undefined}
+
             value={value}
             onChange={(e) => {
               valueRef.current = e.target.value;
@@ -2373,7 +2360,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               fontSize: "var(--chat-content-font-size, 14px)",
               lineHeight: 1.6,
               fontFamily: "inherit",
-              minHeight: compact ? 96 : 24,
+              minHeight: 24,
               maxHeight: 200,
               overflow: "auto",
             }}
@@ -2381,29 +2368,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
           {isStreaming ? (
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, alignSelf: "flex-end" }}>
-              {onSideChat && (
-                <button
-                  type="button"
-                  onClick={sendToSideChat}
-                  disabled={!value.trim() || attachedImages.length > 0}
-                  title={t("chat.sideChatHint")}
-                  aria-label={t("chat.sideChat")}
-                  className={`bg-transparent ${value.trim() && !attachedImages.length ? "cursor-pointer text-text-muted hover:bg-bg-hover hover:text-text" : "cursor-not-allowed text-text-dim"}`}
-                  style={{
-                    width: isMobile ? 36 : 32,
-                    height: isMobile ? 36 : 32,
-                    display: "grid", placeItems: "center",
-                    padding: 0,
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                    transition: "background 0.12s",
-                  }}
-                >
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M21 12a8 8 0 0 1-8 8H5.5a2 2 0 0 1-1.4-3.4A8 8 0 1 1 21 12z" /><path d="M13 8.5v7M9.5 12h7" />
-                  </svg>
-                </button>
-              )}
               {(onSteer || onFollowUp) && (() => {
                 // One delivery-timing control, so Stop owns the slot at its right.
                 const primaryMode: "steer" | "followup" = onSteer ? "steer" : "followup";
@@ -2618,7 +2582,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         )}
 
         {/* Bottom bar: left | center (context) | right */}
-        {!compact && <div className="chat-input-controls" style={{
+        <div className="chat-input-controls" style={{
           marginTop: isMobile ? 4 : 8,
           display: isMobile ? "grid" : "flex",
           gridTemplateColumns: isMobile ? "minmax(0, 1fr) auto" : undefined,
@@ -3071,7 +3035,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
             </div>
           </div>
 
-        </div>}
+        </div>
       </div>
     </fieldset>
   );
