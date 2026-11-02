@@ -45,6 +45,19 @@ test("source keeps the file's line numbers, continuing from the read's offset", 
   assert.deepEqual(numbers(render({ filePath: "/tmp/a.ts", content: "const a = 1;\nconst b = 2;", offset: 40 })), ["40", "41"]);
 });
 
+test("a source slice colours itself when the languages arrive, without re-opening the read", () => {
+  // The Prism languages load in a chunk of their own, usually after this panel
+  // mounted, so the first render is untokenised on purpose. What colours it
+  // afterwards is the hook's answer: the memo holds the element, so a memo that
+  // never sees readiness keeps the untokenised one for the life of the tab, and
+  // the slice stays colourless until its card is opened again.
+  assert.match(viewer, /const prismReady = usePrismLanguages\(/);
+  assert.match(viewer, /language === "text" \|\| !prismReady \? "plaintext" : language/);
+  const sourceMemo = viewer.match(/const source = useMemo\(\s*\(\) => \([\s\S]*?\n {4}\[([^\]]+)\],\n {2}\);/);
+  assert.ok(sourceMemo, "the source view is a memo of its own");
+  assert.match(sourceMemo[1], /prismReady/, "readiness is one of its dependencies");
+});
+
 test("past the file viewer's limit a big slice is plain text, still numbered, and says so", () => {
   const body = (n) => Array.from({ length: n }, (_, i) => `const line${i} = ${i};`).join("\n");
 

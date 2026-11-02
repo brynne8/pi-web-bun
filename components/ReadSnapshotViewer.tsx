@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import SyntaxHighlighter from "react-syntax-highlighter/dist/esm/prism-light";
-import vs from "react-syntax-highlighter/dist/cjs/styles/prism/vs";
+import vs from "react-syntax-highlighter/dist/esm/styles/prism/vs";
 import { useTheme } from "@/hooks/useTheme";
 import { usePrismLanguages } from "@/hooks/usePrismLanguages";
 import { useI18n } from "@/hooks/useI18n";
@@ -84,14 +84,15 @@ export function ReadSnapshotViewer({ filePath, content, offset, toolCallId, onOp
   const tooBigToHighlight = lines.length > SOURCE_HIGHLIGHT_MAX_LINES;
   // A read panel opens after the page does, so the Prism languages load then,
   // as the file viewer's do: the source shows untokenised until the chunk
-  // arrives, and is coloured once it does.
-  usePrismLanguages(!tooBigToHighlight && !isTable && !showPreview && language !== "text");
+  // arrives, and is coloured once it does. The flag has to reach the memo below —
+  // a memo that does not see it keeps the untokenised element forever.
+  const prismReady = usePrismLanguages(!tooBigToHighlight && !isTable && !showPreview && language !== "text");
 
   const source = useMemo(
     () => (
       <SyntaxHighlighter
         className={wrapLines ? "file-source-view is-wrapped" : "file-source-view"}
-        language={language === "text" ? "plaintext" : language}
+        language={language === "text" || !prismReady ? "plaintext" : language}
         style={isDark ? fileViewerDarkTheme : vs}
         showLineNumbers
         startingLineNumber={firstLine}
@@ -122,7 +123,7 @@ export function ReadSnapshotViewer({ filePath, content, offset, toolCallId, onOp
         {content}
       </SyntaxHighlighter>
     ),
-    [content, firstLine, isDark, language, wrapLines],
+    [content, firstLine, isDark, language, prismReady, wrapLines],
   );
 
   const plainSource = useMemo(

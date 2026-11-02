@@ -209,3 +209,27 @@ test("the line-number gutter is pinned in every view", () => {
   // without it puts the numbers off the line boxes they belong to.
   assert.equal(parseFloat(gutterStyle.lineHeight), Number((codeStyle.fontSize * codeStyle.lineHeight).toFixed(1)));
 });
+
+test("the Prism themes are imported where a default import is the theme itself", async () => {
+  // The theme is the highlighter's only source of a token's colour: a token whose
+  // theme entry is missing keeps its class and gets no inline style, which reads as
+  // "no highlighting" with nothing wrong in the tree. `dist/cjs/styles/prism/<name>`
+  // is CommonJS assigning `exports.default`, so under this build a default import of
+  // it is the module namespace — `{ default: { ... } }` — and every token lookup
+  // misses. It shows up in the browser only: rendering the same component in a test
+  // unwraps the namespace, so the colours appear and nothing is caught. The esm build
+  // has the theme as its own default export, which is what a default import gets there.
+  const sources = await Promise.all([
+    readFile(new URL("./FileViewer.tsx", import.meta.url), "utf8"),
+    readFile(new URL("./MermaidBlock.tsx", import.meta.url), "utf8"),
+    readFile(new URL("./ReadSnapshotViewer.tsx", import.meta.url), "utf8"),
+  ]);
+  for (const [name, code] of [["FileViewer", sources[0]], ["MermaidBlock", sources[1]], ["ReadSnapshotViewer", sources[2]]]) {
+    const themeImports = code.match(/import \w+ from "react-syntax-highlighter\/[^"]*styles\/prism[^"]*"/g) ?? [];
+    assert.ok(themeImports.length > 0, `${name} must import a Prism theme`);
+    for (const line of themeImports) {
+      assert.doesNotMatch(line, /\/dist\/cjs\//, `${name}: a cjs theme import arrives as a namespace: ${line}`);
+      assert.match(line, /\/dist\/esm\/styles\/prism\//, `${name}: the theme must come from the esm build: ${line}`);
+    }
+  }
+});
