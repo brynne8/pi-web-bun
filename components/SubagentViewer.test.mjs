@@ -90,7 +90,7 @@ test("AppShell hosts subagent tabs in the right panel next to file and terminal 
   assert.match(appShell, /setFileTabs\(next\.tabs\);[\s\S]{0,120}setAgentTabs\(\[\]\);/);
   assert.match(appShell, /if \(!activeFileTabId \|\| activeFileId \|\| activeFileTabId\.startsWith\("agent:"\) \|\| activeFileTabId\.startsWith\("read:"\)\) \{/);
   // The "no files open" placeholder must not show behind an active agent tab.
-  assert.match(appShell, /!terminalTabs\.some\(\(tab\) => tab\.id === activeFileTabId\) && !activeAgentTab && !activeReadTab \? \(/);
+  assert.match(appShell, /!terminalTabs\.some\(\(tab\) => tab\.id === activeFileTabId\) && !activeAgentTab && !activeReadTab && !activeBgTasksTab && !activeBgOutputTab \? \(/);
 });
 
 test("closing a tab falls back without a ?? chain swallowed by a ternary", () => {
@@ -99,8 +99,10 @@ test("closing a tab falls back without a ?? chain swallowed by a ternary", () =>
   assert.doesNotMatch(appShell, /\?\? \w+\.at\(-1\) \?/);
   // Every close path ends by looking for another tab of the kind, and a fourth
   // kind of tab joins every one of them: definition plus four close paths.
-  assert.equal((appShell.match(/lastAgentTabId\(/g) ?? []).length, 5);
-  assert.equal((appShell.match(/lastReadTabId\(/g) ?? []).length, 5);
+  // One definition plus one fallback per close path: file, terminal, sub-agent, read and log.
+  assert.equal((appShell.match(/lastAgentTabId\(/g) ?? []).length, 6);
+  assert.equal((appShell.match(/lastReadTabId\(/g) ?? []).length, 6);
+  assert.equal((appShell.match(/lastBgOutputTabId\(/g) ?? []).length, 6);
 });
 
 test("the subagent card in a tool call opens the side tab with a label", () => {

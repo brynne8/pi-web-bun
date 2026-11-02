@@ -13,9 +13,13 @@ import { readFile } from "node:fs/promises";
 import {
   bgLogPath,
   FOREGROUND_AUTO_BACKGROUND_MS,
+  noteBgTaskOutput,
   PreHandoffBuffer,
+  promoteBgTask,
+  settleBgTask,
   trackBgTask,
   untrackBgTask,
+  wasBgTaskKilled,
 } from "./bash-bg-tasks";
 import { buildBgTaskNotification, type BgTaskOutcome } from "./bg-task-notification";
 
@@ -42,6 +46,12 @@ type ProjectCommandBashOperationsOptions = {
   localOperations?: BashOperations;
   platform?: NodeJS.Platform;
   shellPath?: string;
+  /**
+   * The project's shell prefix, which pi joins onto the command as `${prefix}\n${command}`. Only
+   * the command itself reaches the activity view: a row that read `cd /repo && …` said nothing
+   * about what was running, and every row in one project read the same.
+   */
+  commandPrefix?: string;
   /** When set, foreground commands without an explicit timeout hand off to background after this long. */
   autoBackgroundMs?: number;
   /** When set, a foreground command that prints more lines than this hands off to background instead. */
@@ -101,6 +111,7 @@ export function createProjectCommandBashOperations(
     baseEnvironment = process.env,
     localOperations = createLocalBashOperations({ shellPath: options.shellPath }),
     platform = process.platform,
+    commandPrefix,
     autoBackgroundMs,
     maxOutputLines,
     bgTask,
@@ -120,7 +131,14 @@ export function createProjectCommandBashOperations(
       // Before the handoff, abort forwards into the controller (see below);
       // after it, the wrapper's abort listener is gone and the process survives.
       const bgController = bgTask ? new AbortController() : undefined;
-      if (bgController && bgTask) trackBgTask(bgTask.sessionId, bgController);
+      // What the panel shows: the command as it was written, without the project's prefix.
+      const shownCommand = commandPrefix && command.startsWith(`${commandPrefix}\n`)
+        ? command.slice(commandPrefix.length + 1)
+        : command;
+      if (bgController && bgTask) {
+        // Hidden until a handoff: this command is still in front of the user.
+        trackBgTask(bgTask.sessionId, bgController, { command: shownCommand, startedAtMs: Date.now() });
+      }
       const execSignal = bgController ? bgController.signal : signal;
       let handedOff = false;
       // With a handoff armed, capture everything the model has not seen yet so the
@@ -149,8 +167,10 @@ export function createProjectCommandBashOperations(
         // survivor must not append to it afterwards.
         onData: (data) => {
           if (!released) onData(data);
-          if (bgStream) bgStream.write(data);
-          else buffer?.push(data);
+          if (bgStream) {
+            bgStream.write(data);
+            if (bgController) noteBgTaskOutput(bgController);
+          } else buffer?.push(data);
           if (maxOutputLines !== undefined && !handedOff) {
             outputLines += data.toString("utf8").split("\n").length - 1;
             if (outputLines > maxOutputLines) handOffOnOutput?.();
@@ -195,13 +215,21 @@ export function createProjectCommandBashOperations(
             const logPath = bgLogPath(bgTask.sessionId);
             const stream = createWriteStream(logPath);
             bgStream = stream;
+            if (bgController) {
+              promoteBgTask(bgController, { command: shownCommand, logPath, startedAtMs, trigger: reason });
+            }
             for (const chunk of buffer.dump()) stream.write(chunk);
             execution.then(
               (result) => {
+                if (bgController) settleBgTask(bgController, { exitCode: result.exitCode ?? null });
+                if (bgController && wasBgTaskKilled(bgController)) return;
                 void reportBgTask(bgTask, command, logPath, startedAtMs, result.exitCode ?? null, undefined, stream);
               },
               (error: unknown) => {
-                void reportBgTask(bgTask, command, logPath, startedAtMs, null, error instanceof Error ? error.message : String(error), stream);
+                const message = error instanceof Error ? error.message : String(error);
+                if (bgController) settleBgTask(bgController, { exitCode: null, error: message });
+                if (bgController && wasBgTaskKilled(bgController)) return;
+                void reportBgTask(bgTask, command, logPath, startedAtMs, null, message, stream);
               },
             );
             release();
@@ -221,8 +249,8 @@ export function createProjectCommandBashOperations(
           // Auto-bg completion reports through bg.onEnd; a handoff already
           // rejected the promise, so settle both branches only on non-handoff.
           execution.then(
-            () => untrackBgTask(bgTask.sessionId, bgController),
-            () => untrackBgTask(bgTask.sessionId, bgController),
+            () => { if (!handedOff) untrackBgTask(bgTask.sessionId, bgController); },
+            () => { if (!handedOff) untrackBgTask(bgTask.sessionId, bgController); },
           );
         }
         execution.then((result) => {
@@ -297,8 +325,14 @@ export function createProjectCommandBashExtension(options: {
     factory: (pi) => {
       const bg = options.bgTasks;
       const displayDefinition = createBashToolDefinition(options.cwd);
+      // The prompt's own `<cwd>` section is a bare path that says nothing about where a command
+      // runs, so a model that can see the path still opens every command with `cd <cwd> && …`.
+      // The description is where this belongs: it is read again with every call, where a rule
+      // would be one line among forty.
+      const cwdNote = `Runs in \`${options.cwd}\`; do not prefix a command with \`cd\`, only to enter a subdirectory the command must run in.`;
       pi.registerTool({
         ...displayDefinition,
+        description: `${displayDefinition.description} ${cwdNote}`,
         ...(bg
           ? {
               parameters: Type.Object({
@@ -307,7 +341,7 @@ export function createProjectCommandBashExtension(options: {
                 run_in_background: Type.Optional(Type.Boolean({ description: "Run this command in the background immediately; you will be notified when it completes." })),
                 max_output_lines: Type.Optional(Type.Number({ description: "Line count before the command goes to the background. Always set it unless you already know the output is short." })),
               }),
-              description: `${displayDefinition.description} Supports background execution: pass run_in_background=true for long-running commands, or let foreground commands auto-background after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000} seconds; you are notified when a background command finishes. Never pipe a command through | tail or redirect its output with > or >>. Bound the command instead.`,
+              description: `${displayDefinition.description} ${cwdNote} Supports background execution: pass run_in_background=true for long-running commands, or let foreground commands auto-background after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000} seconds; you are notified when a background command finishes. Never pipe a command through | tail or redirect its output with > or >>. Bound the command instead.`,
               promptGuidelines: [
                 ...(displayDefinition.promptGuidelines ?? []),
                 "NEVER pipe a command through `| tail` or redirect its output with `>` or `>>`. Both end the output early, so nothing is saved to a file. Run the command plain.",
@@ -331,6 +365,7 @@ export function createProjectCommandBashExtension(options: {
             commandPrefix: options.settings.getShellCommandPrefix(),
             operations: createProjectCommandBashOperations({
               shellPath: options.settings.getShellPath(),
+              commandPrefix: options.settings.getShellCommandPrefix(),
               autoBackgroundMs: bg ? FOREGROUND_AUTO_BACKGROUND_MS : undefined,
               maxOutputLines: input.max_output_lines,
               bgTask: bg && context?.sessionManager
@@ -370,12 +405,23 @@ function startBackgroundCommand(
   const stream = createWriteStream(logPath);
   const controller = new AbortController();
   const startedAtMs = Date.now();
-  if (sessionId) trackBgTask(sessionId, controller);
+  if (sessionId) {
+    trackBgTask(sessionId, controller, {
+      command: params.command,
+      logPath,
+      startedAtMs,
+      background: true,
+      trigger: "background",
+    });
+  }
   const prefix = options.settings.getShellCommandPrefix();
   const commandText = prefix ? `${prefix}\n${params.command}` : params.command;
   const ops = createProjectCommandBashOperations({ shellPath: options.settings.getShellPath() });
   const execution = ops.exec(commandText, cwd, {
-    onData: (data) => stream.write(data),
+    onData: (data) => {
+      stream.write(data);
+      noteBgTaskOutput(controller);
+    },
     signal: controller.signal,
     timeout: params.timeout,
   });
@@ -391,8 +437,8 @@ function startBackgroundCommand(
       else if (error.startsWith("timeout:")) error = `timed out after ${error.split(":")[1]}s`;
     }
     await drainLog(stream);
-    if (sessionId) untrackBgTask(sessionId, controller);
-    if (sessionId && options.bgTasks) {
+    if (sessionId) settleBgTask(controller, { exitCode, error });
+    if (sessionId && options.bgTasks && !wasBgTaskKilled(controller)) {
       try {
         const tail = await readLogTail(logPath);
         const outcome: BgTaskOutcome = {

@@ -9,10 +9,12 @@ export interface Tab {
   id: string;
   label: string;
   filePath: string;
-  /** File tabs carry no kind: the panel's other tabs are a terminal, a sub-agent's work, or one read's slice. */
-  kind?: "terminal" | "agent" | "read-snapshot";
+  /** File tabs carry no kind: the panel's other tabs are a terminal, a sub-agent's work, one read's slice, the background-task list or one task's log. */
+  kind?: "terminal" | "agent" | "read-snapshot" | "bg-tasks" | "bg-output";
   closing?: boolean;
   sourceSessionId?: string | null;
+  /** A tab the panel always carries (background tasks) has no close button. */
+  closable?: boolean;
   initialDisplayMode?: FileViewerDisplayMode;
   /** PDF page requested by the link that opened this tab (`#page=N`). */
   page?: number;
@@ -106,7 +108,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               if (e.button !== 1) return;
               e.preventDefault();
               e.stopPropagation();
-              if (!tab.closing) onCloseTab(tab.id);
+              if (!tab.closing && tab.closable !== false) onCloseTab(tab.id);
             }}
             style={{
               display: "flex",
@@ -128,7 +130,15 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
             }}
           >
             <span style={{ flexShrink: 0, opacity: isActive ? 1 : 0.7, display: "flex", alignItems: "center" }}>
-              {tab.kind === "terminal" ? (
+              {tab.kind === "bg-output" ? (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
+                </svg>
+              ) : tab.kind === "bg-tasks" ? (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="4" y="5" width="16" height="14" rx="2" /><path d="M8 9h8M8 13h8M8 17h5" />
+                </svg>
+              ) : tab.kind === "terminal" ? (
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
                 </svg>
@@ -155,7 +165,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               onMouseEnter={() => setHoveredClose(tab.id)}
               onMouseLeave={() => setHoveredClose(null)}
               style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
+                display: tab.closable === false ? "none" : "flex", alignItems: "center", justifyContent: "center",
                 width: 24, height: 24,
                 background: hoveredClose === tab.id ? "var(--bg-hover)" : "transparent",
                 border: "none",

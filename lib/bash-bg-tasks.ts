@@ -224,34 +224,18 @@ export function createBgTaskNotifier(deps: BgTaskNotifierDependencies, sink: Set
   };
 }
 
-/** Abort controllers of live background tasks, so a destroyed session does not orphan them. */
-const sessionBgControllers = new Map<string, Set<AbortController>>();
-
-export function trackBgTask(sessionId: string, controller: AbortController): void {
-  let set = sessionBgControllers.get(sessionId);
-  if (!set) {
-    set = new Set();
-    sessionBgControllers.set(sessionId, set);
-  }
-  set.add(controller);
-}
-
-/** Whether this session still has a background command running, so a wait for one has a reason. */
-export function hasLiveBgTasks(sessionId: string): boolean {
-  const set = sessionBgControllers.get(sessionId);
-  return set !== undefined && set.size > 0;
-}
-
-export function untrackBgTask(sessionId: string, controller: AbortController): void {
-  const set = sessionBgControllers.get(sessionId);
-  if (!set) return;
-  set.delete(controller);
-  if (set.size === 0) sessionBgControllers.delete(sessionId);
-}
-
-export function killBgTasksForSession(sessionId: string): void {
-  const set = sessionBgControllers.get(sessionId);
-  if (!set) return;
-  sessionBgControllers.delete(sessionId);
-  for (const controller of set) controller.abort();
-}
+// The live-task registry lives on `globalThis` (lib/bg-task-registry.ts), because the routes that list
+// and stop a task are bundled into another module graph than this one.
+export {
+  getBgTask,
+  hasLiveBgTasks,
+  killBgTask,
+  killBgTasksForSession,
+  listBgTasks,
+  noteBgTaskOutput,
+  promoteBgTask,
+  settleBgTask,
+  trackBgTask,
+  untrackBgTask,
+  wasBgTaskKilled,
+} from "./bg-task-registry";

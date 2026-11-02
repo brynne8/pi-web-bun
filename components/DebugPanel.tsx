@@ -24,7 +24,6 @@ import {
   EMPTY_DEBUG_SAMPLES,
   EMPTY_DEBUG_SERVER_READING,
   barFraction,
-  createDebugPanelEscapeListener,
   createDebugPoller,
   debugHolderLabel,
   debugHolderTone,
@@ -80,7 +79,7 @@ import {
 } from "./debug-panel-state";
 
 /**
- * The top bar's Debug panel: how this page talks to the server (its event stream, its lease, the
+ * The right rail's Debug tab: how this page talks to the server (its event stream, its lease, the
  * other streams it holds) and what the server holds for the selected session and overall. It only
  * reads: the chat's snapshot through a reader that reads refs, page-level bookkeeping
  * (lib/page-debug.ts), and `GET /api/agent/debug` every 2 s, which starts, renews and reconnects
@@ -94,8 +93,11 @@ interface Props {
   selectedSessionId: string | null;
   /** AppShell's session catalog: names and projects for the sessions the server lists. */
   sessions: readonly SessionInfo[];
-  /** Escape; `restoreFocus`: focus was inside the panel, so it goes back to the Debug button. */
-  onClose(restoreFocus: boolean): void;
+  /**
+   * Inside another panel (the right rail's activity view): no shell of its own, so the host owns
+   * the scroll, the padding and the section heading above it.
+   */
+  embedded?: boolean;
 }
 
 /** Keeps a render error in the panel from taking the page down with it. */
@@ -123,16 +125,15 @@ export class DebugPanelBoundary extends Component<{ fallback: string; children: 
   }
 }
 
-export function DebugPanel({ readerRef, selectedSessionId, sessions, onClose }: Props) {
+export function DebugPanel({ readerRef, selectedSessionId, sessions, embedded = false }: Props) {
   const { t } = useI18n();
   const selectedRef = useRef(selectedSessionId);
   selectedRef.current = selectedSessionId;
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
   const pollerRef = useRef<DebugPoller | null>(null);
   const disposedRef = useRef(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sectionRef = useRef<HTMLElement | null>(null);
+  // The panel's element, for the tooltip-hold listener below.
+  const panelRef = useRef<HTMLElement | null>(null);
   // The running poll's last record seen, so each poll is one sample.
   const lastRunningAtRef = useRef<number | null>(null);
   const [page, setPage] = useState<DebugPageReading | null>(null);
@@ -147,7 +148,7 @@ export function DebugPanel({ readerRef, selectedSessionId, sessions, onClose }: 
   liveRef.current = { page, server, samples };
 
   useEffect(() => {
-    const section = sectionRef.current;
+    const section = panelRef.current;
     if (!section) return;
     let heldOn: Element | null = null;
     const onPointerOver = (event: PointerEvent) => {
@@ -226,19 +227,6 @@ export function DebugPanel({ readerRef, selectedSessionId, sessions, onClose }: 
     pollerRef.current?.sync();
   }, [selectedSessionId]);
 
-  // Escape closes the panel. On `document`, so it runs after whatever is nearer (a menu, ChatInput
-  // stopping a run, React's own handlers, which run from `document` first) and before the window's
-  // Stop shortcut, which a handled Escape skips.
-  useEffect(() => {
-    const handleKeyDown = createDebugPanelEscapeListener(
-      document,
-      () => sectionRef.current,
-      (restoreFocus) => onCloseRef.current(restoreFocus),
-    );
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
   const handleCopy = () => {
     const payload = { client: page, server: server.reply };
     void copyText(JSON.stringify(payload, null, 2)).then(() => {
@@ -260,7 +248,8 @@ export function DebugPanel({ readerRef, selectedSessionId, sessions, onClose }: 
       copied={copied}
       onCopy={handleCopy}
       t={t}
-      sectionRef={sectionRef}
+      panelRef={panelRef}
+      embedded={embedded}
     />
   );
 }
@@ -281,8 +270,10 @@ interface ViewProps {
   copied: boolean;
   onCopy(): void;
   t: Translate;
-  /** The panel's element, for the Escape that closes it to tell whether focus was inside. */
-  sectionRef?: Ref<HTMLElement>;
+  /** The panel's element, for the tooltip-hold listener; read only in an effect. */
+  panelRef?: Ref<HTMLElement>;
+  /** Inside another panel: the host owns the scroll and the heading above this one. */
+  embedded?: boolean;
 }
 
 /** What every part of the view reads. */
@@ -298,7 +289,7 @@ interface Ctx {
 }
 
 /** The panel itself, from what DebugPanel read; pure, so tests render it from fixtures. */
-export function DebugPanelView({ page, server, samples = EMPTY_DEBUG_SAMPLES, selectedSessionId, sessions, copied, onCopy, t, sectionRef }: ViewProps) {
+export function DebugPanelView({ page, server, samples = EMPTY_DEBUG_SAMPLES, selectedSessionId, sessions, copied, onCopy, t, panelRef, embedded = false }: ViewProps) {
   const now = page?.at ?? server.receivedAt ?? 0;
   const client = page?.client ?? null;
   const targetSessionId = debugTargetSessionId(client, selectedSessionId);
@@ -319,11 +310,15 @@ export function DebugPanelView({ page, server, samples = EMPTY_DEBUG_SAMPLES, se
   const ctx: Ctx = { t, now, clock, myHolder, titleOf };
 
   return (
-    <section ref={sectionRef} className="debug-panel" aria-label={t("debug.panelLabel")}>
+    <section ref={panelRef} className={`debug-panel${embedded ? " is-embedded" : ""}`} aria-label={t("debug.panelLabel")}>
       <div className="debug-panel-header">
-        <span className="debug-panel-heading" title={t("debug.readOnly")}>{t("debug.title")}</span>
-        {/* Plain text, no live region: a screen reader would read out every change. */}
-        <VerdictView verdict={verdict} t={t} />
+        {!embedded && (
+          <>
+            <span className="debug-panel-heading" title={t("debug.readOnly")}>{t("debug.title")}</span>
+            {/* Plain text, no live region: a screen reader would read out every change. */}
+            <VerdictView verdict={verdict} t={t} />
+          </>
+        )}
         <button type="button" className="debug-panel-copy" onClick={onCopy} title={t("debug.copyTitle")}>
           {copied ? t("debug.copied") : t("debug.copyJson")}
         </button>
@@ -1473,18 +1468,33 @@ function SessionRowCells({ summary, mine, remaining, idleTimeoutMs, t, badges, i
 // jump once a second. Narrow rules follow the panel's own width, not the window's.
 const DEBUG_PANEL_CSS = `
   .debug-panel {
-    --dbg-ok: #16a34a;
-    --dbg-warn: #d97706;
-    --dbg-err: #ef4444;
+    --dbg-ok: var(--act-ok, #16a34a);
+    --dbg-warn: var(--act-warn, #d97706);
+    --dbg-err: var(--act-err, #ef4444);
     container-type: inline-size;
     container-name: debug-panel;
     display: flex;
-    max-height: min(720px, 80dvh);
+    height: 100%;
+    min-height: 0;
     flex-direction: column;
-    background: var(--bg-panel);
-    border-bottom: 1px solid var(--border);
-    box-shadow: 0 10px 28px rgba(0,0,0,0.10);
+    background: var(--bg);
     color: var(--text);
+  }
+  .debug-panel.is-embedded {
+    height: auto;
+    min-height: 0;
+    background: transparent;
+  }
+  .debug-panel.is-embedded .debug-panel-header {
+    padding: 0 0 6px;
+    border-bottom: none;
+    background: transparent;
+    font-size: 11px;
+  }
+  .debug-panel.is-embedded .debug-panel-scroll {
+    overflow: visible;
+    padding: 0;
+    gap: 10px;
   }
   .debug-panel .is-ok { color: var(--dbg-ok); }
   .debug-panel .is-warning { color: var(--dbg-warn); }

@@ -14,8 +14,9 @@ import { BranchNavigator, hasSessionBranches } from "./BranchNavigator";
 import { SystemPromptPanel } from "./SystemPromptPanel";
 import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
 import { AgentSessionPanel } from "./AgentSessionPanel";
-import { DebugPanelBoundary } from "./DebugPanel";
 import type { ReadSnapshot } from "@/lib/read-snapshot";
+import type { BgTaskSummary } from "@/lib/bg-task-types";
+import { BgTaskOutputView } from "./BgTaskOutputView";
 // The terminal brings @xterm with it, which nothing on the first page needs:
 // its chunk loads when the first terminal tab mounts.
 const TerminalPanel = lazy(() =>
@@ -33,8 +34,8 @@ const SubagentViewer = lazy(() =>
 const ReadSnapshotViewer = lazy(() =>
   import("./ReadSnapshotViewer").then((module) => ({ default: module.ReadSnapshotViewer })),
 );
-const DebugPanel = lazy(() =>
-  import("./DebugPanel").then((module) => ({ default: module.DebugPanel })),
+const BackgroundTasksPanel = lazy(() =>
+  import("./BackgroundTasksPanel").then((module) => ({ default: module.BackgroundTasksPanel })),
 );
 const SettingsPanel = lazy(() =>
   import("./SettingsPanel").then((module) => ({ default: module.SettingsPanel })),
@@ -53,6 +54,7 @@ import { useAudio } from "@/hooks/useAudio";
 import { copyText } from "@/lib/clipboard";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { getFileName } from "@/lib/file-paths";
+import { sessionDisplayTitle } from "@/lib/session-fork-name";
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import {
   claimExtensionAttentionNotification,
@@ -60,6 +62,7 @@ import {
   showBrowserNotification,
 } from "@/lib/browser-notifications";
 import { setupPushSubscription } from "@/lib/push-client";
+import { useBgTasks } from "@/hooks/useBgTasks";
 import { startPageVisibilityTracking } from "@/lib/page-debug";
 import type { DebugClientSession } from "@/lib/debug-types";
 import { getInitialNavigation, linkedSessionId, withTabOpen } from "@/lib/initial-navigation";
@@ -101,7 +104,6 @@ import type { FileViewerState } from "@/lib/file-viewer-state";
 import { PRESET_READ_ONLY, type ToolEntry } from "@/lib/tool-presets";
 import { getAgentsBadge, getFoldedMoreAgentsBadge, getSessionFamily } from "@/lib/session-family";
 import { getLastSettingsSection, settingsSectionRequiresProject, type SettingsSection } from "@/lib/settings-navigation";
-import { focusIfLost } from "@/lib/stacked-dialog";
 
 type SessionCopyField = "file" | "id" | "projectDir" | "gitBranch" | "gitWorktree";
 type AutoNameStatus =
@@ -127,6 +129,12 @@ function lastAgentTabId(tabs: readonly { sessionId: string }[]): string | null {
 function lastReadTabId(tabs: readonly { toolCallId: string }[]): string | null {
   const last = tabs.at(-1);
   return last ? `read:${last.toolCallId}` : null;
+}
+
+/** Panel tab id of the last background-task log tab, or null when there is none. */
+function lastBgOutputTabId(tabs: readonly { taskId: string }[]): string | null {
+  const last = tabs.at(-1);
+  return last ? `bg:${last.taskId}` : null;
 }
 
 export function AppShell() {
@@ -202,6 +210,10 @@ export function AppShell() {
     () => getSessionFamily(sessionsWithSelection, selectedSession?.id),
     [selectedSession?.id, sessionsWithSelection],
   );
+  const bgTaskSessionTitles = useMemo(
+    () => new Map(sessionsWithSelection.map((session) => [session.id, sessionDisplayTitle(session)])),
+    [sessionsWithSelection],
+  );
   const hasSubagentSessions = Boolean(activeSessionFamily?.subagents.length);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const handleRunningSessionIdsChange = useCallback((ids: Set<string>) => {
@@ -263,6 +275,7 @@ export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(() => !initialNavigation.sidebarCollapsed);
   const desktopSidebarOpenRef = useRef(!initialNavigation.sidebarCollapsed);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const { tasks: bgTasks, runningCount: bgTaskRunningCount, refresh: refreshBgTasks } = useBgTasks();
   const [rightPanelExpanded, setRightPanelExpanded] = useState(false);
   const rightPanelFullWidth = rightPanelOpen && rightPanelExpanded && !isMobile;
   useEffect(() => {
@@ -432,7 +445,7 @@ export function AppShell() {
   }, []);
 
   // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "session" | "debug" | null>(null);
+  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "session" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   useEffect(() => {
@@ -452,24 +465,13 @@ export function AppShell() {
   }, [rightPanelFullWidth]);
 
   const toggleTopPanel = useCallback((
-    panel: "agents" | "branches" | "system" | "tools" | "session" | "debug",
+    panel: "agents" | "branches" | "system" | "tools" | "session",
     keepMobileToolbarOpen = false,
   ) => {
     if (isMobile) setSidebarOpen(false);
     setActiveTopPanel((cur) => cur === panel ? null : panel);
     if (isMobile && isNarrowMobile && keepMobileToolbarOpen) setMobileToolbarMoreOpen(true);
   }, [isMobile, isNarrowMobile]);
-
-  // The Debug button on screen (one of its three places at a time); Escape gives focus back to it.
-  const debugButtonRef = useRef<HTMLButtonElement | null>(null);
-
-  // Escape inside the debug panel; it never closes another panel that took its place. With focus
-  // in the panel, that focus leaves the page with it: once the panel is gone (the next frame), the
-  // Debug button gets it back, unless the user moved it meanwhile (focusIfLost).
-  const closeDebugPanel = useCallback((restoreFocus: boolean) => {
-    setActiveTopPanel((panel) => panel === "debug" ? null : panel);
-    if (restoreFocus) requestAnimationFrame(() => focusIfLost(document, debugButtonRef.current));
-  }, []);
 
   // Read once, by whichever panel needs it: the System and Tools panels above the
   // chat, and Settings › Tools' list of the session's tools.
@@ -532,6 +534,7 @@ export function AppShell() {
       setActiveTopPanel(null);
       setMobileToolbarMoreOpen(false);
     }
+    setActiveFileTabId((current) => current ?? "bg-tasks");
     setRightPanelOpen((open) => !open);
   }, [isMobile]);
 
@@ -589,7 +592,7 @@ export function AppShell() {
 
   // Files unmount when inactive; workspace terminals stay mounted until closed.
   const [fileTabs, setFileTabs] = useState<Tab[]>([]);
-  const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null);
+  const [activeFileTabId, setActiveFileTabId] = useState<string | null>("bg-tasks");
   const fileWorkspaceStatesRef = useRef(new Map<string, ParkedFileWorkspace>());
   // Bumped on every workspace switch. The active viewer reports its state as
   // it unmounts, tagged with the generation it rendered in, so the report of a
@@ -604,7 +607,24 @@ export function AppShell() {
   // Read snapshots are as transient as sub-agent tabs: each holds the slice one
   // `read` call returned, which only this chat's messages carry.
   const [readTabs, setReadTabs] = useState<{ toolCallId: string; snapshot: ReadSnapshot }[]>([]);
+  // A background task's log: one tab per task, opened from the activity view's grid.
+  const [bgOutputTabs, setBgOutputTabs] = useState<{ taskId: string; label: string }[]>([]);
   const panelTabs: Tab[] = [
+    {
+      id: "bg-tasks",
+      label: bgTaskRunningCount > 0
+        ? translate("bgTasks.tabCount", { count: bgTaskRunningCount })
+        : translate("bgTasks.tab"),
+      filePath: translate("bgTasks.tab"),
+      kind: "bg-tasks" as const,
+      closable: false,
+    },
+    ...bgOutputTabs.map((tab) => ({
+      id: `bg:${tab.taskId}`,
+      label: tab.label,
+      filePath: tab.label,
+      kind: "bg-output" as const,
+    })),
     ...fileTabs,
     ...terminalTabs.map((tab) => ({
       id: tab.id,
@@ -906,7 +926,7 @@ export function AppShell() {
     setSystemTools(null);
     setSystemInfoLoading(false);
     // The debug panel stays open across the switch: it follows whichever session is shown.
-    setActiveTopPanel((panel) => panel === "debug" ? panel : null);
+    setActiveTopPanel(null);
     if (currentProject !== newProject) {
       // Keep #281's project isolation, but park each workspace's file tabs
       // instead of discarding them so they return when the user switches back.
@@ -931,7 +951,7 @@ export function AppShell() {
     const projectKey = workspaceKeyOf(session);
     if (activeProjectKeyRef.current !== projectKey) {
       changeFileWorkspace(activeProjectKeyRef.current, projectKey);
-      setActiveTopPanel((panel) => panel === "debug" ? panel : null);
+      setActiveTopPanel(null);
     }
     activeProjectKeyRef.current = projectKey;
     // Re-clicking the already-open session must not remount the chat and
@@ -1013,7 +1033,7 @@ export function AppShell() {
     setSystemPrompt(null);
     setSystemTools(null);
     setSystemInfoLoading(false);
-    setActiveTopPanel((panel) => panel === "debug" ? panel : null);
+    setActiveTopPanel(null);
     if (isMobile) setSidebarOpen(false);
     router.replace(`?cwd=${encodeURIComponent(cwd)}`, { scroll: false });
     // The fresh composer takes the caret once it renders (#1313), unless the
@@ -1251,7 +1271,7 @@ export function AppShell() {
       setSystemPrompt(null);
       setSystemTools(null);
       setSystemInfoLoading(false);
-      setActiveTopPanel((panel) => panel === "debug" ? panel : null);
+      setActiveTopPanel(null);
       router.replace(cwd ? `?cwd=${encodeURIComponent(cwd)}` : (typeof window !== "undefined" ? window.location.pathname : "/"), { scroll: false });
     }
   }, [invalidateWorkspaceRestore, router]);
@@ -1278,6 +1298,15 @@ export function AppShell() {
     // On mobile the file panel is full-screen; close the drawer so it shows.
     if (isMobile) setSidebarOpen(false);
   }, [isMobile]);
+
+  const handleOpenBgOutputTab = useCallback((taskId: string) => {
+    const task = bgTasks.find((item) => item.id === taskId);
+    const label = task ? (task.command.split("\n")[0] || taskId) : taskId;
+    setBgOutputTabs((prev) => prev.some((tab) => tab.taskId === taskId) ? prev : [...prev, { taskId, label }]);
+    setActiveFileTabId(`bg:${taskId}`);
+    setRightPanelOpen(true);
+    if (isMobile) setSidebarOpen(false);
+  }, [bgTasks, isMobile]);
 
   const handleOpenLinkedFile = useCallback((filePath: string, page?: number) => {
     handleOpenFile(filePath, getFileName(filePath), { sourceSessionId: selectedSession?.id ?? null, page });
@@ -1333,7 +1362,7 @@ export function AppShell() {
     const replacement = tab.closing === "restart" ? newTerminalTab(tab.cwd) : null;
     const remaining = terminalTabs.filter((item) => item.id !== tab.id);
     setTerminalTabs((tabs) => tabs.flatMap((item) => item.id !== tab.id ? [item] : replacement ? [replacement] : []));
-    setActiveFileTabId((current) => current !== tab.id ? current : replacement?.id ?? remaining.at(-1)?.id ?? fileTabs.at(-1)?.id ?? lastAgentTabId(agentTabs) ?? lastReadTabId(readTabs));
+    setActiveFileTabId((current) => current !== tab.id ? current : replacement?.id ?? remaining.at(-1)?.id ?? fileTabs.at(-1)?.id ?? lastAgentTabId(agentTabs) ?? lastReadTabId(readTabs) ?? lastBgOutputTabId(bgOutputTabs) ?? "bg-tasks");
     if (!replacement && !remaining.length && !fileTabs.length && !agentTabs.length && !readTabs.length) setRightPanelOpen(false);
   };
 
@@ -1347,9 +1376,20 @@ export function AppShell() {
       setAgentTabs(remainingAgents);
       setActiveFileTabId((cur) => {
         if (cur !== tabId) return cur;
-        return fileTabs.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(remainingAgents) ?? lastReadTabId(readTabs);
+        return fileTabs.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(remainingAgents) ?? lastReadTabId(readTabs) ?? lastBgOutputTabId(bgOutputTabs) ?? "bg-tasks";
       });
       if (fileTabs.length === 0 && terminalTabs.length === 0 && remainingAgents.length === 0 && readTabs.length === 0) setRightPanelOpen(false);
+      return;
+    }
+    if (tabId.startsWith("bg:")) {
+      const taskId = tabId.slice("bg:".length);
+      const remainingBg = bgOutputTabs.filter((tab) => tab.taskId !== taskId);
+      setBgOutputTabs(remainingBg);
+      setActiveFileTabId((cur) => {
+        if (cur !== tabId) return cur;
+        return fileTabs.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(agentTabs) ?? lastReadTabId(readTabs) ?? lastBgOutputTabId(remainingBg) ?? "bg-tasks";
+      });
+      if (fileTabs.length === 0 && terminalTabs.length === 0 && agentTabs.length === 0 && readTabs.length === 0 && remainingBg.length === 0) setRightPanelOpen(false);
       return;
     }
     if (tabId.startsWith("read:")) {
@@ -1357,7 +1397,7 @@ export function AppShell() {
       setReadTabs(remainingReads);
       setActiveFileTabId((cur) => {
         if (cur !== tabId) return cur;
-        return fileTabs.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(agentTabs) ?? lastReadTabId(remainingReads);
+        return fileTabs.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(agentTabs) ?? lastReadTabId(remainingReads) ?? lastBgOutputTabId(bgOutputTabs) ?? "bg-tasks";
       });
       if (fileTabs.length === 0 && terminalTabs.length === 0 && agentTabs.length === 0 && remainingReads.length === 0) setRightPanelOpen(false);
       return;
@@ -1370,9 +1410,9 @@ export function AppShell() {
     setActiveFileTabId((cur) => {
       if (cur !== tabId) return cur;
       const remaining = fileTabs.filter((t) => t.id !== tabId);
-      return remaining.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(agentTabs) ?? lastReadTabId(readTabs);
+      return remaining.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(agentTabs) ?? lastReadTabId(readTabs) ?? lastBgOutputTabId(bgOutputTabs) ?? "bg-tasks";
     });
-  }, [fileTabs, terminalTabs, agentTabs, readTabs]);
+  }, [fileTabs, terminalTabs, agentTabs, readTabs, bgOutputTabs]);
 
   const handleViewFullHistory = useCallback(() => {
     if (!selectedSession) return;
@@ -1447,7 +1487,7 @@ export function AppShell() {
 
   // The Debug button shows with a chat only: without one, its panel would have nothing to close it.
   useEffect(() => {
-    if (!showChat) setActiveTopPanel((panel) => panel === "debug" ? null : panel);
+    if (!showChat) setActiveTopPanel(null);
   }, [showChat]);
 
   useEffect(() => {
@@ -1514,7 +1554,13 @@ export function AppShell() {
     if (cwd === projectTrustCwd) setProjectTrust(status);
   }, [projectTrustCwd]);
 
+  const parkedBgOutputTasks = useRef<Map<string, BgTaskSummary>>(new Map());
+  useEffect(() => {
+    for (const task of bgTasks) parkedBgOutputTasks.current.set(task.id, task);
+  }, [bgTasks]);
   const activeFileTab = fileTabs.find((tab) => tab.id === activeFileTabId) ?? null;
+  const activeBgTasksTab = activeFileTabId === "bg-tasks";
+  const activeBgOutputTab = bgOutputTabs.find((tab) => `bg:${tab.taskId}` === activeFileTabId) ?? null;
   // Subagent work tabs: like files, only the active one is mounted.
   const activeAgentTab = agentTabs.find((tab) => `agent:${tab.sessionId}` === activeFileTabId) ?? null;
   // Read snapshots likewise: their content is already in hand, so mounting one costs a render.
@@ -2033,7 +2079,6 @@ export function AppShell() {
         className={mobile ? "mobile-session-stats" : undefined}
         data-mobile-toolbar-stats={mobile ? "true" : undefined}
         style={{
-          // The Debug button before it takes the free space (renderDebugButton).
           marginLeft: 0,
           display: "flex", alignItems: "center", justifyContent: "flex-end",
           flex: mobile ? 1 : undefined,
@@ -2139,47 +2184,6 @@ export function AppShell() {
     );
   };
 
-  // Icon only, right of the chat's actions; on a desktop it takes the bar's free space, so it
-  // sits left of the session stats. It only opens or closes its panel: nothing is loaded here.
-  const renderDebugButton = (mobile: boolean) => {
-    if (!showChat) return null;
-    const open = activeTopPanel === "debug";
-    return (
-      <button
-        ref={debugButtonRef}
-        type="button"
-        onClick={() => toggleTopPanel("debug", mobile)}
-        title={translate("debug.title")}
-        aria-label={translate("debug.title")}
-        aria-pressed={open}
-        style={{
-          marginLeft: mobile ? 0 : "auto",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          width: TOP_BAR_ICON_BUTTON_SIZE, height: "100%", padding: 0,
-          background: open ? "var(--bg-selected)" : "none",
-          border: "none",
-          borderTop: open ? "2px solid var(--accent)" : "2px solid transparent",
-          ...(mobile ? { borderRight: "1px solid var(--border)" } : { borderLeft: "1px solid var(--border)" }),
-          color: open ? "var(--text)" : "var(--text-muted)",
-          cursor: "pointer", flexShrink: 0, transition: "color 0.1s, background 0.1s",
-        }}
-        onMouseEnter={(event) => {
-          event.currentTarget.style.color = "var(--text)";
-        }}
-        onMouseLeave={(event) => {
-          event.currentTarget.style.color = open ? "var(--text)" : "var(--text-muted)";
-        }}
-        data-mobile-toolbar-action={mobile ? "debug" : undefined}
-      >
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: open ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }} aria-hidden="true">
-          <path d="M8 2l1.9 1.9M16 2l-1.9 1.9M9 7.1v-1a3 3 0 0 1 6 0v1" />
-          <path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6zM12 20v-9" />
-          <path d="M6.5 9C4.6 8.8 3 7.1 3 5M6 13H2M3 21c0-2.1 1.7-3.9 3.8-4M21 5c0 2.1-1.6 3.8-3.5 4M22 13h-4M17.2 17c2.1.1 3.8 1.9 3.8 4" />
-        </svg>
-      </button>
-    );
-  };
-
   const renderMainFileToggle = (mobile: boolean) => {
     const covered = mobile && isNarrowMobile && mobileToolbarMoreOpen;
     return (
@@ -2195,9 +2199,9 @@ export function AppShell() {
         aria-label={rightPanelOpen ? translate("files.hidePanel") : translate("files.showPanel")}
         data-mobile-toolbar-file={mobile ? "true" : undefined}
         style={{
-          // With a chat the Debug button is right-aligned instead (renderDebugButton).
           marginLeft: !mobile && !showChat ? "auto" : 0,
           display: "flex", alignItems: "center", justifyContent: "center",
+          position: "relative",
           width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
           visibility: covered ? "hidden" : "visible",
           pointerEvents: covered ? "none" : "auto",
@@ -2212,6 +2216,18 @@ export function AppShell() {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
         </svg>
+        {bgTaskRunningCount > 0 && (
+          <span
+            aria-hidden="true"
+            style={{
+              position: "absolute", top: 3, right: 3, minWidth: 13, height: 13, padding: "0 3px",
+              borderRadius: 7, background: "var(--accent)", color: "var(--bg)",
+              fontSize: 9, fontWeight: 700, lineHeight: "13px", textAlign: "center",
+            }}
+          >
+            {bgTaskRunningCount > 9 ? "9+" : bgTaskRunningCount}
+          </span>
+        )}
       </button>
     );
   };
@@ -2431,7 +2447,6 @@ export function AppShell() {
                 </button>
               )}
               {!isNarrowMobile && renderChatToolbarActions(true)}
-              {!isNarrowMobile && renderDebugButton(true)}
               {renderSessionStatsButton(true)}
               {renderMainFileToggle(true)}
               {isNarrowMobile && mobileToolbarMoreOpen && (
@@ -2459,7 +2474,6 @@ export function AppShell() {
                   }}
                 >
                   {renderChatToolbarActions(true)}
-                  {renderDebugButton(true)}
                 </div>
               )}
             </div>
@@ -2468,7 +2482,6 @@ export function AppShell() {
             <>
               {renderProjectTrustWarning(false)}
               {renderChatToolbarActions(false)}
-              {renderDebugButton(false)}
               {renderSessionStatsButton(false)}
             </>
           )}
@@ -2719,16 +2732,6 @@ export function AppShell() {
                   )}
                 </div>
               )}
-              {activeTopPanel === "debug" && (
-                <DebugPanelBoundary fallback={translate("debug.failed")}>
-                  <DebugPanel
-                    readerRef={debugSnapshotReaderRef}
-                    selectedSessionId={selectedSession?.id ?? null}
-                    sessions={sessionsWithSelection}
-                    onClose={closeDebugPanel}
-                  />
-                </DebugPanelBoundary>
-              )}
             </div>
           )}
 
@@ -2939,11 +2942,35 @@ export function AppShell() {
                 )}
               />
             </Suspense>
-          ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) && !activeAgentTab && !activeReadTab ? (
+          ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) && !activeAgentTab && !activeReadTab && !activeBgTasksTab && !activeBgOutputTab ? (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
                {translate("files.noneOpen")}
             </div>
           ) : null}
+          {activeBgTasksTab && (
+            <Suspense fallback={null}>
+              <BackgroundTasksPanel
+                tasks={bgTasks}
+                sessionTitles={bgTaskSessionTitles}
+                onOpenTask={handleOpenBgOutputTab}
+                onRefresh={refreshBgTasks}
+                debug={{
+                  readerRef: debugSnapshotReaderRef,
+                  selectedSessionId: selectedSession?.id ?? null,
+                  sessions: sessionsWithSelection,
+                }}
+              />
+            </Suspense>
+          )}
+          {activeBgOutputTab && (
+            <Suspense fallback={null}>
+              <BgTaskOutputView
+                key={activeBgOutputTab.taskId}
+                task={bgTasks.find((task) => task.id === activeBgOutputTab.taskId) ?? parkedBgOutputTasks.current.get(activeBgOutputTab.taskId)!}
+                sessionTitles={bgTaskSessionTitles}
+              />
+            </Suspense>
+          )}
           {terminalTabs.map((tab) => (
             <div key={tab.id} hidden={tab.id !== activeFileTabId} style={{ width: "100%", height: "100%" }}>
               <Suspense fallback={null}>

@@ -12,13 +12,13 @@ const { renderToStaticMarkup } = await jiti.import("react-dom/server");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 const { DebugPanelView } = await jiti.import("./DebugPanel.tsx");
 const { EMPTY_DEBUG_SERVER_READING } = await jiti.import("./debug-panel-state.ts");
-const { focusIfLost } = await jiti.import("@/lib/stacked-dialog.ts");
 const { enLocale } = await jiti.import("@/lib/i18n/messages/en.ts");
 const { zhCNLocale } = await jiti.import("@/lib/i18n/messages/zh-CN.ts");
 const { interpolateMessage } = await jiti.import("@/lib/i18n/format.ts");
 const panelSource = await readFile(new URL("./DebugPanel.tsx", import.meta.url), "utf8");
 const shellSource = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
 const sidebarSource = await readFile(new URL("./SessionSidebar.tsx", import.meta.url), "utf8");
+const activitySource = await readFile(new URL("./BackgroundTasksPanel.tsx", import.meta.url), "utf8");
 
 const h = React.createElement;
 const SECOND = 1000;
@@ -696,9 +696,15 @@ test("the panel keeps to the theme and to Safari 16.2: tokens, the three state c
   assert.match(css, /\.debug-measure-sub,\s*\.debug-measure-empty \{\s*grid-column: 2 \/ -1;\s*width: 0;\s*min-width: 100%;/);
   assert.doesNotMatch(outside, /\{[^}]*\{/, "no nested rule");
   assert.match(css, /container-type: inline-size;\s*container-name: debug-panel;/);
+  // A rail tab fills its panel: no drop-down height, no shadow, no bottom rule.
+  assert.match(css, /\.debug-panel \{\s*--dbg-ok: var\(--act-ok, #16a34a\);\s*--dbg-warn: var\(--act-warn, #d97706\);\s*--dbg-err: var\(--act-err, #ef4444\);\s*container-type: inline-size;\s*container-name: debug-panel;\s*display: flex;\s*height: 100%;\s*min-height: 0;\s*flex-direction: column;\s*background: var\(--bg\);\s*color: var\(--text\);\s*\}/);
+  assert.doesNotMatch(css, /max-height|box-shadow: 0 /);
+  // Embedded in the activity view: the host owns the scroll, the padding and the heading.
+  assert.match(css, /\.debug-panel\.is-embedded \{\s*height: auto;\s*min-height: 0;\s*background: transparent;\s*\}/);
+  assert.match(css, /\.debug-panel\.is-embedded \.debug-panel-scroll \{\s*overflow: visible;\s*padding: 0;\s*gap: 10px;\s*\}/);
   assert.match(css, /@container debug-panel \(max-width: 520px\)/);
-  // Escape on document (before the window's Stop shortcut), and nothing that keeps a session alive.
-  assert.match(panelSource, /document\.addEventListener\("keydown", handleKeyDown\)/);
+  // A rail tab has no Escape: it closes like every other tab. Nothing keeps a session alive.
+  assert.doesNotMatch(panelSource, /addEventListener\("keydown"/);
   assert.doesNotMatch(panelSource, /\/lease|\/events|EventSource|sendAgentCommand|method: "POST"/);
   // The sidebar shows nothing: the panel writes no labels anywhere.
   assert.doesNotMatch(panelSource, /debug-overlay-store|setDebugOverlay/);
@@ -721,45 +727,36 @@ test("a tooltip holds the view still: the mouse on a titled element freezes what
   assert.match(panelSource, /const shown = held \?\? \{ page, server, samples \};/);
 });
 
-test("the Debug button only toggles its panel, left of the session stats", () => {
-  const button = between(shellSource, "const renderDebugButton = (mobile: boolean) => {", "const renderMainFileToggle");
-  assert.match(button, /onClick=\{\(\) => toggleTopPanel\("debug", mobile\)\}/);
-  assert.doesNotMatch(button, /handleSystemInfoToggle|sendAgentCommand|fetch\(|setSessionKey|loadSession|systemInfoLoaderRef/);
-  assert.match(button, /aria-label=\{translate\("debug\.title"\)\}/);
-  assert.match(button, /aria-pressed=\{open\}/);
-  assert.match(button, /data-mobile-toolbar-action=\{mobile \? "debug" : undefined\}/);
-  assert.match(button, /if \(!showChat\) return null;/);
-  assert.notEqual(enLocale.messages["debug.title"], enLocale.messages["session.title"], "e2e finds the stats button by its own name");
+test("the debug read-out is fused into the rail's activity view, not a tab of its own", () => {
+  // The top bar has no Debug button any more: the button, its ref and its close handler are gone.
+  assert.doesNotMatch(shellSource, /renderDebugButton|debugButtonRef|closeDebugPanel|toggleTopPanel\("debug"/);
+  // One tab the rail always carries, without a close button, ahead of whatever is open.
+  assert.match(shellSource, /const panelTabs: Tab\[\] = \[\s*\{\s*id: "bg-tasks",[^]*?kind: "bg-tasks" as const,\s*closable: false,\s*\},/);
+  assert.doesNotMatch(shellSource, /id: "debug",/);
+  // The read-out is a section of the activity view, which hands it the chat's reader and catalog.
+  const activity = between(activitySource, "export function BackgroundTasksPanel", "const ACTIVITY_PANEL_CSS");
+  assert.match(activity, /<DebugPanel\s+readerRef=\{debug\.readerRef\}\s+selectedSessionId=\{debug\.selectedSessionId\}\s+sessions=\{debug\.sessions\}\s+embedded\s*\/>/);
+  // Connections and sessions come first: they are the context, one light line each, and a grid of
+  // task cards is the heavy content that would push them out of sight the other way round.
+  const head = between(activitySource, "const head = (", "};");
+  assert.match(head, /className="activity-head"[\s\S]*?className="activity-title"/);
+  const firstReturn = between(activitySource, "return (\n    <div className=\"activity-panel\">", "const ACTIVITY_PANEL_CSS");
+  const connectionsAt = firstReturn.indexOf('t("activity.connections")');
+  const commandsAt = firstReturn.indexOf('t("bgTasks.title")}');
+  assert.ok(connectionsAt !== -1 && commandsAt !== -1, "both sections are titled");
+  assert.ok(connectionsAt < commandsAt, "connections and sessions come before the commands");
+  // The head is shared by the empty and the full state.
+  assert.equal((activitySource.match(/\{head\}/g) ?? []).length, 2);
 
-  // Desktop: after the chat's actions, right before the stats, taking the free space.
-  assert.match(shellSource, /\{renderChatToolbarActions\(false\)\}\s*\{renderDebugButton\(false\)\}\s*\{renderSessionStatsButton\(false\)\}/);
-  assert.match(button, /marginLeft: mobile \? 0 : "auto"/);
-  const stats = between(shellSource, "const renderSessionStatsButton = (mobile: boolean) => {", "const renderDebugButton");
-  assert.match(stats, /\n\s*marginLeft: 0,/);
-  assert.match(shellSource, /marginLeft: !mobile && !showChat \? "auto" : 0,/);
-  // Phones: before the stats on a wide one, in the "more" overlay on a narrow one.
-  assert.match(shellSource, /\{!isNarrowMobile && renderChatToolbarActions\(true\)\}\s*\{!isNarrowMobile && renderDebugButton\(true\)\}\s*\{renderSessionStatsButton\(true\)\}/);
-  assert.match(shellSource, /\{renderChatToolbarActions\(true\)\}\s*\{renderDebugButton\(true\)\}\s*<\/div>/);
-});
-
-test("Escape with focus in the panel gives it back to the Debug button, after the panel left the page", () => {
-  assert.match(panelSource, /<section ref=\{sectionRef\} className="debug-panel"/);
-  assert.match(panelSource, /createDebugPanelEscapeListener\(\s*document,\s*\(\) => sectionRef\.current,\s*\(restoreFocus\) => onCloseRef\.current\(restoreFocus\),\s*\)/);
-  const button = between(shellSource, "const renderDebugButton = (mobile: boolean) => {", "const renderMainFileToggle");
-  assert.match(button, /<button\s+ref=\{debugButtonRef\}/);
-  const close = between(shellSource, "const closeDebugPanel = useCallback(", "}, []);");
-  assert.match(close, /\(restoreFocus: boolean\) => \{\s*setActiveTopPanel\(\(panel\) => panel === "debug" \? null : panel\);\s*if \(restoreFocus\) requestAnimationFrame\(\(\) => focusIfLost\(document, debugButtonRef\.current\)\);/);
-  assert.match(shellSource, /import \{ focusIfLost \} from "@\/lib\/stacked-dialog";/);
-  assert.match(shellSource, /onClose=\{closeDebugPanel\}/);
-
-  // What that frame does: focus that fell to the page goes to the button; focus put elsewhere stays.
-  const focused = [];
-  const debugButton = { focus: () => focused.push("debug") };
-  const body = { name: "body" };
-  assert.equal(focusIfLost({ activeElement: body, body }, debugButton), true);
-  assert.equal(focusIfLost({ activeElement: { name: "composer" }, body }, debugButton), false);
-  assert.equal(focusIfLost({ activeElement: body, body }, null), false, "no Debug button on screen (narrow phone, more closed)");
-  assert.deepEqual(focused, ["debug"]);
+  assert.match(shellSource, /onOpenTask=\{handleOpenBgOutputTab\}/);
+  assert.match(shellSource, /const \[bgOutputTabs, setBgOutputTabs\] = useState<\{ taskId: string; label: string \}\[\]>\(\[\]\);/);
+  assert.match(shellSource, /id: `bg:\$\{tab\.taskId\}`,[^]*?kind: "bg-output" as const,/);
+  assert.match(shellSource, /<BgTaskOutputView\s+key=\{activeBgOutputTab\.taskId\}/);
+  // No top-bar panel is left to hold open across a switch.
+  for (const [name, next] of [["handleCwdChange", "handleSelectSession"], ["handleSelectSession", "handleNewSession"], ["handleNewSession", "hydrateSelectedSession"], ["handleSessionDeleted", "handleOpenFile"]]) {
+    const body = between(shellSource, `const ${name} = useCallback`, `const ${next} = useCallback`);
+    assert.match(body, /setActiveTopPanel\(null\);/, name);
+  }
 });
 
 test("the sidebar's running poll records its request alone, not the session-list reload after it", () => {
@@ -777,16 +774,11 @@ test("the narrow phone's more overlay scrolls the buttons it cannot fit instead 
   assert.match(overlay, /overflowX: "auto",\s*overflowY: "hidden",\s*scrollbarWidth: "none",/);
 });
 
-test("AppShell keeps the chat's reader in a ref and the panel open across session switches", () => {
+test("AppShell keeps the chat's reader in a ref, and the debug tab follows the chat", () => {
   const register = between(shellSource, "const handleDebugSnapshotReaderChange = useCallback(", "}, []);");
   assert.match(register, /debugSnapshotReaderRef\.current = reader;/);
   assert.doesNotMatch(register, /\bset[A-Z]\w*\(/, "registering renders nothing");
   assert.match(shellSource, /onDebugSnapshotReaderChange=\{handleDebugSnapshotReaderChange\}/);
-  assert.match(shellSource, /<DebugPanelBoundary fallback=\{translate\("debug\.failed"\)\}>\s*<DebugPanel\s/);
+  assert.match(activitySource, /<DebugPanel\s/);
   assert.match(shellSource, /useEffect\(\(\) => \{\s*startPageVisibilityTracking\(\);\s*\}, \[\]\);/);
-  for (const [name, next] of [["handleCwdChange", "handleSelectSession"], ["handleSelectSession", "handleNewSession"], ["handleNewSession", "hydrateSelectedSession"], ["handleSessionDeleted", "handleOpenFile"]]) {
-    const body = between(shellSource, `const ${name} = useCallback`, `const ${next} = useCallback`);
-    assert.match(body, /setActiveTopPanel\(\(panel\) => panel === "debug" \? panel : null\);/, name);
-    assert.doesNotMatch(body, /setActiveTopPanel\(null\)/, name);
-  }
 });

@@ -26,7 +26,7 @@ import { toolFieldsOfInput } from "@/lib/tool-fields";
 import { parseStreamingJson } from "@earendil-works/pi-ai/utils/json-parse";
 import { mcpToolLabel, prettyMcpResultText } from "@/lib/mcp-tool-display";
 import { BgTaskNotificationView } from "./BgTaskNotificationView";
-import { BG_TASK_NOTIFICATION_CUSTOM_TYPE, stripBgTaskNotificationPrefix } from "@/lib/bg-task-notification";
+import { BG_TASK_KILLED_CUSTOM_TYPE, BG_TASK_NOTIFICATION_CUSTOM_TYPE, stripBgTaskNotificationPrefix } from "@/lib/bg-task-notification";
 import { stripSubagentNotificationPrefix } from "@/lib/subagent-notification";
 import { streamRateKey, streamRateStart, streamTokensPerSecond, type StreamRateStart } from "@/lib/stream-token-rate";
 import { formatNoticeTokens, getTranscriptNotices } from "@/lib/transcript-notices";
@@ -2088,7 +2088,9 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
   const images = getMessageImages(message.content);
   const hasDetails = message.details !== undefined;
   const detailsText = hasDetails ? safeJson(message.details) : "";
-  const title = formatCustomType(message.customType);
+  const title = message.customType === BG_TASK_KILLED_CUSTOM_TYPE
+    ? t("bgTasks.killedTitle")
+    : formatCustomType(message.customType);
   const isBgTaskNotification = message.customType === BG_TASK_NOTIFICATION_CUSTOM_TYPE;
   // A batch of settled background reports is one queue element holding one text block per report.
   // It renders as one card per report — the card that report always had, named by its entry in

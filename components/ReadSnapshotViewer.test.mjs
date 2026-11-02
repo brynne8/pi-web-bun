@@ -160,7 +160,7 @@ test("the viewer holds the snapshot: it fetches nothing and never opens the live
 });
 
 test("the tab reaches the panel through the same machinery as file, terminal and sub-agent tabs", () => {
-  assert.match(tabBar, /kind\?: "terminal" \| "agent" \| "read-snapshot"/);
+  assert.match(tabBar, /kind\?: "terminal" \| "agent" \| "read-snapshot" \| "bg-tasks"/);
   assert.match(tabBar, /tab\.kind === "read-snapshot" \? t\("readPanel\.tabLabel", \{ name: tab\.label \}\)/);
 
   assert.match(appShell, /const \[readTabs, setReadTabs\] = useState<\{ toolCallId: string; snapshot: ReadSnapshot \}\[\]\>\(\[\]\)/);
@@ -178,7 +178,7 @@ test("the tab reaches the panel through the same machinery as file, terminal and
   assert.match(appShell, /remainingAgents\.length === 0 && readTabs\.length === 0\) setRightPanelOpen\(false\)/);
   assert.match(appShell, /agentTabs\.length === 0 && remainingReads\.length === 0\) setRightPanelOpen\(false\)/);
   // The "no file open" placeholder must not show behind an active snapshot tab.
-  assert.match(appShell, /&& !activeAgentTab && !activeReadTab \? \(/);
+  assert.match(appShell, /&& !activeAgentTab && !activeReadTab && !activeBgTasksTab && !activeBgOutputTab \? \(/);
   // A snapshot came from this project's chat: a project switch drops them, unparked.
   assert.match(appShell, /setAgentTabs\(\[\]\);[\s\S]{0,160}setReadTabs\(\[\]\);/);
   assert.match(appShell, /activeFileTabId\.startsWith\("agent:"\) \|\| activeFileTabId\.startsWith\("read:"\)\)/);
