@@ -61,3 +61,11 @@ test("a profile model's pi :level suffix names its base model; a listed colon id
   assert.equal(base("openai/gpt-5:turbo", isListed), "openai/gpt-5:turbo");
   assert.equal(base("openai/gpt-5:", isListed), "openai/gpt-5:");
 });
+
+test("a new agent starts with the turn budget the read-only built-ins ship", () => {
+  const constant = source.slice(source.indexOf("const DEFAULT_MAX_TURNS"), source.indexOf("\n", source.indexOf("const DEFAULT_MAX_TURNS")));
+  const draft = source.slice(source.indexOf("const EMPTY_PROFILE"), source.indexOf("const inputStyle"));
+  const code = ts.transpileModule(`${constant}\n${draft}`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+  const empty = vm.runInNewContext(`${code}; EMPTY_PROFILE`);
+  assert.equal(empty.maxTurns, 50);
+});

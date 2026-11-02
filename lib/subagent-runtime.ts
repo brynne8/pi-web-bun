@@ -6,6 +6,7 @@ import {
   initTheme,
   SessionManager,
   SettingsManager,
+  type AgentSession,
   type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike } from "./pi-types";
@@ -133,7 +134,16 @@ declare global {
 const SUBAGENT_CONTEXT_LIMIT = 50_000;
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
-const TURN_LIMIT_INSTRUCTION = "You have reached your turn limit. Wrap up immediately and provide your final answer now.";
+const TURN_LIMIT_INSTRUCTION = "You have reached your turn limit. You no longer have access to any tools. Answer now from the context you already have: your final answer or report, in full.";
+/** Sent when the tool-less wrap-up turn produced no words at all, for one more attempt. */
+const EMPTY_ANSWER_INSTRUCTION = "You did not provide an answer. You still have no access to any tools. Give your final answer now, from the context you already have.";
+/** Tells a resumed child its tools are back, as a system message the chat does not render. */
+const TOOLS_RESTORED_INSTRUCTION = "Your tool access has been fully restored. You may call tools again.";
+
+/** Whether an assistant message carries words, as opposed to only thinking or tool calls. */
+function turnHasText(message: { content: readonly { type: string; text?: string }[] }): boolean {
+  return message.content.some((block) => block.type === "text" && (block.text ?? "").trim().length > 0);
+}
 
 /**
  * How the last model request ended when `prompt()` resolved anyway: pi records a provider
@@ -448,6 +458,111 @@ async function cleanupWorktree(
 }
 
 /**
+ * Queues the "your tools are back" notice as a system message, so it reaches the model with the
+ * next request. A system role rather than a user one: `lib/session-reader.ts` filters those out of
+ * what the chat renders, so no card appears for what is only the runtime talking to the model.
+ */
+function announceToolsRestored(session: HostSession | void): void {
+  const agent = session?.inner.agent as {
+    steer?: (message: { role: "system"; content: string; timestamp: number }) => void;
+  };
+  agent?.steer?.({ role: "system", content: TOOLS_RESTORED_INSTRUCTION, timestamp: Date.now() });
+}
+
+interface TurnLimiter {
+  /** The error the run failed with, or undefined when the limit did not end it. */
+  error(): string | undefined;
+  /** Whether this run took the child's tools away, which a resumed child is told was undone. */
+  toolsWithheld(): boolean;
+  /** Puts back the hook, the steering mode and the tools the run started with. */
+  restore(): void;
+}
+
+/**
+ * Counts a run's turns at the SDK's awaited `finishTurn` boundary and ends the run at the budget.
+ * Each run counts from zero, so a `resume` gets the profile's whole budget again rather than the
+ * remainder of the run before it. The wrap-up turn is sent with no tools at all, so its one request
+ * can only write an answer; one that stops without words gets a second such attempt, and a second
+ * silence ends the run as the limit being reached.
+ */
+function installTurnLimiter(
+  session: AgentSession,
+  stored: StoredSubagentExecution,
+  turnLimit: number | undefined,
+  activeTools: readonly string[],
+): TurnLimiter | undefined {
+  if (!turnLimit) return undefined;
+  let turnCount = 0;
+  let maxTurnsReached = false;
+  let toolsWithheld = false;
+  let undelivered: string[] = [];
+  const previousFinishTurn = session.agent.finishTurn;
+  const previousSteeringMode = session.agent.steeringMode;
+  // Finalized events retain the SDK's terminate hint; tool-result messages do not.
+  const terminatingTools = new Set<string>();
+  const unsubscribeTools = session.subscribe((event) => {
+    if (event.type === "tool_execution_end" && event.result?.terminate === true) {
+      terminatingTools.add(event.toolCallId);
+    }
+  });
+  const endAtTurnLimit = (): { action: "end" } => {
+    maxTurnsReached = true;
+    stored.turnLimitReached = true;
+    // AgentSession starts another run for anything still queued, past an `end`
+    // decision, so the limit holds only once the queues are empty.
+    const { steering, followUp } = session.clearQueue();
+    undelivered = [...undelivered, ...steering, ...followUp];
+    return { action: "end" };
+  };
+  session.agent.finishTurn = async (turn, signal) => {
+    const decision = (await previousFinishTurn?.(turn, signal)) ?? undefined;
+    const toolsContinue = turn.toolResults.some((message) => !terminatingTools.has(message.toolCallId));
+    terminatingTools.clear();
+    turnCount += 1;
+    if (signal?.aborted || decision?.action === "end" ||
+      turn.message.stopReason === "error" || turn.message.stopReason === "aborted") return decision;
+    const needsAnotherTurn = toolsContinue || decision?.action === "continue" || session.agent.hasQueuedMessages();
+    // A turn past the budget that stopped without a word still owes an answer. The tools
+    // are gone by then, so the retry is one more request and nothing else; a second
+    // silence ends the run as the limit being reached.
+    if (!needsAnotherTurn && turnCount > turnLimit && !turnHasText(turn.message)) {
+      if (turnCount === turnLimit + 1) {
+        session.agent.steeringMode = "all";
+        await session.steer(EMPTY_ANSWER_INSTRUCTION);
+        return { action: "continue" };
+      }
+      return endAtTurnLimit();
+    }
+    if (!needsAnotherTurn || turnCount < turnLimit) return decision;
+    if (turnCount >= turnLimit + 1) return endAtTurnLimit();
+    // The wrap-up turn takes the tools away, so its one request can only answer: a model
+    // that keeps working would spend it on more tool calls and answer nothing. A profile
+    // with no tools has none to take, and a resumed one is told nothing was taken.
+    if (activeTools.length > 0) {
+      session.setActiveToolsByName([]);
+      toolsWithheld = true;
+    }
+    // The awaited SDK boundary delivers the instruction before the wrap-up request.
+    // In one-at-a-time mode a steer queued earlier would take the wrap-up turn and
+    // leave the instruction for later, so that turn takes everything queued.
+    session.agent.steeringMode = "all";
+    await session.steer(TURN_LIMIT_INSTRUCTION);
+    return decision;
+  };
+  return {
+    error: () => (maxTurnsReached ? turnLimitError(turnLimit, undelivered) : undefined),
+    toolsWithheld: () => toolsWithheld,
+    restore: () => {
+      session.agent.finishTurn = previousFinishTurn;
+      session.agent.steeringMode = previousSteeringMode;
+      // The wrapper outlives the run, so a session the user prompts directly keeps its tools.
+      if (toolsWithheld) session.setActiveToolsByName([...activeTools]);
+      unsubscribeTools();
+    },
+  };
+}
+
+/**
  * Writes a settled run's result entry, which `readSubagentRun()` reads back, and returns the run as
  * recorded. An isolated run's entry keeps whether its worktree path still exists now, which decides
  * what the parent is told about it, live and read back alike (#1202): a checkout removed during
@@ -463,6 +578,7 @@ function recordResult(sessionManager: SessionManager, run: SubagentRunInfo): Sub
     ...(recorded.error ? { error: recorded.error } : {}),
     ...(recorded.worktreeCleanupError ? { worktreeCleanupError: recorded.worktreeCleanupError } : {}),
     ...(recorded.worktreeExists !== undefined ? { worktreeExists: recorded.worktreeExists } : {}),
+    ...(recorded.toolsWithheld ? { toolsWithheld: true } : {}),
   };
   sessionManager.appendCustomEntry(SUBAGENT_RESULT_TYPE, entry);
   return recorded;
@@ -721,46 +837,7 @@ export function createSubagentController(
         sessionManager.appendCustomEntry(SUBAGENT_STATUS_TYPE, { version: 1, status: "running" });
         request.onUpdate?.(stored.run);
         dependencies.invalidateSessionList();
-        let turnCount = 0;
-        let maxTurnsReached = false;
-        let undelivered: string[] = [];
-        const previousFinishTurn = inner.agent.finishTurn;
-        const previousSteeringMode = inner.agent.steeringMode;
-        let unsubscribeTools: (() => void) | undefined;
-        if (turnLimit) {
-          // Finalized events retain the SDK's terminate hint; tool-result messages do not.
-          const terminatingTools = new Set<string>();
-          unsubscribeTools = inner.subscribe((event) => {
-            if (event.type === "tool_execution_end" && event.result?.terminate === true) {
-              terminatingTools.add(event.toolCallId);
-            }
-          });
-          inner.agent.finishTurn = async (turn, signal) => {
-            const decision = (await previousFinishTurn?.(turn, signal)) ?? undefined;
-            const toolsContinue = turn.toolResults.some((message) => !terminatingTools.has(message.toolCallId));
-            terminatingTools.clear();
-            turnCount += 1;
-            if (signal?.aborted || decision?.action === "end" ||
-              turn.message.stopReason === "error" || turn.message.stopReason === "aborted") return decision;
-            const needsAnotherTurn = toolsContinue || decision?.action === "continue" || inner.agent.hasQueuedMessages();
-            if (!needsAnotherTurn || turnCount < turnLimit) return decision;
-            if (turnCount >= turnLimit + 1) {
-              maxTurnsReached = true;
-              stored.turnLimitReached = true;
-              // AgentSession starts another run for anything still queued, past an `end`
-              // decision, so the limit holds only once the queues are empty.
-              const { steering, followUp } = inner.clearQueue();
-              undelivered = [...undelivered, ...steering, ...followUp];
-              return { action: "end" };
-            }
-            // The awaited SDK boundary delivers the instruction before the wrap-up request.
-            // In one-at-a-time mode a steer queued earlier would take the wrap-up turn and
-            // leave the instruction for later, so that turn takes everything queued.
-            inner.agent.steeringMode = "all";
-            await inner.steer(TURN_LIMIT_INSTRUCTION);
-            return decision;
-          };
-        }
+        const limiter = installTurnLimiter(inner, stored, turnLimit, activeTools);
         let result: SubagentRunInfo;
         try {
           // A profile's `mcp: on` connects this child's own mcp.json servers before
@@ -775,8 +852,7 @@ export function createSubagentController(
           const text = inner.getLastAssistantText()?.trim();
           const stop = stored.abortRequested ? undefined : lastAssistantStop(sessionManager);
           const aborted = stored.abortRequested || stop?.aborted === true;
-          const errorMessage = aborted ? undefined : stop?.error ??
-            (maxTurnsReached && turnLimit ? turnLimitError(turnLimit, undelivered) : undefined);
+          const errorMessage = aborted ? undefined : stop?.error ?? limiter?.error();
           result = {
             ...initialRun,
             status: aborted ? "aborted" : errorMessage ? "failed" : "completed",
@@ -797,16 +873,13 @@ export function createSubagentController(
               : {}),
           };
         } finally {
-          if (turnLimit) {
-            inner.agent.finishTurn = previousFinishTurn;
-            inner.agent.steeringMode = previousSteeringMode;
-          }
-          unsubscribeTools?.();
+          limiter?.restore();
           request.signal?.removeEventListener("abort", handleParentAbort);
         }
 
         const cleanupError = await cleanupWorktree(parent.cwd, isolatedWorktree);
         if (cleanupError) result = { ...result, worktreeCleanupError: cleanupError };
+        if (limiter?.toolsWithheld()) result = { ...result, toolsWithheld: true };
         result = recordResult(sessionManager, result);
         stored.run = result;
         request.onUpdate?.(result);
@@ -913,6 +986,8 @@ export function createSubagentController(
       // Resume removes no worktree: this run's result says only whether it is still there.
       worktreeCleanupError: undefined,
       worktreeExists: undefined,
+      // A new run withholds no tools until its own turn limit says otherwise.
+      toolsWithheld: undefined,
       resumed: true,
     };
     const manager = wrapper.inner.sessionManager;
@@ -944,20 +1019,30 @@ export function createSubagentController(
       stored.run = { ...stored.run, status: "running" };
       manager.appendCustomEntry(SUBAGENT_STATUS_TYPE, { version: 1, status: "running" });
       request.onUpdate?.(stored.run);
+      const limiter = installTurnLimiter(
+        wrapper!.inner as unknown as AgentSession,
+        stored,
+        resolveSubagentProfile(wrapper!.cwd, existing.profile)?.maxTurns,
+        wrapper!.inner.getActiveToolNames(),
+      );
       let result: SubagentRunInfo;
       try {
         await prepareChildMcp(wrapper, stored);
+        // The run that ended at its limit told the child it had no tools, and that line stays in
+        // its transcript. Say the tools are back before the task, or the model reads its own
+        // history and stays quiet.
+        if (existing.toolsWithheld) announceToolsRestored(wrapper);
         await wrapper!.inner.prompt(request.task, { source: "rpc" });
         const text = wrapper!.inner.getLastAssistantText()?.trim();
         const stop = stored.abortRequested ? undefined : lastAssistantStop(manager);
         const aborted = stored.abortRequested || stop?.aborted === true;
-        const providerError = aborted ? undefined : stop?.error;
+        const errorMessage = aborted ? undefined : stop?.error ?? limiter?.error();
         result = {
           ...initialRun,
-          status: aborted ? "aborted" : providerError ? "failed" : "completed",
+          status: aborted ? "aborted" : errorMessage ? "failed" : "completed",
           completedAt: new Date().toISOString(),
           ...(text ? { result: text } : {}),
-          ...(providerError ? { error: providerError } : {}),
+          ...(errorMessage ? { error: errorMessage } : {}),
         };
       } catch (error) {
         result = {
@@ -967,8 +1052,10 @@ export function createSubagentController(
           ...(!stored.abortRequested && !request.signal?.aborted ? { error: error instanceof Error ? error.message : String(error) } : {}),
         };
       } finally {
+        limiter?.restore();
         request.signal?.removeEventListener("abort", handleParentAbort);
       }
+      if (limiter?.toolsWithheld()) result = { ...result, toolsWithheld: true };
       result = recordResult(manager, result);
       stored.run = result;
       request.onUpdate?.(result);

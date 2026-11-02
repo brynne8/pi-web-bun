@@ -45,12 +45,17 @@ const THINKING_OPTIONS = ["", "off", "minimal", "low", "medium", "high", "xhigh"
 type EditableProfile = Omit<SubagentProfile, "scope" | "filePath">;
 type EditorMode = "view" | "edit" | "create";
 
+/** The turn budget a newly created agent starts with, as the read-only built-ins ship. */
+const DEFAULT_MAX_TURNS = 50;
+
 const EMPTY_PROFILE: EditableProfile = {
   name: "custom-agent",
   displayName: "Custom agent",
   description: "",
   systemPrompt: "",
   tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
+  // The budget a new agent starts with, matching what the read-only built-ins ship.
+  maxTurns: DEFAULT_MAX_TURNS,
   loadSkills: false,
   loadExtensions: false,
   codemode: "off",

@@ -107,6 +107,8 @@ export interface SubagentResultMetadata {
   worktreeCleanupError?: string;
   /** Whether an isolated run's worktree path still existed when this entry was written (#1202). */
   worktreeExists?: boolean;
+  /** Whether this run took the child's tools away for its final turn, as the turn limit does. */
+  toolsWithheld?: boolean;
 }
 
 export interface SubagentStatusMetadata {
@@ -142,6 +144,8 @@ export interface SubagentRunInfo {
   worktreeCleanupError?: string;
   /** Set once the run's result is recorded, as `SubagentResultMetadata.worktreeExists`. */
   worktreeExists?: boolean;
+  /** Set once the run's result is recorded, as `SubagentResultMetadata.toolsWithheld`. */
+  toolsWithheld?: boolean;
   /** Set on a run started by `resume`, which reuses the session ID of an earlier run. Not persisted. */
   resumed?: boolean;
 }
@@ -213,6 +217,15 @@ function validateSavedMcp(value: unknown): SubagentMcp | undefined {
   throw new Error("mcp must be one of: on, off");
 }
 
+/**
+ * The turn budgets the built-ins ship with. `explore` and `plan` are read-only and spend their
+ * turns reading and searching, so a budget is what makes them write up what they found and report
+ * instead of running until the context fills; `general-purpose` edits and runs checks, so it gets
+ * the larger of the two.
+ */
+const READ_ONLY_MAX_TURNS = 50;
+const GENERAL_PURPOSE_MAX_TURNS = 100;
+
 const BUILTIN_PROFILES: SubagentProfile[] = [
   {
     name: "general-purpose",
@@ -221,6 +234,7 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     description: "Implement a delegated task: edit files, run checks, report changes",
     systemPrompt: "Work autonomously on the delegated task. Keep the final answer concise and include important files, decisions, and remaining risks.",
     tools: DEFAULT_TOOLS,
+    maxTurns: GENERAL_PURPOSE_MAX_TURNS,
     loadSkills: false,
     loadExtensions: false,
     codemode: "inherit",
@@ -237,6 +251,7 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     description: "Use when mapping an unfamiliar codebase or investigating a question deeply; read-only",
     systemPrompt: "Explore the codebase to answer the delegated question. Do not modify files. Report concrete findings with file paths and relevant symbols.",
     tools: [...PRESET_READ_ONLY],
+    maxTurns: READ_ONLY_MAX_TURNS,
     loadSkills: false,
     loadExtensions: false,
     codemode: "inherit",
@@ -253,6 +268,7 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     description: "Use for a large, complex task that needs its steps broken down; read-only",
     systemPrompt: "Produce an implementation-ready plan for the delegated task. Inspect the repository as needed, do not modify files, and call out dependencies, risks, and verification steps.",
     tools: [...PRESET_READ_ONLY],
+    maxTurns: READ_ONLY_MAX_TURNS,
     loadSkills: false,
     loadExtensions: false,
     codemode: "inherit",
@@ -1016,5 +1032,6 @@ export function readSubagentRun(entries: readonly SessionEntry[], sessionId: str
     ...(typeof data.worktreeBranch === "string" ? { worktreeBranch: data.worktreeBranch } : {}),
     ...(result && typeof result.worktreeCleanupError === "string" ? { worktreeCleanupError: result.worktreeCleanupError } : {}),
     ...(result && typeof result.worktreeExists === "boolean" ? { worktreeExists: result.worktreeExists } : {}),
+    ...(result && result.toolsWithheld === true ? { toolsWithheld: true } : {}),
   };
 }

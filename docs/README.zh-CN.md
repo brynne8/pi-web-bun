@@ -146,6 +146,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **一次子代理调用不带文件清单。** `Agent` 收的参数只有 `subagent_type`、`prompt`、`description`、`run_in_background`、`resume`、`model` 和 `isolation`：要让子代理看哪些文件，就写在 `prompt` 里，它用自己的 `read` 去打开。思考档位、轮次上限、是否继承这段对话都由 profile 决定，思考档位跟着模型引用一起写（写成 `x:high`）。原版在调用上保留 `input_files` 列表，和它从同一个 PR 拿到的 profile 参数并列（[#1138](https://github.com/agegr/pi-web/pull/1138)）。（[说明](./agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）
 
+**子代理的最后一轮不能再干活。** profile 里的 `max_turns` 给的那最后一轮，工具全被收走，这一次请求只能写答案；这一轮一个字都没交出来，就再给一次同样的机会，之后这次运行才算失败——报错里点出轮次上限，孩子已经写下的部分照样留着。运行一结束工具就还回来，resume 起来的孩子也会被告知这件事，用的是一条只有模型读得到、界面不显示的消息。resume 会把这个预算从零开始重算，所以每一次运行拿到的都是 profile 给的那一整套。原版的收尾轮保留全部工具。（[说明](./agents/subagents.md#built-in-subagents)）
+
 **委派规则自己成块。** 目标一清楚就该委派——这句话现在单独成块，作为 `<delegation>` 出现在系统提示的末尾，读起来是 `Agent` 自己的策略。它给 `explore` 和 `plan` 各写了规则——面对陌生的代码库要建立理解，或一处改动波及尚未摸清、必须小心处理的代码，就用 `explore`；需要先想清楚步骤的大型复杂任务，就用 `plan`，而且绝不和它所规划的工作同时进行，plan 也应该始终在前台运行——其余启用的子代理只列名字。它随每一次运行的提示发出，**系统提示**面板也能看到，包括被插件改写了提示的会话。原版把委派建议放在工具的 prompt guidelines 里，由 Pi 追加到扁平的 `<rules>` 列表。（[说明](./agents/subagents.md#delegation-policy)）
 
 **模型可以停掉它委派出去的运行。** `abort_subagent` 让发起子代理的 agent 结束一个它不再想要的运行。后台运行不受父会话上「停止」的影响。这次运行进行到哪儿都留在它自己的记录里，事后可以读，也可以用 `resume` 接着往下跑；被模型停掉的运行不会再额外报一条说自己被停了。原版把同样的停止写成一个没有界面入口的服务端调用，而且给模型的是三个子代理工具，不是五个。（[说明](./agents/subagents.md#stopping-a-run)）
@@ -155,6 +157,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 **子代理用短 id 称呼。** 每份报告、每次停止和转向的回答、每一行运行列表，用的都是会话 id 的最后八位，`Agent` 的 `resume`、`get_subagent_result`、`steer_subagent`、`abort_subagent` 也都认这个写法，完整 id 仍然可用。会话 id 的尾部才是区分两次运行的唯一部分，也是唯一值得在调用之间抄下来的部分。两次运行尾部相同时会被拒绝，不会替你猜。原版打印完整 UUID，也只接受完整 UUID。（[说明](./agents/subagents.md#short-subagent-ids)）
 
 **内置子代理跟随会话的 Code mode。** Explore、Plan 和 General purpose 启动时沿用父会话正在用的 Code mode，不再永远直接调用工具；于是开着 Code mode 的会话不会在一委派出去就把它丢掉。工具权限不变，这三个配置也仍然只读——但在磁盘上放一个同名文件照样可以整体替换其中一个。原版把这三个的 Code mode 默认关着，而「设置 › 子代理」早就能按配置单独改它（[#1097](https://github.com/agegr/pi-web/pull/1097)），只是你不改就一直是关。（[说明](./agents/subagents.md)）
+
+**只读的那两个内置子代理会停下来汇报。** Explore 和 Plan 自带轮次预算，于是一个还在到处翻的委派运行会停下，把已经查到的东西写成报告交出来，而不是一直跑到上下文被塞满；General purpose 要改文件、要跑检查，所以给它的是更大的那个数。新建 agent 时面板填的也是同一个数，磁盘上的同名文件则照样能改掉内置的那个。原版这三个都不带预算。（[说明](./agents/subagents.md#built-in-subagents)）
 
 **子代理的报告不会被它自己摘要掉。** 子会话以一段回答结束那次运行时不会被压缩：报告与父会话之间不隔一次生成摘要的请求。在子代理自己的对话里 `/compact`、以及上下文溢出之后的恢复仍旧会压缩，发给它的下一条提示词也会先压缩再开始那次运行。原版每条消息之后都会像检查任何会话一样检查子代理的上下文，所以填满上下文的子代理在把报告交出去之前，要先为刚刚作答的那次运行付一次摘要。（[说明](./agents/subagents.md#compaction-held-while-the-child-writes-its-report)）
 
