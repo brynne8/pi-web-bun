@@ -2071,7 +2071,6 @@ export function AppShell() {
         className={mobile ? "mobile-session-stats" : undefined}
         data-mobile-toolbar-stats={mobile ? "true" : undefined}
         style={{
-          marginLeft: !mobile && showChat ? "auto" : 0,
           display: "flex", alignItems: "center", justifyContent: "flex-end",
           flex: mobile ? 1 : undefined,
           minWidth: 0,
@@ -2191,7 +2190,6 @@ export function AppShell() {
         aria-label={rightPanelOpen ? translate("files.hidePanel") : translate("files.showPanel")}
         data-mobile-toolbar-file={mobile ? "true" : undefined}
         style={{
-          marginLeft: !mobile && !showChat ? "auto" : 0,
           display: "flex", alignItems: "center", justifyContent: "center",
           position: "relative",
           width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
@@ -2470,14 +2468,14 @@ export function AppShell() {
               )}
             </div>
           )}
+          {!isMobile && renderProjectTrustWarning(false)}
+          {!isMobile && renderChatToolbarActions(false)}
           {!isMobile && (
-            <>
-              {renderProjectTrustWarning(false)}
-              {renderChatToolbarActions(false)}
+            <div data-top-bar-group="right" style={{ marginLeft: "auto", display: "flex", alignItems: "center", height: "100%", minWidth: 0 }}>
               {renderSessionStatsButton(false)}
-            </>
+              {renderMainFileToggle(false)}
+            </div>
           )}
-          {!isMobile && renderMainFileToggle(false)}
           {isMobile && sessionHasBranches && (
             <BranchNavigator
               tree={branchTree}
