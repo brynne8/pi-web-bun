@@ -41,5 +41,12 @@ export default defineConfig({
   // blocks and the rest of the client graph must be lowered for it (#753).
   build: { target: "safari16.2" },
   // A pre-bundled dependency never reaches the transform hook above.
-  optimizeDeps: { exclude: ["mdast-util-gfm-autolink-literal"] },
+  optimizeDeps: {
+    exclude: ["mdast-util-gfm-autolink-literal"],
+    // partial-json (pi-ai's utils/json-parse, imported by components/MessageView.tsx)
+    // is CommonJS, and it enters the client graph behind ChatWindow's lazy import —
+    // past Vite's initial scan, so nothing pre-bundles it and the browser is served
+    // the raw CJS file, where `parse` is not an importable binding.
+    include: ["partial-json"],
+  },
 });
