@@ -2,6 +2,8 @@ import { Type } from "@earendil-works/pi-ai";
 import {
   createBashToolDefinition,
   createLocalBashOperations,
+  DEFAULT_MAX_BYTES,
+  DEFAULT_MAX_LINES,
   getAgentDir,
   type BashOperations,
   type InlineExtension,
@@ -325,14 +327,24 @@ export function createProjectCommandBashExtension(options: {
     factory: (pi) => {
       const bg = options.bgTasks;
       const displayDefinition = createBashToolDefinition(options.cwd);
-      // The prompt's own `<cwd>` section is a bare path that says nothing about where a command
-      // runs, so a model that can see the path still opens every command with `cd <cwd> && …`.
-      // The description is where this belongs: it is read again with every call, where a rule
-      // would be one line among forty.
-      const cwdNote = `Runs in \`${options.cwd}\`; do not prefix a command with \`cd\`, only to enter a subdirectory the command must run in.`;
+      // One rule per line, its subject first: this description is the only place the tool says
+      // how to be used, and rules written as one run-on paragraph are rules the model skips.
+      const descriptionLines = [
+        `Execute a bash command in \`${options.cwd}\`.`,
+        "Already in that directory: `cd` only to enter a subdirectory.",
+        `Returns stdout and stderr, cut to the last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever comes first); full output goes to a temp file.`,
+        "Optionally provide a timeout in seconds.",
+      ];
+      if (bg) {
+        descriptionLines.push(
+          "Bound the command to see less (`git log --oneline -20`, `find . -maxdepth 2`); never `| tail`, `>` or `>>` — they end the output early and save nothing.",
+          `A long-running command: run_in_background=true. A foreground command hands off to the background after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000} seconds and reports back when it finishes.`,
+        );
+      }
+      const description = descriptionLines.join("\n");
       pi.registerTool({
         ...displayDefinition,
-        description: `${displayDefinition.description} ${cwdNote}`,
+        description,
         ...(bg
           ? {
               parameters: Type.Object({
@@ -341,7 +353,6 @@ export function createProjectCommandBashExtension(options: {
                 run_in_background: Type.Optional(Type.Boolean({ description: "Run this command in the background immediately; you will be notified when it completes." })),
                 max_output_lines: Type.Optional(Type.Number({ description: "Line count before the command goes to the background. Always set it unless you already know the output is short." })),
               }),
-              description: `${displayDefinition.description} ${cwdNote} Supports background execution: pass run_in_background=true for long-running commands, or let foreground commands auto-background after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000} seconds; you are notified when a background command finishes. Never pipe a command through | tail or redirect its output with > or >>. Bound the command instead.`,
               promptGuidelines: [
                 ...(displayDefinition.promptGuidelines ?? []),
                 "NEVER pipe a command through `| tail` or redirect its output with `>` or `>>`. Both end the output early, so nothing is saved to a file. Run the command plain.",
