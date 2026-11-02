@@ -1,10 +1,13 @@
-import { randomBytes } from "crypto";
-import { existsSync } from "fs";
+import { randomBytes, randomUUID } from "crypto";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { SessionManager, type SessionEntry as PiSessionEntry } from "@earendil-works/pi-coding-agent";
 import { writeSessionFileAtomicSync } from "./atomic-file";
 import { forkSessionName, sessionDisplayTitle } from "./session-fork-name";
 import { scanSessionFileInfo } from "./session-list-scanner";
 import { readSubagentRun } from "./subagents";
+import { SIDE_SESSION_NAME } from "./session-family";
+import { createSessionToolSelectionEntry, readSessionToolSelection } from "./session-tool-selection";
+import { createSideBoundaryEntry, createSideMetadataEntry, readSideRelation } from "./side-session";
 import type { SessionEntry } from "./types";
 
 /**
@@ -14,7 +17,7 @@ import type { SessionEntry } from "./types";
  * named: the source's title plus a short random suffix (session-fork-name.ts).
  */
 
-export type SessionForkRefusal = "not_found" | "unsaved" | "empty" | "subagent";
+export type SessionForkRefusal = "not_found" | "unsaved" | "empty" | "subagent" | "side";
 
 export class SessionForkError extends Error {
   constructor(readonly code: SessionForkRefusal, message: string) {
@@ -108,6 +111,46 @@ export function forkSessionBranch(
   liveLeafId?: string | null,
   sourceTitle?: string | null,
 ): { sessionId: string; path: string; name: string | undefined } {
+  return copySessionBranch(sourcePath, liveLeafId, (manager) => (sourceTitle === null ? undefined : forkSessionName(
+    sourceTitle?.trim() || manager.getSessionId().slice(0, 12),
+    randomBytes(2).toString("hex"),
+    typeof manager.getHeader()?.parentSession === "string",
+  )));
+}
+
+/**
+ * The same copy as a side chat (ADR 0007, `lib/side-session.ts`): the metadata
+ * entry goes directly after the header, where the list's bounded head read
+ * finds it, with the first copied entry chained under it, and the hidden
+ * boundary message goes last, as the new leaf. A parent reads its tool pin from
+ * the whole file, and the copy holds one branch, so the pin is written again
+ * before the boundary: one set on another branch still binds the side chat. The
+ * copy is brand new and has no wrapper yet, so this is the only rewrite it ever
+ * gets.
+ */
+export function createSideSession(
+  sourcePath: string,
+  liveLeafId?: string | null,
+  name: string = SIDE_SESSION_NAME,
+): { sessionId: string; path: string } {
+  const copy = copySessionBranch(sourcePath, liveLeafId, () => name);
+  const [header, first, ...rest] = readFileSync(copy.path, "utf8").trimEnd().split("\n");
+  const firstEntry = JSON.parse(first) as { parentId?: string | null };
+  const metadata = createSideMetadataEntry(copy.sourceSessionId, `side-${randomUUID()}`, firstEntry.parentId ?? null);
+  firstEntry.parentId = metadata.id;
+  const leaf = JSON.parse(rest.at(-1) ?? first) as { id: string };
+  const pin = copy.toolSelection && createSessionToolSelectionEntry(copy.toolSelection, `side-tools-${randomUUID()}`, leaf.id);
+  const boundary = createSideBoundaryEntry(`side-boundary-${randomUUID()}`, pin?.id ?? leaf.id);
+  const added = [...(pin ? [pin] : []), boundary].map((entry) => JSON.stringify(entry));
+  writeFileSync(copy.path, [header, JSON.stringify(metadata), JSON.stringify(firstEntry), ...rest, ...added].join("\n") + "\n", { encoding: "utf8" });
+  return { sessionId: copy.sessionId, path: copy.path };
+}
+
+function copySessionBranch(
+  sourcePath: string,
+  liveLeafId: string | null | undefined,
+  nameFor: (source: SessionManager) => string | undefined,
+): { sessionId: string; path: string; name: string | undefined; sourceSessionId: string; toolSelection: string[] | undefined } {
   const live = liveLeafId !== undefined;
   // SessionManager.open() of a missing path silently starts an empty session.
   if (!existsSync(sourcePath)) {
@@ -129,16 +172,19 @@ export function forkSessionBranch(
   if (readSubagentRun(branch as unknown as SessionEntry[], "", sourcePath)) {
     throw new SessionForkError("subagent", "A subagent session cannot be forked");
   }
+  // The same read for a side chat: forking it would leak its parent's context
+  // into a visible session (ADR 0007; promote is the intended path).
+  if (readSideRelation(branch as unknown as SessionEntry[])) {
+    throw new SessionForkError("side", "A side chat cannot be forked");
+  }
   if (!branch.some((entry) => entry.type === "message")) {
     throw new SessionForkError("empty", "Nothing to fork: the session has no messages");
   }
 
   // Read before createBranchedSession() repoints the instance to the copy.
-  const name = sourceTitle === null ? undefined : forkSessionName(
-    sourceTitle?.trim() || manager.getSessionId().slice(0, 12),
-    randomBytes(2).toString("hex"),
-    typeof manager.getHeader()?.parentSession === "string",
-  );
+  const name = nameFor(manager);
+  const sourceSessionId = manager.getSessionId();
+  const toolSelection = readSessionToolSelection(manager.getEntries() as unknown as SessionEntry[]);
   const cutId = recordedToolResultId(manager, branch[branch.length - 1]) ?? leafId;
   const path = manager.createBranchedSession(cutId);
   // Appended to the copy's file; a shell-only copy keeps it in memory until
@@ -154,5 +200,5 @@ export function forkSessionBranch(
     }
   }
   if (!path || !existsSync(path)) throw new Error("Failed to fork the session");
-  return { sessionId: manager.getSessionId(), path, name };
+  return { sessionId: manager.getSessionId(), path, name, sourceSessionId, toolSelection };
 }

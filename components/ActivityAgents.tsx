@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
-import { countRunningSubagents } from "@/lib/session-family";
+import { countRunningSubagents, sideChatTitle } from "@/lib/session-family";
 import type { SessionUsageSummary } from "@/lib/session-stats";
 import { formatActiveDuration, formatCompactCount, formatCostShort } from "@/lib/session-stats-format";
 import type { SessionInfo, SubagentSessionStatus } from "@/lib/types";
@@ -17,7 +17,9 @@ export interface ActivityAgentsProps {
   /** Subagents with a viewer tab in the open right panel. */
   openSubagentTabIds: ReadonlySet<string>;
   /** Opens a subagent's read-only viewer tab in the right panel (the `Agent` card's button), or closes it when open. */
-  onToggleSubagentTab: (sessionId: string, label: string) => void;
+  onToggleSubagentTab: (sessionId: string, label: string, side?: boolean) => void;
+  /** Forks the main agent into a side chat and opens its tab; answers the refusal to show, or null. */
+  onNewSideChat: () => Promise<string | null>;
 }
 
 const STATS_POLL_MS = 3000;
@@ -127,14 +129,6 @@ function formatRelativeTime(value: string, locale: string): string {
   return formatter.format(Math.round(elapsedHours / 24), "day");
 }
 
-export function statusColor(status: SubagentSessionStatus): string {
-  if (status === "running" || status === "starting") return "var(--accent)";
-  if (status === "completed") return "#16a34a";
-  if (status === "failed") return "#dc2626";
-  if (status === "aborted") return "#d97706";
-  return "var(--text-dim)";
-}
-
 /** The run's state as a mark. A `label` makes it an image saying which state; alone it is decor. */
 export function StatusIcon({ status, label }: { status: SubagentSessionStatus; label?: string }) {
   const named = label ? { role: "img" as const, "aria-label": label } : { "aria-hidden": true as const };
@@ -175,6 +169,8 @@ interface RowProps {
   onSelect(): void;
   tabShown?: boolean;
   onToggleTab?(): void;
+  onNewSideChat?(): void;
+  newSideChatPending?: boolean;
 }
 
 /** The family's root, drawn where a subagent row shows its run's mark. */
@@ -186,19 +182,29 @@ function MainGlyph() {
   );
 }
 
+/** A side chat, drawn where a subagent row shows its run's mark. */
+function SideChatGlyph() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 12a8 8 0 0 1-8 8H5.5a2 2 0 0 1-1.4-3.4A8 8 0 1 1 21 12z" />
+    </svg>
+  );
+}
+
 /**
  * One agent on one line: its state as a mark, what it is, what it cost. The tooltip carries what
  * the line has no room for — the profile, the model and its reasoning level, when the session last
  * moved, the usage breakdown — the way a task card's line names the command and its tooltip holds
  * the whole one.
  */
-function AgentRow({ session, main, selected, running, usage, onSelect, tabShown, onToggleTab }: RowProps) {
+function AgentRow({ session, main, selected, running, usage, onSelect, tabShown, onToggleTab, onNewSideChat, newSideChatPending }: RowProps) {
   const { locale, t } = useI18n();
   const relation = session.relation?.kind === "subagent" ? session.relation : null;
+  const side = session.relation?.kind === "side";
   const status: SubagentSessionStatus = running ? "running" : relation?.status ?? "completed";
   const statusLabel = t(`agentSwitcher.status.${status}`);
-  const primary = main ? t("agentSwitcher.main") : relation?.description || sessionTitle(session);
-  const profile = relation?.profile ?? t("agentSwitcher.subagent");
+  const primary = main ? t("agentSwitcher.main") : side ? sideChatTitle(session, t("agentSwitcher.sideChat")) : relation?.description || sessionTitle(session);
+  const profile = side ? t("agentSwitcher.sideChat") : relation?.profile ?? t("agentSwitcher.subagent");
   const model = usage?.model ? `${usage.model.provider}/${usage.model.modelId}` : null;
   const thinkingLevel = usage?.thinkingLevel && usage.thinkingLevel !== "off" ? usage.thinkingLevel : null;
   const tip = [
@@ -211,18 +217,33 @@ function AgentRow({ session, main, selected, running, usage, onSelect, tabShown,
     <div className={`agent-row${selected ? " is-selected" : ""}`} title={tip}>
       <button type="button" role="option" aria-selected={selected} className="agent-open" onClick={onSelect}>
         <span className={`agent-glyph${running ? " is-running" : ""}${main ? " is-main" : ""}`}>
-          {main ? <MainGlyph /> : <StatusIcon status={status} label={statusLabel} />}
+          {main ? <MainGlyph /> : side ? <SideChatGlyph /> : <StatusIcon status={status} label={statusLabel} />}
         </span>
         <span className="agent-name">{primary}</span>
         {hasUsage(usage) && <UsageLine usage={usage} />}
       </button>
+      {onNewSideChat && (
+        <button
+          type="button"
+          className="agent-tab"
+          onClick={onNewSideChat}
+          disabled={newSideChatPending}
+          title={t("sideChat.new")}
+          aria-label={t("sideChat.new")}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M21 12a8 8 0 0 1-8 8H5.5a2 2 0 0 1-1.4-3.4A8 8 0 1 1 21 12z" /><path d="M13 8.5v7M9.5 12h7" />
+          </svg>
+        </button>
+      )}
       {onToggleTab && (
         <button
           type="button"
           className={`agent-tab${tabShown ? " is-shown" : ""}`}
           onClick={onToggleTab}
-          title={t(tabShown ? "subagent.closeTab" : "subagent.openTab")}
-          aria-label={t(tabShown ? "subagent.closeTab" : "subagent.openTab")}
+          disabled={selected}
+          title={selected ? t("agentSwitcher.openInMainChat") : t(tabShown ? (side ? "sideChat.closeTab" : "subagent.closeTab") : side ? "sideChat.openTab" : "subagent.openTab")}
+          aria-label={selected ? t("agentSwitcher.openInMainChat") : t(tabShown ? (side ? "sideChat.closeTab" : "subagent.closeTab") : side ? "sideChat.openTab" : "subagent.openTab")}
           aria-pressed={tabShown}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -237,9 +258,10 @@ function AgentRow({ session, main, selected, running, usage, onSelect, tabShown,
 
 /**
  * The activity view's Agents section: the session on screen and every subagent it delegated, one
- * row each. A row opens that session in the chat; its side button toggles the read-only transcript
- * tab in the rail. The numbers are the family's own — the rows' and the header's sum — counted the
- * way the session info popover counts them, so the run's cost is readable without opening it.
+ * row each. A row opens that session in the chat; its side button toggles the transcript tab in the
+ * rail, and the root's starts a side chat. The numbers are the family's own — the rows' and the
+ * header's sum — counted the way the session info popover counts them, so the run's cost is
+ * readable without opening it.
  */
 export function ActivityAgents({
   rootSession,
@@ -249,9 +271,23 @@ export function ActivityAgents({
   onSelectSession,
   openSubagentTabIds,
   onToggleSubagentTab,
+  onNewSideChat,
 }: ActivityAgentsProps) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
+  const [newSideChatPending, setNewSideChatPending] = useState(false);
+  const [newSideChatError, setNewSideChatError] = useState<string | null>(null);
+  const handleNewSideChat = async () => {
+    setNewSideChatPending(true);
+    setNewSideChatError(null);
+    try {
+      setNewSideChatError(await onNewSideChat());
+    } catch (error) {
+      setNewSideChatError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setNewSideChatPending(false);
+    }
+  };
   const sortedSubagents = useMemo(() => [...subagents].sort((a, b) => {
     const aRunning = runningSessionIds.has(a.id);
     const bRunning = runningSessionIds.has(b.id);
@@ -262,7 +298,8 @@ export function ActivityAgents({
   const visibleSubagents = normalizedQuery
     ? sortedSubagents.filter((session) => {
         const relation = session.relation?.kind === "subagent" ? session.relation : null;
-        return [relation?.description, relation?.profile, session.name, session.firstMessage]
+        const sideLabel = session.relation?.kind === "side" ? t("agentSwitcher.sideChat") : null;
+        return [relation?.description, relation?.profile, sideLabel, session.name, session.firstMessage]
           .some((value) => value?.toLowerCase().includes(normalizedQuery));
       })
     : sortedSubagents;
@@ -297,7 +334,7 @@ export function ActivityAgents({
       <div className="activity-section-head">
         <span className="activity-section-title">{t("agentSwitcher.title")}</span>
         <span className={`activity-section-count${runningCount > 0 ? " is-running" : ""}`}>
-          {t("agentSwitcher.count", { count: subagents.length })}
+          {t(subagents.length === 1 ? "agentSwitcher.countOne" : "agentSwitcher.count", { count: subagents.length })}
           {runningCount > 0 && ` · ${t("agentSwitcher.runningCount", { count: runningCount })}`}
         </span>
         {familyUsage && (
@@ -325,7 +362,12 @@ export function ActivityAgents({
           running={runningSessionIds.has(rootSession.id)}
           usage={usage[rootSession.id]}
           onSelect={() => onSelectSession(rootSession)}
+          onNewSideChat={handleNewSideChat}
+          newSideChatPending={newSideChatPending}
         />
+        {newSideChatError && (
+          <div className="agent-error" role="alert">{newSideChatError}</div>
+        )}
         {visibleSubagents.map((session) => (
           <AgentRow
             key={session.id}
@@ -336,6 +378,10 @@ export function ActivityAgents({
             onSelect={() => onSelectSession(session)}
             tabShown={openSubagentTabIds.has(session.id)}
             onToggleTab={() => {
+              if (session.relation?.kind === "side") {
+                onToggleSubagentTab(session.id, t("sideChat.title"), true);
+                return;
+              }
               const relation = session.relation?.kind === "subagent" ? session.relation : null;
               onToggleSubagentTab(session.id, relation?.description || relation?.profile || sessionTitle(session));
             }}

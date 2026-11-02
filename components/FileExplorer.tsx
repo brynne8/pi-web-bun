@@ -18,6 +18,7 @@ import { uploadFiles, type DroppedItem, type UploadConflictStrategy, type Upload
 import { buildSearchTree, type SearchTreeNode } from "@/lib/search-tree";
 import type { FileTreeHiddenReason } from "@/lib/file-tree-visibility";
 import { createExpandedPathsMemory } from "@/lib/file-tree-expansion";
+import { loadChangesViewMode, saveChangesViewMode, type ChangesViewMode } from "@/lib/sidebar-prefs";
 import { droppedItems } from "@/hooks/useDragDrop";
 import { useI18n } from "@/hooks/useI18n";
 import { getVisibleRowIndices, revealScrollTop } from "@/lib/session-tree";
@@ -466,19 +467,23 @@ const ChangeRow = memo(function ChangeRow({
   cwd,
   handlers,
   t,
+  depth = 0,
+  treeMode = false,
 }: {
   status: GitFileStatus;
   cwd: string;
   handlers: RefObject<RowHandlers>;
   t: Translate;
+  depth?: number;
+  treeMode?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   const name = getFileName(status.filePath);
   const rel = getRelativeFilePath(status.filePath, cwd);
   // Split the path so the directory part ellipsizes while the file name stays fully visible
   const lastSlash = rel.lastIndexOf("/");
-  const dirPart = lastSlash >= 0 ? rel.slice(0, lastSlash + 1) : "";
-  const baseName = lastSlash >= 0 ? rel.slice(lastSlash + 1) : rel;
+  const dirPart = !treeMode && lastSlash >= 0 ? rel.slice(0, lastSlash + 1) : "";
+  const baseName = treeMode ? name : (lastSlash >= 0 ? rel.slice(lastSlash + 1) : rel);
   return (
     <div
       onClick={() => handlers.current.onOpenFile(status.filePath, name, { modeHint: "diff" })}
@@ -490,8 +495,8 @@ const ChangeRow = memo(function ChangeRow({
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 6,
-        paddingLeft: 10,
+        gap: treeMode ? 4 : 6,
+        paddingLeft: treeMode ? 8 + depth * 14 : 10,
         paddingRight: 8,
         height: FILE_TREE_ROW_HEIGHT,
         cursor: "pointer",
@@ -502,6 +507,7 @@ const ChangeRow = memo(function ChangeRow({
       }}
     >
       <GitStatusBadge status={status} t={t} />
+      {treeMode && <span style={{ width: 10, flexShrink: 0 }} />}
       <span style={{ flexShrink: 0, display: "flex", alignItems: "center", opacity: 0.85 }}>
         {getFileIcon(name, 13)}
       </span>
@@ -535,7 +541,7 @@ const ChangeRow = memo(function ChangeRow({
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
-            flexShrink: 0,
+            flexShrink: treeMode ? 1 : 0,
             maxWidth: "100%",
           }}
         >
@@ -549,7 +555,8 @@ const ChangeRow = memo(function ChangeRow({
 /** One row of the explorer's single windowed scroller: a tree entry, a changed file, the changes header, or a one-line note. */
 type DisplayRow =
   | { kind: "tree"; key: string; row: FlatTreeRow; onToggle: (fullPath: string, open: boolean) => void }
-  | { kind: "change"; key: string; status: GitFileStatus }
+  | { kind: "change"; key: string; status: GitFileStatus; depth?: number }
+  | { kind: "change-dir"; key: string; node: SearchTreeNode; depth: number; open: boolean; onToggle: (path: string, open: boolean) => void }
   | { kind: "change-header"; key: string; count: number; additions: number; deletions: number }
   | { kind: "message"; key: string; text: string; tone?: "error" };
 
@@ -612,6 +619,8 @@ export const WindowedList = memo(function WindowedList({
   dropTargetPath,
   handlers,
   cwd,
+  changesViewMode,
+  onToggleChangesViewMode,
   t,
   listRef,
 }: {
@@ -625,6 +634,8 @@ export const WindowedList = memo(function WindowedList({
   dropTargetPath: string | null;
   handlers: RefObject<RowHandlers>;
   cwd: string;
+  changesViewMode?: ChangesViewMode;
+  onToggleChangesViewMode?: () => void;
   t: Translate;
   listRef: RefObject<HTMLDivElement | null>;
 }) {
@@ -665,7 +676,14 @@ export const WindowedList = memo(function WindowedList({
         if (row.kind === "change") {
           return (
             <div key={row.key} style={wrapper}>
-              <ChangeRow status={row.status} cwd={cwd} handlers={handlers} t={t} />
+              <ChangeRow status={row.status} cwd={cwd} handlers={handlers} t={t} depth={row.depth} treeMode={row.depth !== undefined} />
+            </div>
+          );
+        }
+        if (row.kind === "change-dir") {
+          return (
+            <div key={row.key} style={wrapper}>
+              <ChangesFolderRow node={row.node} depth={row.depth} open={row.open} onToggle={row.onToggle} />
             </div>
           );
         }
@@ -676,10 +694,40 @@ export const WindowedList = memo(function WindowedList({
               style={wrapper}
               aria-label={t("files.changeStats", { count: row.count, additions: row.additions, deletions: row.deletions })}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: 6, height: FILE_TREE_ROW_HEIGHT, padding: "0 10px", fontSize: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, height: FILE_TREE_ROW_HEIGHT, padding: "0 6px 0 10px", fontSize: 12 }}>
                 <span style={{ color: "var(--text-dim)" }}>{t("files.changedCount", { count: row.count })}</span>
                 <span style={{ color: GIT_STATUS_COLORS.added, fontFamily: "var(--font-mono)" }}>+{row.additions}</span>
                 <span style={{ color: GIT_STATUS_COLORS.deleted, fontFamily: "var(--font-mono)" }}>-{row.deletions}</span>
+                {changesViewMode && onToggleChangesViewMode && (
+                  <>
+                    <span style={{ flex: 1 }} />
+                    <button
+                      type="button"
+                      onClick={onToggleChangesViewMode}
+                      title={changesViewMode === "list" ? t("files.viewAsTree") : t("files.viewAsList")}
+                      aria-label={changesViewMode === "list" ? t("files.viewAsTree") : t("files.viewAsList")}
+                      aria-pressed={changesViewMode === "tree"}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: 22,
+                        height: 22,
+                        padding: 0,
+                        border: "none",
+                        borderRadius: 4,
+                        background: "transparent",
+                        color: "var(--text-dim)",
+                        cursor: "pointer",
+                        flexShrink: 0,
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-dim)"; }}
+                    >
+                      <ChangesViewToggleIcon mode={changesViewMode} />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           );
@@ -696,6 +744,109 @@ export const WindowedList = memo(function WindowedList({
     </div>
   );
 });
+
+function ChangesFolderRow({
+  node,
+  depth,
+  open,
+  onToggle,
+}: {
+  node: SearchTreeNode;
+  depth: number;
+  open: boolean;
+  onToggle: (path: string, open: boolean) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      onClick={() => onToggle(node.path, !open)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      title={node.path}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+        paddingLeft: 8 + depth * 14,
+        paddingRight: 8,
+        height: 24,
+        cursor: "pointer",
+        background: hovered ? "var(--bg-hover)" : "transparent",
+        borderRadius: 4,
+        userSelect: "none",
+      }}
+    >
+      <svg
+        width="10" height="10" viewBox="0 0 10 10" fill="none"
+        stroke="var(--text-dim)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+        style={{ flexShrink: 0, transform: open ? "rotate(90deg)" : "none", transition: "transform 0.1s" }}
+        aria-hidden="true"
+      >
+        <polyline points="3 2 7 5 3 8" />
+      </svg>
+      <span style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
+        <FolderIcon size={14} open={open} />
+      </span>
+      <span
+        style={{
+          fontSize: 12,
+          color: "var(--text)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          flex: 1,
+        }}
+      >
+        {node.name}
+      </span>
+    </div>
+  );
+}
+
+type ChangeTreeDisplayRow =
+  | { kind: "dir"; key: string; node: SearchTreeNode; depth: number; open: boolean }
+  | { kind: "file"; key: string; status: GitFileStatus; depth: number };
+
+function flattenChangesTree(
+  nodes: SearchTreeNode[],
+  statusByPath: Map<string, GitFileStatus>,
+  collapsedPaths: Set<string>,
+  depth = 0,
+): ChangeTreeDisplayRow[] {
+  const rows: ChangeTreeDisplayRow[] = [];
+  for (const node of nodes) {
+    if (node.isDir) {
+      const open = !collapsedPaths.has(node.path);
+      rows.push({ kind: "dir", key: `d:${node.path}`, node, depth, open });
+      if (open) rows.push(...flattenChangesTree(node.children, statusByPath, collapsedPaths, depth + 1));
+    } else {
+      const status = statusByPath.get(node.path);
+      if (status) rows.push({ kind: "file", key: `c:${status.filePath}`, status, depth });
+    }
+  }
+  return rows;
+}
+
+function ChangesViewToggleIcon({ mode }: { mode: ChangesViewMode }) {
+  if (mode === "tree") {
+    // List icon: switching back to the flat list
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M8 6h13" /><path d="M8 12h13" /><path d="M8 18h13" />
+        <path d="M3 6h.01" /><path d="M3 12h.01" /><path d="M3 18h.01" />
+      </svg>
+    );
+  }
+  // Tree icon: switching to the folder tree
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 3v12" /><path d="M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+      <path d="M6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+      <path d="M18 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+      <path d="M9 12h6" /><path d="M12 12v3" />
+    </svg>
+  );
+}
 
 export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({
   cwd,
@@ -723,6 +874,9 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [highlightedPaths, setHighlightedPaths] = useState<Set<string>>(new Set());
   const [gitFiles, setGitFiles] = useState<GitFileStatus[]>([]);
   const [gitLineStats, setGitLineStats] = useState({ additions: 0, deletions: 0 });
+  const [changesViewMode, setChangesViewMode] = useState<ChangesViewMode>("list");
+  // Folders stay open unless collapsed here, so a refresh or a newly changed folder never folds them.
+  const [collapsedChangeDirs, setCollapsedChangeDirs] = useState<Set<string>>(() => new Set());
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -960,12 +1114,42 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     return result;
   }, [treeDisplayRows]);
 
-  // The windowed changed-files list: its stats header and one row per change.
+  const changesByRelativePath = useMemo(() => new Map(gitFiles.map((status) => [
+    normalizeFilePathSlashes(getRelativeFilePath(status.filePath, cwd)).replace(/^\/+/, ""),
+    status,
+  ])), [cwd, gitFiles]);
+  const changesTree = useMemo(() => buildSearchTree([...changesByRelativePath.keys()]), [changesByRelativePath]);
+
+  const handleToggleChangesExpanded = useCallback((path: string, open: boolean) => {
+    setCollapsedChangeDirs((prev) => {
+      const next = new Set(prev);
+      if (open) next.delete(path); else next.add(path);
+      return next;
+    });
+  }, []);
+
+  const handleChangesViewModeToggle = useCallback(() => {
+    setChangesViewMode((prev) => {
+      const next: ChangesViewMode = prev === "list" ? "tree" : "list";
+      saveChangesViewMode(next);
+      return next;
+    });
+  }, []);
+
+  // The windowed changed-files list: its stats header and one row per change,
+  // as a flat list or as the repository's folders with their changed files.
   const changeDisplayRows = useMemo(() => {
     const rows: DisplayRow[] = [{ kind: "change-header", key: "change-header", count: gitFiles.length, additions: gitLineStats.additions, deletions: gitLineStats.deletions }];
-    for (const status of gitFiles) rows.push({ kind: "change", key: `c:${status.filePath}`, status });
+    if (changesViewMode === "tree") {
+      for (const row of flattenChangesTree(changesTree, changesByRelativePath, collapsedChangeDirs)) {
+        if (row.kind === "dir") rows.push({ kind: "change-dir", key: row.key, node: row.node, depth: row.depth, open: row.open, onToggle: handleToggleChangesExpanded });
+        else rows.push({ kind: "change", key: row.key, status: row.status, depth: row.depth });
+      }
+    } else {
+      for (const status of gitFiles) rows.push({ kind: "change", key: `c:${status.filePath}`, status });
+    }
     return rows;
-  }, [gitFiles, gitLineStats]);
+  }, [gitFiles, gitLineStats, changesViewMode, changesTree, changesByRelativePath, collapsedChangeDirs, handleToggleChangesExpanded]);
 
   const searchActive = fileSearchOpen && hasSearchQuery;
   const treeActive = (changesCollapsed || gitFiles.length === 0) && !searchActive;
@@ -1252,6 +1436,10 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   useEffect(() => {
     onChangesCountChange?.(gitFiles.length);
   }, [gitFiles, onChangesCountChange]);
+
+  useEffect(() => {
+    setChangesViewMode(loadChangesViewMode());
+  }, []);
 
   // Track the sidebar's own scroller: its scrollTop and height drive the
   // window, and the fixed content above the list (upload feedback, the search
@@ -1557,6 +1745,8 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
             dropTargetPath={dropTargetPath}
             handlers={handlersRef}
             cwd={cwd}
+            changesViewMode={changesViewMode}
+            onToggleChangesViewMode={handleChangesViewModeToggle}
             t={t}
             listRef={listRef}
           />

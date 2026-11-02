@@ -47,6 +47,7 @@ import {
 import { sessionPathKey } from "./session-path";
 import { forgetSessionUiState } from "./session-ui-state";
 import { readSubagentRun, SUBAGENT_META_TYPE } from "./subagents";
+import { readSideRelation } from "./side-session";
 import type { SessionEntry, SessionHeader } from "./types";
 
 /** Most ids one POST /api/sessions/delete takes; the sidebar sends a bigger project in parts. */
@@ -159,7 +160,7 @@ export async function deleteSessions(
   const childrenByParent = new Map<string, string[]>();
   const indexedChildIds = new Set<string>();
   for (const session of sessions) {
-    if (session.relation?.kind === "subagent") {
+    if (session.relation?.kind === "subagent" || session.relation?.kind === "side") {
       addChild(childrenByParent, session.relation.parentSessionId, session.id);
       indexedChildIds.add(session.id);
     }
@@ -220,9 +221,16 @@ export async function deleteSessions(
           try { return [JSON.parse(line) as SessionEntry]; } catch { return []; }
         });
         const subagent = readSubagentRun(entries, header.id, childPath);
-        if (!subagent) continue;
-        addChild(childrenByParent, subagent.parentSessionId, header.id);
-        sessionPaths.set(header.id, childPath);
+        if (subagent) {
+          addChild(childrenByParent, subagent.parentSessionId, header.id);
+          sessionPaths.set(header.id, childPath);
+        } else {
+          const side = readSideRelation(entries);
+          if (side) {
+            addChild(childrenByParent, side.parentSessionId, header.id);
+            sessionPaths.set(header.id, childPath);
+          }
+        }
         const familySizeBefore = familyPathKeys.size;
         familyPathKeys.add(key);
         seedFamily(header.id);

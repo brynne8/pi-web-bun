@@ -173,7 +173,7 @@ test("the viewer holds the snapshot: it fetches nothing and never opens the live
 });
 
 test("the tab reaches the panel through the same machinery as file, terminal and sub-agent tabs", () => {
-  assert.match(tabBar, /kind\?: "terminal" \| "agent" \| "read-snapshot" \| "bg-tasks"/);
+  assert.match(tabBar, /kind\?: "terminal" \| "agent" \| "side" \| "read-snapshot" \| "bg-tasks" \| "bg-output"/);
   assert.match(tabBar, /tab\.kind === "read-snapshot" \? t\("readPanel\.tabLabel", \{ name: tab\.label \}\)/);
 
   assert.match(appShell, /const \[readTabs, setReadTabs\] = useState<\{ toolCallId: string; snapshot: ReadSnapshot \}\[\]\>\(\[\]\)/);

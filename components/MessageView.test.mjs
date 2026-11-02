@@ -105,6 +105,16 @@ test("updates a reused message when it gains or loses its place in a turn", () =
   assert.equal(MessageView.compare({ ...props, isTurnPart: true }, props), false);
 });
 
+test("on a narrow phone a message's actions drop their labels and keep their titles", () => {
+  const html = renderMessage({ role: "user", content: "Hi", timestamp: 1 }, { entryId: "entry", onFork: () => {}, onEditContent: () => {} });
+  assert.equal(html.match(/class="message-action-label"/g)?.length, 3);
+  for (const title of ["Copy message", "Edit from here — branches within this session", "New session — creates an independent copy from here"]) {
+    assert.ok(html.includes(`title="${title}"`), title);
+  }
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(css, /@media \(max-width: 380px\) \{\s*\.message-action-label \{\s*display: none;\s*\}\s*\}/);
+});
+
 test("matches response model aliases and otherwise includes the provider", () => {
   const names = {
     "gateway:claude-sonnet-5": "Sonnet 5",

@@ -94,6 +94,29 @@ async function waitForSubagent<T>(
   }
 }
 
+const SUBAGENT_CANDIDATE_LIMIT = 10;
+
+/**
+ * Names the subagents this session has run when an id finds nothing, so a mistyped id can be
+ * corrected from the error. They come from the details on the session's tool results.
+ */
+function withSubagentCandidates(text: string, sessionManager?: { getEntries?: () => unknown }): string {
+  if (!text.startsWith("Subagent not found:")) return text;
+  const entries = sessionManager?.getEntries?.();
+  if (!Array.isArray(entries)) return text;
+  const candidates = new Map<string, string>();
+  for (let i = entries.length - 1; i >= 0 && candidates.size < SUBAGENT_CANDIDATE_LIMIT; i -= 1) {
+    const entry = entries[i] as { type?: unknown; message?: { role?: unknown; details?: Partial<SubagentToolDetails> } };
+    if (entry?.type !== "message" || entry.message?.role !== "toolResult") continue;
+    const details = entry.message.details;
+    if (details?.kind !== "pi-web-subagent" || !details.sessionId || candidates.has(details.sessionId)) continue;
+    candidates.set(details.sessionId, details.description ?? "");
+  }
+  if (candidates.size === 0) return text;
+  const list = [...candidates].map(([id, description]) => `- ${id}${description ? `: ${description}` : ""}`).join("\n");
+  return `${text}\nThis session's latest subagents:\n${list}`;
+}
+
 function waitTimeoutText(run: SubagentRunInfo | undefined, sessionId: string, timeoutMs: number): string {
   const status = run ? subagentFinalText(run) : `Subagent ${sessionId}: status lookup is still pending.`;
   return `Wait budget exhausted (${timeoutMs / 1000} seconds). ${status} Only the wait ended; the subagent was not cancelled. Do not immediately repeat the same wait; continue independent work or return control to the user. Use a longer wait_timeout when planning a long task.`;
@@ -579,7 +602,7 @@ export function createSubagentExtension(
             };
           } catch (error) {
             return {
-              content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
+              content: [{ type: "text", text: withSubagentCandidates(error instanceof Error ? error.message : String(error), ctx?.sessionManager) }],
               details: undefined,
               isError: true,
             };
@@ -600,7 +623,7 @@ export function createSubagentExtension(
           wait: Type.Optional(Type.Boolean({ description: "Only when the user asks you to wait for a run." })),
           wait_timeout: waitTimeoutParameter(),
         }),
-        async execute(_toolCallId, params, signal) {
+        async execute(_toolCallId, params, signal, _onUpdate, ctx) {
           // Registers this call so a run that settles under it is not also announced as a
           // notification; see `beginSubagentResultCollection` in the runtime.
           let agentId: string;
@@ -638,7 +661,7 @@ export function createSubagentExtension(
             } else {
               run = await runtime.get(agentId);
             }
-            if (!run) return { content: [{ type: "text", text: `Subagent not found: ${params.agent_id}` }], details: undefined, isError: true };
+            if (!run) return { content: [{ type: "text", text: withSubagentCandidates(`Subagent not found: ${params.agent_id}`, ctx?.sessionManager) }], details: undefined, isError: true };
             // The parent now holds this result, so the completion notification must not
             // deliver the same text again and wake a duplicate turn — a foreground run whose
             // wait expired reports on its own as well, so every terminal run is marked.

@@ -114,7 +114,7 @@ test("a group's contents are not the turn's scroll target", () => {
 
 test("skips custom messages without display and counts them nowhere (#1043)", () => {
   // pi's TUI never renders them; one card per idle session restart flooded the chat.
-  assert.match(source, /const msg = options\.messageOverride \?\? messages\[idx\];\s*if \(isHiddenCustomMessage\(msg\)\) return null;/);
+  assert.match(source, /const msg = options\.messageOverride \?\? messages\[idx\];\s*if \(msg\.role === "custom" && msg\.customType === SIDE_BOUNDARY_MESSAGE_TYPE\) return <SideChatDivider key="side-chat-divider" \/>;\s*if \(isHiddenCustomMessage\(msg\)\) return null;/);
 });
 
 test("a turn's footer is the turn's, rendered once where the turn ends", () => {

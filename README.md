@@ -126,8 +126,6 @@ Useful on the first run; none of it needs configuring unless the entry says othe
 
 **Line numbers outside the code's scroller.** Scrolling a wide line sideways in the right panel keeps the line-number gutter where it is. In the source view the sideways scrollbar runs under the code only, never across the numbers. The code is a step smaller than upstream's, and the Source view, the Diff view and the read-snapshot panel all move with it. Upstream pins its numbers too ([#1200](https://github.com/agegr/pi-web/pull/1200)), but inside the code's own scroller, so its sideways scrollbar still runs under them. ([Note](./docs/agents/files-and-access.md#the-line-number-gutter-beside-the-code))
 
-**Prose opens wrapped; code does not.** A Markdown or plain-text file opens with its lines wrapped to the panel in both the Source view and the Diff view. Source code opens unwrapped, one line per row, scrolled sideways, and a log keeps the same rule. The wrap button still flips either kind either way, and that choice holds for the tab. Upstream opens every file unwrapped. ([Note](./docs/agents/files-and-access.md#which-lines-wrap))
-
 **A long file scrolls and stays colored.** The source view renders the lines around the viewport instead of all of them, so a file of any size scrolls without the tab stalling, and the lines on screen stay syntax-highlighted however long the file is. Find in file — the toolbar's magnifier or ⌘/Ctrl+F with the viewer under the pointer — searches every loaded line, not only the rendered window, and scrolls a match into view even when it sits far below. Upstream renders every line and stops highlighting past a thousand lines. ([Note](./docs/agents/files-and-access.md#long-files-a-window-of-lines-and-find-across-all-of-them))
 
 **Controls that stay put during a run.** Stop sits in the composer beside Steer and Follow-up, and the row below the input has one layout whether a run is live or finished — nothing you are about to click turns into something else when the run ends. Upstream guards against a click made just after a run ends ([#1131](https://github.com/agegr/pi-web/pull/1131)). ([Note](./docs/agents/sessions.md#composer-action-row-nothing-moves-under-the-pointer-at-a-run-boundary))
@@ -164,7 +162,7 @@ Useful on the first run; none of it needs configuring unless the entry says othe
 
 **A subagent's report is not summarised away.** A child session that ends its run by writing an answer is not compacted at that moment: the report reaches its parent with no summarising request in between. A `/compact` in the child's own chat and recovery from a context overflow still compact, and the next prompt to the child compacts before that run starts. Upstream checks a subagent's context after every message like any other session, so a child that filled its context pays for a summary of the run that just answered before reporting it. ([Note](./docs/agents/subagents.md#compaction-held-while-the-child-writes-its-report))
 
-**A subagent you answer yourself is still a run.** Type into a subagent's own chat and its run is recorded like any `resume`: the rail's Agents section shows it running, `get_subagent_result` waits on it, the result lands in its transcript, and its parent gets the completion report. This is the way back after a restart cut a child off: send it a line, and the state stops lying. Upstream leaves a prompt typed into a child outside the subagent record, so no status, result, or report follows. ([Note](./docs/agents/subagents.md#built-in-subagents))
+**A subagent you answer yourself is still a run.** Type into a subagent's own chat and its run is recorded like any `resume`: the rail's Agents section shows it running, `get_subagent_result` waits on it, the result lands in its transcript, and its parent gets the completion report. This is the way back after a restart cut a child off: send it a line, and the state stops lying. Upstream settles a run a restart cut off once a turn in that child's chat ends, but a prompt typed into a child otherwise stays outside the subagent record: no running status while it works, and no report to its parent. ([Note](./docs/agents/subagents.md#built-in-subagents))
 
 **Shell variables stay out of the formulas.** A single `$` needs nothing but a matching `$` further along to open a formula, so a message about `$HOME` and `$PATH` reads as math italics, and a Chinese sentence between two dollars does too. This fork reads what sits between the delimiters — a shell variable's name, punctuation only CJK text has, several CJK letters — and leaves that text as written, while `$E=mc^2$`, `$PV=nRT$` and a short CJK variable name stay formulas. Upstream runs remark-math as written: any two `$` open a formula and nothing between them is read ([remark-math](https://github.com/remarkjs/remark-math)). ([Note](./docs/agents/sessions.md#math-delimiters-and-prose-that-only-looks-like-a-formula))
 
@@ -245,6 +243,10 @@ PI_WEB_PASSWORD='a-long-random-password' pi-web --hostname 0.0.0.0
 ```
 
 Password authentication does not encrypt the connection. Do not expose Pi Web over plain HTTP to the internet; use HTTPS through a trusted reverse proxy or a trusted VPN. If a reverse proxy sends an external hostname, add that exact name to `PI_WEB_ALLOWED_HOSTS`. This allow-list does not change the address Pi Web binds to.
+
+### Docker
+
+Each release publishes an image to `ghcr.io/agegr/pi-web`. See [Running Pi Web in Docker](./docs/docker.md) for it, the Compose example and which volumes to keep.
 
 ### HTTP Proxy
 

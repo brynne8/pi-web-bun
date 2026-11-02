@@ -9,8 +9,8 @@ export interface Tab {
   id: string;
   label: string;
   filePath: string;
-  /** File tabs carry no kind: the panel's other tabs are a terminal, a sub-agent's work, one read's slice, the background-task list or one task's log. */
-  kind?: "terminal" | "agent" | "read-snapshot" | "bg-tasks" | "bg-output";
+  /** File tabs carry no kind: the panel's other tabs are a terminal, a sub-agent's work, a side chat, one read's slice, the background-task list or one task's log. */
+  kind?: "terminal" | "agent" | "side" | "read-snapshot" | "bg-tasks" | "bg-output";
   closing?: boolean;
   sourceSessionId?: string | null;
   /** A tab the panel always carries (background tasks) has no close button. */
@@ -83,7 +83,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
           <div
             key={tab.id}
             role="tab"
-            aria-label={tab.kind === "terminal" ? t("terminal.tabLabel", { name: tab.label }) : tab.kind === "agent" ? t("subagent.tabLabel", { name: tab.label }) : tab.kind === "read-snapshot" ? t("readPanel.tabLabel", { name: tab.label }) : tab.label}
+            aria-label={tab.kind === "terminal" ? t("terminal.tabLabel", { name: tab.label }) : tab.kind === "agent" ? t("subagent.tabLabel", { name: tab.label }) : tab.kind === "read-snapshot" ? t("readPanel.tabLabel", { name: tab.label }) : tab.kind === "side" ? t("sideChat.tabLabel") : tab.label}
             aria-selected={isActive}
             tabIndex={isActive || (!activeTabId && tabs[0].id === tab.id) ? 0 : -1}
             onKeyDown={(event) => {
@@ -145,6 +145,10 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               ) : tab.kind === "agent" ? (
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <rect x="5" y="7" width="14" height="11" rx="2" /><path d="M9 11h.01M15 11h.01M9 15h6M12 7V4M10 4h4" />
+                </svg>
+              ) : tab.kind === "side" ? (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M21 12a8 8 0 0 1-8 8H5.5a2 2 0 0 1-1.4-3.4A8 8 0 1 1 21 12z" />
                 </svg>
               ) : getFileIcon(tab.label, 13)}
             </span>

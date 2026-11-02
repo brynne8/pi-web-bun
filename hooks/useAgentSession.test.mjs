@@ -228,7 +228,6 @@ test("forking stays available during a run while in-session branch switches wait
   // in-session edit still waits because pi refuses navigate_tree mid-run.
   assert.match(chatWindowSource, /onFork=\{bashRunning \|\| isNew \? undefined : handleFork\}/);
   assert.match(chatWindowSource, /onEditContent=\{sessionBusy \? undefined : handleEditContent\}/);
-  assert.match(chatWindowSource, /onAskInNewChat && quotedSelection\.sourceEntryId && !bashRunning &&/);
   assert.match(forkSource, /addNotice\(\{ type: "error", message:/);
 
   assert.match(leafChangeSource, /if \(bashRunningRef\.current \|\| agentRunningRef\.current \|\| isCompacting\) return;/);
@@ -696,11 +695,11 @@ test("suppresses sounds and browser attention for the active subagent session", 
     appShellSource.indexOf("  const handleAutoName = useCallback"),
   );
 
-  assert.match(chatWindowSource, /completionNotificationsEnabled = session\?\.relation\?\.kind !== "subagent"/);
+  assert.match(chatWindowSource, /completionNotificationsEnabled = !isHiddenRelation\(session\?\.relation\)/);
   assert.match(chatWindowSource, /completionNotificationsEnabled && soundEnabledRef\.current/);
   assert.match(chatWindowSource, /!completionNotificationsEnabled \|\| !surfaced/);
-  assert.match(completionSource, /selectedSession\?\.relation\?\.kind === "subagent"\) return/);
-  assert.match(attentionSource, /selectedSession\?\.relation\?\.kind === "subagent"\) return/);
+  assert.match(completionSource, /isHiddenRelation\(selectedSession\?\.relation\)\) return/);
+  assert.match(attentionSource, /isHiddenRelation\(selectedSession\?\.relation\)\) return/);
 });
 
 test("routes blocking extension requests through deduplicated browser attention notifications", () => {

@@ -66,7 +66,7 @@ test("the diff view wraps when the viewer wraps", () => {
   // rendered preview (markdown, HTML, table), where there are no lines to wrap.
   assert.match(
     source,
-    /\{\(effectiveDisplayMode === "source" \|\| effectiveDisplayMode === "diff"\) && \(\s*<WrapToggleButton wrapLines=\{wrapLines\} onToggle=\{toggleWrapLines\} \/>/,
+    /\{\(effectiveDisplayMode === "source" \|\| effectiveDisplayMode === "diff"\) && !isBinary && \(\s*<WrapToggleButton wrapLines=\{wrapLines\} onToggle=\{toggleWrapLines\} \/>/,
   );
   // Both header controls are the shared components, so this panel and the read
   // snapshot's cannot drift into two different buttons.
@@ -104,6 +104,26 @@ test("markdown preview keeps app links and opens web and app links in a new tab 
     source,
     /return isExternalMarkdownHref\(href\)\s*\? <a href=\{href\} \{\.\.\.props\} target="_blank" rel="noopener noreferrer">\{children\}<\/a>\s*: <a href=\{href\} \{\.\.\.props\} onClick=\{jumpToMarkdownFragment\}>\{children\}<\/a>;/,
   );
+});
+
+test("the diff view wraps when the viewer wraps, and the key reaches the diff", () => {
+  const diffView = source.slice(source.indexOf("function DiffView"), source.indexOf("function ImageViewer"));
+  assert.notEqual(source.indexOf("function DiffView"), -1);
+
+  // Wrapped: the box stops being the widest line's width and the row's text
+  // column gives way instead of pushing a horizontal scrollbar.
+  assert.match(diffView, /width: wrapLines \? "100%" : "max-content"/);
+  assert.match(diffView, /whiteSpace: wrapLines \? "pre-wrap" : "pre"/);
+  assert.match(diffView, /overflowWrap: wrapLines \? "anywhere" : "normal"/);
+  assert.match(diffView, /flexShrink: wrapLines \? 1 : 0/);
+  // Unwrapped stays exactly as before: one line per row, sideways scroll. The
+  // +/- marker column never shrinks either way.
+  assert.match(diffView, /padding: "0 6px",[\s\S]{0,160}flexShrink: 0/);
+  assert.match(source, /<DiffView patch=\{gitDiff\.patch!\} wrapLines=\{wrapLines\} \/>/);
+
+  // The wrap control is offered for the diff as well as the source, never for a
+  // rendered preview (markdown, HTML, table), where there are no lines to wrap.
+  assert.match(source, /\(effectiveDisplayMode === "source" \|\| effectiveDisplayMode === "diff"\) && !isBinary/);
 });
 
 test("partly loaded HTML previews up to the HTML cap; partly loaded markdown does not", () => {

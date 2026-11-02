@@ -99,8 +99,11 @@ export interface SubagentController {
    * status and result are recorded and its parent is told when it finishes.
    */
   beginDirectPrompt(sessionId: string, task: string): DirectSubagentPromptRun | undefined;
+  /** A turn in a child's own chat ended: settles the run a restart cut off, if that is what the file holds. */
+  settleDirectTurn(sessionId: string, aborted: boolean): void;
 }
 
+/** A run adopted from a prompt sent to a child's own chat: the run and the call that finishes it. */
 export interface DirectSubagentPromptRun {
   run: SubagentRunInfo;
   finish(outcome: { aborted?: boolean; error?: string }): Promise<SubagentRunInfo>;
@@ -1363,6 +1366,26 @@ export function createSubagentController(
     await wrapper.inner.abort();
   }
 
+  function settleDirectTurn(sessionId: string, aborted: boolean): void {
+    // A run in the map records its own result, and a settled run keeps its report.
+    if (getSubagentRuns().has(sessionId)) return;
+    const wrapper = dependencies.getSession(sessionId);
+    if (!wrapper?.isAlive()) return;
+    const manager = wrapper.inner.sessionManager;
+    const run = readSubagentRun(manager.getEntries() as unknown as SessionEntry[], sessionId, wrapper.sessionFile);
+    if (!run || (run.status !== "running" && run.status !== "queued")) return;
+    const text = wrapper.inner.getLastAssistantText()?.trim();
+    const stop = aborted ? undefined : lastAssistantStop(manager);
+    recordResult(manager, {
+      ...run,
+      status: aborted || stop?.aborted ? "aborted" : stop?.error ? "failed" : "completed",
+      completedAt: new Date().toISOString(),
+      ...(text ? { result: text } : {}),
+      ...(stop?.error ? { error: stop.error } : {}),
+    });
+    dependencies.invalidateSessionList();
+  }
+
   return {
     // `abort` goes to the tools as well as to the routes: the parent that started a run can end one
     // it no longer wants, and does not need a report back telling it what it just did.
@@ -1372,5 +1395,6 @@ export function createSubagentController(
     steer,
     abort,
     beginDirectPrompt,
+    settleDirectTurn,
   };
 }

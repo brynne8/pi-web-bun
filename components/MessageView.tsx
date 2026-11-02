@@ -565,7 +565,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
                 </svg>
               )}
-               {copied ? t("i18n.copied") : t("i18n.copy")}
+               <span className="message-action-label">{copied ? t("i18n.copied") : t("i18n.copy")}</span>
             </button>
           </div>
           {(canFork || canEdit || canCancelEdit) && (
@@ -597,7 +597,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                     <polyline points="15 10 20 15 15 20" />
                     <path d="M4 4v7a4 4 0 0 0 4 4h12" />
                   </svg>
-                   {t("i18n.editFromHere")}
+                   <span className="message-action-label">{t("i18n.editFromHere")}</span>
                 </button>
               )}
               {canCancelEdit && (
@@ -620,7 +620,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
                     <path d="M6 6l12 12M18 6L6 18" />
                   </svg>
-                  {t("i18n.cancel")}
+                  <span className="message-action-label">{t("i18n.cancel")}</span>
                 </button>
               )}
               {canFork && (
@@ -648,7 +648,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                     <circle cx="6" cy="18" r="3" />
                     <path d="M18 9a9 9 0 0 1-9 9" />
                   </svg>
-                   {forking ? t("i18n.creating") : t("i18n.newSession")}
+                   <span className="message-action-label">{forking ? t("i18n.creating") : t("i18n.newSession")}</span>
                 </button>
               )}
             </div>
@@ -1025,11 +1025,11 @@ function AssistantMessageView({
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
               </svg>
             )}
-             {copied ? t("i18n.copied") : t("i18n.copy")}
+             <span className="message-action-label">{copied ? t("i18n.copied") : t("i18n.copy")}</span>
           </button>
         )}
-        {time && (
-          <span style={{ fontSize: 10, color: "var(--text-dim)", marginLeft: "auto" }}>{time}</span>
+        {time && !isStreaming && (
+          <span style={{ fontSize: 10, color: "var(--text-dim)", marginLeft: "auto", whiteSpace: "nowrap" }}>{time}</span>
         )}
       </div>
       )}
@@ -2228,7 +2228,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
                     text={text}
                     fallback={isBgTaskNotification
                       ? <pre style={{ margin: 0, color: "var(--text-muted)", fontSize: 12, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{stripBgTaskNotificationPrefix(text)}</pre>
-                      : <MarkdownBody className="markdown-custom-message" cwd={cwd} onOpenFile={onOpenFile}>{stripSubagentNotificationPrefix(text)}</MarkdownBody>}
+                      : <MarkdownBody className="markdown-custom-message" keepTextLayout cwd={cwd} onOpenFile={onOpenFile}>{stripSubagentNotificationPrefix(text)}</MarkdownBody>}
                   />
                 : <span style={{ color: "var(--text-dim)", fontSize: 12 }}>{t("i18n.noMessage")}</span>}
             </div>
