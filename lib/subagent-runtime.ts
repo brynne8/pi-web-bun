@@ -41,6 +41,7 @@ import { projectTrustReloadOptions } from "./project-trust";
 import { createSubagentCodemodeExtension, createSubagentMcpExtensions } from "./builtin-extensions";
 import type { McpHost } from "./mcp-host";
 import { createSubagentMcpPolicyExtension } from "./mcp-read-only-policy";
+import { createSubagentCompactionGuardExtension } from "./subagent-compaction-guard";
 import { resolveShellTools } from "./powershell-settings";
 import { isBuiltInSubagentsEnabled, readSubagentSettings } from "./subagent-settings";
 import { pendingTitleFrom } from "./pending-notifications";
@@ -546,6 +547,7 @@ export function createSubagentController(
           })
         : undefined;
       const extensionFactories = [
+        createSubagentCompactionGuardExtension(),
         ...(codemodeExtension ? [codemodeExtension] : []),
         ...(mcp ? [...mcp.extensions, createSubagentMcpPolicyExtension(() => mcpScope)] : []),
         ...(skillsBinding.loaderOptions.extensionFactories ?? []),
