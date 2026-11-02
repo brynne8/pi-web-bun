@@ -119,6 +119,32 @@ html.dark:root {
   color-scheme: dark;
 }
 
+/* ANSI colours of command output (tool cards, task logs, extension widgets).
+   A fixed hue mixed toward the theme's own ink darkens on a light theme and
+   lifts on a dark one, so one declaration stays legible in all fourteen; black
+   and white have no hue to keep, so they take the theme's greys, as a terminal
+   theme does. */
+:root {
+  --ansi-fg: var(--text);
+  --ansi-bg: var(--bg);
+  --ansi-0: var(--text-dim);
+  --ansi-8: var(--text-dim);
+  --ansi-7: var(--text-muted);
+  --ansi-15: var(--text);
+  --ansi-1: color-mix(in srgb, #d94a45 86%, var(--text));
+  --ansi-2: color-mix(in srgb, #1f8a58 86%, var(--text));
+  --ansi-3: color-mix(in srgb, #a97b1e 86%, var(--text));
+  --ansi-4: color-mix(in srgb, #3b6fe0 86%, var(--text));
+  --ansi-5: color-mix(in srgb, #a94bb2 86%, var(--text));
+  --ansi-6: color-mix(in srgb, #1f8a9c 86%, var(--text));
+  --ansi-9: color-mix(in srgb, #e05247 86%, var(--text));
+  --ansi-10: color-mix(in srgb, #2b8f5c 86%, var(--text));
+  --ansi-11: color-mix(in srgb, #a97b1e 86%, var(--text));
+  --ansi-12: color-mix(in srgb, #5278e8 86%, var(--text));
+  --ansi-13: color-mix(in srgb, #bb57c6 86%, var(--text));
+  --ansi-14: color-mix(in srgb, #2b8fa0 86%, var(--text));
+}
+
 /* a font chosen in Settings wins over the design's own face; :root[data-theme]
    outranks a plain attribute selector, so this one has to be important */
 html:root[style*="--font-ui"] {

@@ -12,7 +12,7 @@ import { parseCompactionSummary } from "@/lib/compaction-summary";
 import { getAssistantErrorMessage, getThinkingPreview, hasAssistantAnswer, isAssistantTruncated, isEmptyThinkingBlock } from "@/lib/message-display";
 import { diffGapLabel, parseUnifiedPatch, unifiedDiffLines, type SplitDiffCell, type SplitDiffFile, type SplitDiffGap, type UnifiedDiffLine } from "@/lib/patch";
 import { applyPatchPreviewToFiles, applyPatchResultHasFailures, extractApplyPatchPaths, getApplyPatchInputText, parseApplyPatchInput } from "@/lib/apply-patch";
-import { isApplyPatchToolName, isEditToolName, isShellToolName } from "@/lib/tool-names";
+import { isApplyPatchToolName, isEditToolName, isPowerShellToolName, isShellToolName } from "@/lib/tool-names";
 import { readSnapshotOfCall, type ReadSnapshot } from "@/lib/read-snapshot";
 import { isToolCallExpanded, setToolCallExpanded } from "@/lib/tool-call-expansion";
 import { isThinkingExpandedByDefault, THINKING_EXPANDED_EVENT } from "@/lib/thinking-expansion-preference";
@@ -20,6 +20,7 @@ import { skillExpansionContent, skillExpansionToCommand } from "@/lib/slash-disp
 import type { SubagentToolDetails } from "@/lib/subagent-extension";
 import { CODEMODE_TOOL_NAME, codemodeCalls, codemodeScript, codemodeScriptPreview, stripCodemodeHeader } from "@/lib/codemode-view";
 import { CodemodeCallList } from "./CodemodeToolView";
+import { PowerShellOutput } from "./PowerShellOutput";
 import { BashCommand } from "./BashCommand";
 import { KeyValueTable } from "./KeyValueTable";
 import { toolFieldsOfInput } from "@/lib/tool-fields";
@@ -1465,6 +1466,7 @@ function ToolCallBlock({ block, result, duration, cwd, onOpenFile, onOpenSubagen
             : <PairedResult
                 text={resultText ?? ""}
                 isEmpty={resultIsEmpty}
+                powershell={isPowerShellToolName(block.toolName)}
                 isError={isError}
               />
         )
@@ -1910,10 +1912,12 @@ function MarkdownResult({ text, isError, cwd, onOpenFile }: {
   );
 }
 
-function PairedResult({ text, isEmpty, isError }: {
+function PairedResult({ text, isEmpty, isError, powershell }: {
   text: string;
   isEmpty: boolean;
   isError: boolean;
+  /** This is a `powershell` call, whose output PowerShell coloured itself. */
+  powershell?: boolean;
 }) {
   const { t } = useI18n();
   return (
@@ -1939,7 +1943,7 @@ function PairedResult({ text, isEmpty, isError }: {
           opacity: isEmpty ? 0.6 : 1,
         }}
       >
-        {isEmpty ? t("i18n.noOutput") : text}
+        {isEmpty ? t("i18n.noOutput") : powershell ? <PowerShellOutput text={text} /> : text}
       </pre>
     </div>
   );

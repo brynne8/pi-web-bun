@@ -24,6 +24,7 @@
 - **侧栏里的读取切片与表格**：点开 `read` 工具卡片会在侧栏打开它真正读到的那一段——Markdown 按 Markdown 渲染，源码行号从读取的偏移接着往下数；CSV 和 TSV 的切片以表格打开，行号沿用文件自己的行号。
 - **长文件也能顺畅阅读**：源码视图只渲染视口附近的行，大文件滚动不卡，屏幕上的行无论文件多长都保持语法高亮，文件内查找搜索每一行而不只是渲染出来的窗口。
 - **命令高亮**：shell 工具卡片把命令按 token 着色，不再是一整条暗色字符串，并在旁边保留 `timeout` 与后台标记。
+- **`powershell` 卡片保留自己的颜色**：红色和绿色以颜色到来，而不是 `[7mError:[0m` 这样的字母；移动光标或清除整行的转义什么都不显示。
 - **工具卡片上的参数按行排**：参数全是普通值的工具调用，会一行一个参数地排成表格，而不是一整块 JSON——不必数引号、也不必展开嵌套。只要有一个值是对象或数组，这张卡片就退回 JSON，因为藏掉一棵子树的表格等于让你看不到那个参数。
 - **放得下的 diff**：edit 和 apply_patch 的改动两栏并排——左边改动前、右边改动后；在手机上改为单栏，因为两个代码栏并排时哪一栏都没法读，删掉的那一行就排在替换它的那一行上面。
 - **按顺序读下来的运行**：模型写的句子留在它写下的位置，中间连着的思考和工具调用各自折进自己那一组「处理详情」，这次运行最后由单独一行收尾——token 数、这一轮改过的文件，和一个把写下的全部内容交出去的「复制」按钮。
@@ -119,6 +120,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **一眼能读懂的 shell 命令。** bash 工具卡片里的命令按 shell 语法高亮，不再是一整条灰字；展开后显示命令本身和它的超时，而不是原始 JSON——于是 `grep -rl "foo" src | xargs rm` 看起来就是一条管道。模型主动要求放到后台跑的命令另有 `(background)` 标记。原版会在参数行里随着流量显示出命令的文字（[#1396](https://github.com/agegr/pi-web/pull/1396)），其余部分仍选择不带样式（[#1135](https://github.com/agegr/pi-web/pull/1135)）。（[说明](./agents/sessions.md#tool-execution-events-on-the-sse-stream)）
 
+**`powershell` 卡片显示自己的颜色。** 不管有没有终端在看，PowerShell 都会给自己的输出上色，而这张卡片会把那些转义显示成字母——`SQLite[7mError:[0m no such column`——因为开启一次转义的那个字符本身什么都不画。现在是红色和绿色告诉你哪一条测试失败了，而反相视频（`bun test` 打印 `(fail)` 用的就是它）变成一块底色。移动光标或清除整行的转义什么都不显示。基本颜色跟随你选的那套主题。原版把工具的输出显示成纯文本，和终端里的 pi 一样。（[说明](./agents/sessions.md#a-powershell-card-draws-its-outputs-colours-libansi-textts-componentspowershelloutputtsx)）
+
 **在对话旁边读文件的那一段。** 点开一张已完成的 `read` 卡片，右侧面板就打开这次调用真正返回的那一段：Markdown 按 Markdown 渲染、一键就能切回它的源码，源码行号从这次读取起始的那一行接着数，CSV 和 TSV 直接成表格、用的还是文件真实行号。面板显示的是模型拿到的内容，不是文件此刻的样子——不重新请求、也不重新读盘。卡片保留自己的表头，把文字交给面板。原版把 read 的输出留在卡片里，并把那张分隔符表格用在文件预览中（[#1136](https://github.com/agegr/pi-web/pull/1136)、[#1150](https://github.com/agegr/pi-web/pull/1150)）。（[说明](./agents/sessions.md#a-read-card-opens-its-slice-in-the-right-panel-toolcallblock-componentsreadsnapshotviewertsx)）
 
 **行号在代码的滚动区之外。** 在右侧面板里把一行宽代码横向挪动时，行号那一栏钉在原地。在源码视图里，横向滚动条只走在代码下面，不会横穿行号。代码字号比原版小一号，源码视图、Diff 视图和读取快照面板一起跟着这一套字号走。原版也在 [#1200](https://github.com/agegr/pi-web/pull/1200) 里把行号钉住了，只是钉在代码自己的滚动容器里，于是横向滚动条仍然从行号下面穿过去。（[说明](./agents/files-and-access.md#the-line-number-gutter-beside-the-code)）
@@ -152,6 +155,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 **子代理用短 id 称呼。** 每份报告、每次停止和转向的回答、每一行运行列表，用的都是会话 id 的最后八位，`Agent` 的 `resume`、`get_subagent_result`、`steer_subagent`、`abort_subagent` 也都认这个写法，完整 id 仍然可用。会话 id 的尾部才是区分两次运行的唯一部分，也是唯一值得在调用之间抄下来的部分。两次运行尾部相同时会被拒绝，不会替你猜。原版打印完整 UUID，也只接受完整 UUID。（[说明](./agents/subagents.md#short-subagent-ids)）
 
 **内置子代理跟随会话的 Code mode。** Explore、Plan 和 General purpose 启动时沿用父会话正在用的 Code mode，不再永远直接调用工具；于是开着 Code mode 的会话不会在一委派出去就把它丢掉。工具权限不变，这三个配置也仍然只读——但在磁盘上放一个同名文件照样可以整体替换其中一个。原版把这三个的 Code mode 默认关着，而「设置 › 子代理」早就能按配置单独改它（[#1097](https://github.com/agegr/pi-web/pull/1097)），只是你不改就一直是关。（[说明](./agents/subagents.md)）
+
+**子代理的报告不会被它自己摘要掉。** 子会话以一段回答结束那次运行时不会被压缩：报告与父会话之间不隔一次生成摘要的请求。在子代理自己的对话里 `/compact`、以及上下文溢出之后的恢复仍旧会压缩，发给它的下一条提示词也会先压缩再开始那次运行。原版每条消息之后都会像检查任何会话一样检查子代理的上下文，所以填满上下文的子代理在把报告交出去之前，要先为刚刚作答的那次运行付一次摘要。（[说明](./agents/subagents.md#compaction-held-while-the-child-writes-its-report)）
 
 **你自己回答的子代理也算一次运行。** 在子代理自己的对话里输入内容，它的运行会像任何一次 `resume` 那样被记录下来：agent 切换器显示它正在运行，`get_subagent_result` 会等它，结果落进它自己的记录，父会话收到完成报告。这是重启把子代理切断之后的回来之路：给它发一行，状态就不再撒谎。原版把输入到子代理里的提示词留在子代理记录之外，于是没有状态、没有结果，也没有报告跟着来。（[说明](./agents/subagents.md#built-in-subagents)）
 

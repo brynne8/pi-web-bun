@@ -44,6 +44,14 @@ export function isShellToolName(toolName: string): boolean {
 }
 
 /**
+ * The PowerShell tool, whose output PowerShell colours on its own.
+ * Only this one's output is drawn with its colours; see `docs/agents/sessions.md`.
+ */
+export function isPowerShellToolName(toolName: string): boolean {
+  return toolName.toLowerCase() === "powershell";
+}
+
+/**
  * `read` and its decorated forms. Unlike the writers, a read's result is worth
  * showing on its own, so the predicate guards the panel shortcut rather than a
  * different rendering.

@@ -1479,3 +1479,36 @@ test("the layout is the viewport's choice, taken once for both the patch input a
   assert.match(source, /const layout: PatchDiffLayout = useIsMobile\(\) \? "stacked" : "split";/);
   assert.equal(countIn(source, "<SplitFilesView"), 2);
 });
+
+test("a powershell card draws its output's colours; every other card prints it raw", () => {
+  const output = "SQLite\x1b[7mError:\x1b[0m no such column: model_name\n\x1b[31m1 fail\x1b[0m\x1b[2K";
+  const render = (toolName) => {
+    const block = { type: "toolCall", toolCallId: `call-${toolName}`, toolName, input: { command: "bun test" } };
+    const result = { role: "toolResult", toolCallId: block.toolCallId, content: [{ type: "text", text: output }], isError: true };
+    clearExpandedToolCalls();
+    setToolCallExpanded(block.toolCallId, true);
+    try {
+      return renderMessage(
+        { role: "assistant", provider: "anthropic", model: "claude-test", content: [block] },
+        { toolResults: new Map([[block.toolCallId, result]]) },
+      );
+    } finally {
+      clearExpandedToolCalls();
+    }
+  };
+
+  const powershell = render("powershell");
+  assert.ok(textOf(powershell).includes("no such column: model_name"));
+  assert.match(powershell, /background-color:var\(--ansi-fg/);
+  assert.match(powershell, /color:var\(--ansi-1,/);
+  // A sequence is never printed: no parameters, and no ESC to hide them behind.
+  assert.ok(!powershell.includes("[7m"));
+  assert.ok(!powershell.includes("\x1b"));
+
+  // The scope is the one tool: a bash card still shows the text as it came.
+  for (const toolName of ["bash", "mcp__srv__run"]) {
+    const html = render(toolName);
+    assert.ok(html.includes("[7mError:"), toolName);
+    assert.ok(!html.includes("var(--ansi-"), toolName);
+  }
+});
