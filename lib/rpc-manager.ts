@@ -54,7 +54,7 @@ import {
   subagentToolOptions,
   SUBAGENT_CONTROL_TOOL_NAMES,
 } from "./subagents";
-import { hasSideMetadata, readSideRelation } from "./side-session";
+import { hasSideMetadata, hasSideNoToolsNotice, readSideRelation, SIDE_NO_TOOLS_TEXT } from "./side-session";
 import { SIDE_SESSION_NAME, sideChatNameFrom } from "./session-family";
 import { createSubagentController, getLiveSubagentStatus, hasUnsettledSubagentRun, type DirectSubagentPromptRun } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
@@ -3601,6 +3601,15 @@ export async function startRpcSession(
         ? subagentToolOptions(subagentResources)
         : toolsOption !== undefined ? { tools: toolsOption } : {}),
     });
+
+    // pi's tools section only says "(none)" for a side chat, which reads like a broken
+    // loadout, so the model is told why. A queued system message is delivered before the
+    // first request (as the subagent's tool notices are), and the chat renders no card for
+    // it. pi persists it, so a reopened side chat that already carries it is left alone.
+    if (sideChatTools && !hasSideNoToolsNotice(sessionManager.getEntries() as unknown as SessionEntry[])) {
+      (inner.agent as { steer?: (message: { role: "system"; content: string; timestamp: number }) => void })
+        .steer?.({ role: "system", content: SIDE_NO_TOOLS_TEXT, timestamp: Date.now() });
+    }
 
     // A pinned selection replaces only the coding tools of the SDK's initial loadout, which
     // already holds the extension tools pi activates on registration and whatever

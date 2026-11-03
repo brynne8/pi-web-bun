@@ -40,9 +40,10 @@ task or losing the parent's context.
    registers and activates no tool at all, whatever the parent had and whatever an
    extension, MCP server, Code mode or subagent would add. The copy still writes the
    parent's tool pin, because an empty pin is what keeps a Chat-only parent on the
-   Chat-only path. Extensions, skills and context files stay loaded (pi lists skills
-   only behind a reader tool, so the prompt carries no skill index), MCP and Code
-   mode are not started. There is no snapshot: reopening reads the same empty
+   Chat-only path. The model is told why in a system message queued for its first
+   request, since pi's tools section only reads `(none)`. Extensions, skills and
+   context files stay loaded (pi lists skills only behind a reader tool, so the
+   prompt carries no skill index), MCP and Code mode are not started. There is no snapshot: reopening reads the same empty
    allow-list back, and metadata that does not parse is refused rather than reopened
    with the parent's tools.
 

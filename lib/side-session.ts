@@ -23,6 +23,12 @@ export const SIDE_BOUNDARY_TEXT = "[Side chat] This is a note from the app, not 
 
 type SideMetadata = { version: 1; parentSessionId: string; createdAt: string };
 
+/**
+ * What the model is told before its first request in a side chat, since pi's
+ * tools section only reads "(none)": a system message, so no card appears.
+ */
+export const SIDE_NO_TOOLS_TEXT = "[Side chat] btw mode: no tools. You cannot read files, run commands or change anything. Answer from the history above and the user's messages; work that needs tools belongs in the parent chat.";
+
 function readSideMetadata(entries: readonly SessionEntry[]): SideMetadata | null {
   const entry = entries.find((item) => item.type === "custom" && item.customType === SIDE_META_TYPE);
   if (entry?.type !== "custom" || typeof entry.data !== "object" || entry.data === null) return null;
@@ -66,6 +72,16 @@ export function createSideBoundaryEntry(id: string, parentId: string) {
     parentId,
     timestamp: new Date().toISOString(),
   };
+}
+
+/**
+ * Whether the side chat already carries the no-tools notice: pi persists a system
+ * message like any other, so queueing it again on every reopen would repeat it.
+ */
+export function hasSideNoToolsNotice(entries: readonly SessionEntry[]): boolean {
+  return entries.some((entry) => entry.type === "message"
+    && entry.message.role === "system"
+    && entry.message.content === SIDE_NO_TOOLS_TEXT);
 }
 
 /**
