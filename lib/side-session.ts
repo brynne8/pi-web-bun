@@ -2,23 +2,16 @@
  * Side chats (ADR 0007): a focused detour beside the main chat. A side chat is
  * a normal session forked from a parent's active tip (`createSideSession()` in
  * `lib/session-fork.ts`) with three differences, all decided here: a
- * `pi-web:side` entry hides it in its parent's family, it keeps only the
- * parent's read-mostly built-in tools, and a hidden message marks where the
- * inherited history ends. The prompt is not touched, so providers with native
- * mid-conversation updates keep the cached prefix.
+ * `pi-web:side` entry hides it in its parent's family, it runs with no tools
+ * at all, and a hidden message marks where the inherited history ends. The
+ * prompt is not touched, so providers with native mid-conversation updates
+ * keep the cached prefix.
  */
 
-import { getCurrentTools } from "@earendil-works/pi-ai";
 import { SIDE_BOUNDARY_MESSAGE_TYPE } from "./session-family";
 import type { SessionEntry } from "./types";
 
 export const SIDE_META_TYPE = "pi-web:side";
-
-/** The tools a side chat may keep of its parent's. */
-export const SIDE_TOOLS: readonly string[] = ["read", "bash", "powershell", "grep", "find", "ls"];
-
-/** What pi's default tools leave when a parent recorded no tools (older transcripts). */
-const SIDE_FALLBACK_TOOLS: readonly string[] = ["read", "bash"];
 
 /**
  * What the model reads at the end of the inherited history. pi sends a custom
@@ -84,18 +77,3 @@ export function sideOwnEntries<T extends { timestamp?: string }>(entries: readon
   return createdAt ? entries.filter((entry) => (entry.timestamp ?? "") > createdAt) : entries;
 }
 
-/**
- * A side chat's tools, which `startRpcSession()` passes as pi's allow-list, so
- * nothing else registers, every extension, MCP, Code mode and subagent tool
- * included: the ones its transcript gives it, a pin first, then the loadout pi
- * recorded, cut down to `SIDE_TOOLS`. Never more than the parent had, so a
- * Read-only parent stays without a shell. Reopening reads the same answer back
- * from the side chat's own transcript.
- */
-export function sideToolNames(
-  pinned: readonly string[] | undefined,
-  systemMessages: Parameters<typeof getCurrentTools>[0],
-): string[] {
-  const recorded = systemMessages.length > 0 ? getCurrentTools(systemMessages).map((tool) => tool.name) : undefined;
-  return (pinned ?? recorded ?? SIDE_FALLBACK_TOOLS).filter((name) => SIDE_TOOLS.includes(name));
-}

@@ -54,7 +54,7 @@ import {
   subagentToolOptions,
   SUBAGENT_CONTROL_TOOL_NAMES,
 } from "./subagents";
-import { hasSideMetadata, readSideRelation, sideToolNames } from "./side-session";
+import { hasSideMetadata, readSideRelation } from "./side-session";
 import { SIDE_SESSION_NAME, sideChatNameFrom } from "./session-family";
 import { createSubagentController, getLiveSubagentStatus, hasUnsettledSubagentRun, type DirectSubagentPromptRun } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
@@ -2985,7 +2985,7 @@ export async function setRpcSessionTools(
       throw new Error("Subagent tool selection is fixed by its profile");
     }
     if (hasSideMetadata(manager.getEntries() as unknown as SessionEntry[])) {
-      throw new Error("Side chat tools are fixed when it is forked");
+      throw new Error("A side chat never has tools");
     }
     if (toolNames === undefined) appendClearedSessionToolSelection(manager);
     else appendSessionToolSelection(manager, toolNames);
@@ -2999,7 +2999,7 @@ export async function setRpcSessionTools(
     throw new Error("Subagent tool selection is fixed by its profile");
   }
   if (hasSideMetadata(existing.inner.sessionManager.getEntries() as unknown as SessionEntry[])) {
-    throw new Error("Side chat tools are fixed when it is forked");
+    throw new Error("A side chat never has tools");
   }
 
   const hasCurrentResourcePolicy = typeof existing.isChatOnly === "function"
@@ -3377,15 +3377,11 @@ export async function startRpcSession(
     subagentResources?.loadExtensions || subagentResources?.loadSkills || subagentResources?.codemode || subagentResources?.mcp,
   );
   const chatOnly = pinnedToolNames?.length === 0 && !subagentLoadsResources;
-  // A side chat (ADR 0007) starts as a normal session, or as Chat only, with fewer tools.
+  // A side chat (ADR 0007) starts as a normal session, or as Chat only, with no tools.
   const isSideChat = hasSideMetadata(sessionEntries);
   if (isSideChat && !readSideRelation(sessionEntries)) throw new Error("Invalid side chat metadata");
   const sideChatTools = isSideChat && !chatOnly;
-  const selectedToolNames = sideChatTools
-    ? sideToolNames(pinnedToolNames, sessionManager.getBranch().flatMap((entry) => (
-        entry.type === "message" && entry.message.role === "system" ? [entry.message] : []
-      )))
-    : pinnedToolNames;
+  const selectedToolNames = sideChatTools ? [] : pinnedToolNames;
   const finishStartingSession = trackStartingSession(sessionCwd);
   const starting = (async () => {
     // Some extensions access the SDK's global theme even outside the terminal UI.
@@ -3421,9 +3417,6 @@ export async function startRpcSession(
     // Code mode is on unless the settings say otherwise (ADR 0006): the session's
     // manager supplies that default where pi reads `defaultTools` at startup.
     const settingsManager = withCodemodeDefault(SettingsManager.create(sessionCwd, agentDir));
-    // Here the allow-list is the point: extensions stay loaded, their tools and what
-    // the parent did not have stay out of the registry.
-    if (sideChatTools) toolsOption = resolveShellTools(selectedToolNames ?? [], settingsManager.getDefaultTools());
     // Chat-only sessions and subagents that replace Pi's prompt send an exact
     // system prompt. The prompt is resolved at prompt time through this inline
     // extension: it may read the session's context files, which exist only
