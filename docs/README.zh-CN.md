@@ -114,6 +114,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **长时间运行的命令转后台。** shell 命令跑过两分钟就移交成后台任务：agent 继续往下做，命令结束后带着日志文件以一张已完成的卡片回来。它打印的行数超过模型用 `max_output_lines` 设的上限时也会移交，所以一条会把上下文灌爆的命令，不必靠砍短输出来躲。开关在**设置 → 常规 → 后台 bash 任务**，默认关闭；关着的时候就是原版那个 bash 工具，一模一样。原版的立场是：后台执行该由 pi 自己提供，而不是由网页包装层提供（[#1132](https://github.com/agegr/pi-web/pull/1132)）。（[移交是怎么发生的](./agents/background-bash.md#two-ways-into-the-background)）
 
+**这次会话在做的一切，收在右侧面板里。** 活动视图按你能动手的东西排序：看着不对的、这次对话委派出去的 subagent、它的后台命令，以及服务器还为它留着 wrapper 或事件流的会话；而支撑这些说法的那些数字（这个页面的连接数和轮询往返、服务器的总计、哪些页面连着）单独收进一个折叠里，合上就把它们清出视线。一张任务的卡片打开它的输出；一个 subagent 的行可以把对话切到它，或者读它的 transcript。原版只把正在跑的命令留在它自己的工具卡片里。（[说明](./agents/background-bash.md#the-rails-activity-view)）
+
 **跑完的东西不会再看不见。** 后台命令或子代理没法在父会话运行途中报告自己。已结算的报告汇成一批送达，只把父会话唤醒一次，每份仍保留自己的卡片；在还没有结果、而后台仍在跑的时候，`await_notifications` 会等到下一份报告；等待期间每个轮次都会收到一次提醒。模型已经用 `get_subagent_result` 读过的结果会从这一批里撤下。原版是一份发一条消息，而且要等父会话空闲。（[说明](./agents/pending-notifications.md)）
 
 **断流不再赔上整次运行。** 有些中继会在响应中途掐断 HTTP/2 流，运行就连同写到一半的回答一起停下。pi 自己的重试表从 1.4.0 起收录了常见的措辞，本分支再补上它还没收的那些，沿用 pi 自己的重试次数与退避，同时仍然把你按下的「停止」、额度被拒、上下文装满当作致命错误处理。原版的立场是浏览器应当和终端里的 pi 重试得一模一样（[#1134](https://github.com/agegr/pi-web/pull/1134)）。（[重试什么、不重试什么](./agents/sessions.md#agentsession-lifecycle-librpc-managerts)）
@@ -125,8 +127,6 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 **在对话旁边读文件的那一段。** 点开一张已完成的 `read` 卡片，右侧面板就打开这次调用真正返回的那一段：Markdown 按 Markdown 渲染、一键就能切回它的源码，源码行号从这次读取起始的那一行接着数，CSV 和 TSV 直接成表格、用的还是文件真实行号。面板显示的是模型拿到的内容，不是文件此刻的样子——不重新请求、也不重新读盘。卡片保留自己的表头，把文字交给面板。原版把 read 的输出留在卡片里，并把那张分隔符表格用在文件预览中（[#1136](https://github.com/agegr/pi-web/pull/1136)、[#1150](https://github.com/agegr/pi-web/pull/1150)）。（[说明](./agents/sessions.md#a-read-card-opens-its-slice-in-the-right-panel-toolcallblock-componentsreadsnapshotviewertsx)）
 
 **行号在代码的滚动区之外。** 在右侧面板里把一行宽代码横向挪动时，行号那一栏钉在原地。在源码视图里，横向滚动条只走在代码下面，不会横穿行号。代码字号比原版小一号，源码视图、Diff 视图和读取快照面板一起跟着这一套字号走。原版也在 [#1200](https://github.com/agegr/pi-web/pull/1200) 里把行号钉住了，只是钉在代码自己的滚动容器里，于是横向滚动条仍然从行号下面穿过去。（[说明](./agents/files-and-access.md#the-line-number-gutter-beside-the-code)）
-
-**散文默认折行，代码不折。** Markdown 和纯文本文件的源码视图和 Diff 视图打开时就按面板宽度折行，长句子能一口气读到底，不必拖动横向滚动条去找后半句。源代码则默认不折行，一行一行铺开、横向滚动——和编辑器一致，因为读代码靠的是缩进和列对齐，日志也按这条走。折行按钮仍然可以随手翻转任意一种文件，这个选择会在标签页里保留。原版所有文件都默认不折行。（[说明](./agents/files-and-access.md#which-lines-wrap)）
 
 **再长的文件也能滚动，并且一直有颜色。** 源码视图只渲染视口附近的那些行，不再一次渲染全部，于是多大的文件滚动起来标签页都不会卡，屏幕上的行无论文件多长都保持语法高亮。文件内查找——工具栏的放大镜，或指针在查看器内时按 ⌘/Ctrl+F——搜索全部已加载的行，而不只是渲染出来的窗口，匹配落在很靠下时也会滚动到眼前。原版渲染每一行，并在一千行之后停止高亮。（[说明](./agents/files-and-access.md#long-files-a-window-of-lines-and-find-across-all-of-them)）
 
@@ -165,6 +165,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 **子代理的报告不会被它自己摘要掉。** 子会话以一段回答结束那次运行时不会被压缩：报告与父会话之间不隔一次生成摘要的请求。在子代理自己的对话里 `/compact`、以及上下文溢出之后的恢复仍旧会压缩，发给它的下一条提示词也会先压缩再开始那次运行。原版每条消息之后都会像检查任何会话一样检查子代理的上下文，所以填满上下文的子代理在把报告交出去之前，要先为刚刚作答的那次运行付一次摘要。（[说明](./agents/subagents.md#compaction-held-while-the-child-writes-its-report)）
 
 **你自己回答的子代理也算一次运行。** 在子代理自己的对话里输入内容，它的运行会像任何一次 `resume` 那样被记录下来：agent 切换器显示它正在运行，`get_subagent_result` 会等它，结果落进它自己的记录，父会话收到完成报告。这是重启把子代理切断之后的回来之路：给它发一行，状态就不再撒谎。原版把输入到子代理里的提示词留在子代理记录之外，于是没有状态、没有结果，也没有报告跟着来。（[说明](./agents/subagents.md#built-in-subagents)）
+
+**side chat 是一条命令，不是一个按钮。** 输入 `/btw`，这次会话就分叉成一个 side chat，在右侧面板打开，命令后面跟着的东西成为它的第一条消息；单独一个 `/btw` 打开一个空的。它在一轮正在流式输出的时候也能开，因为分叉是文件的一份拷贝，agent 从来看不见它。原版还会从输入框里的 Side chat 图标、Agents 弹出层里的 New side chat，以及选中文字弹出的弹出层开一个（[#1469](https://github.com/agegr/pi-web/pull/1469)）。（[说明](./agents/side-sessions.md#creation)）
 
 **文中的 shell 变量不再被当成公式。** 一个单独的 `$`，只要后面还有另一个 `$`，就会开一个公式，所以一句讲 `$HOME` 和 `$PATH` 的话会以数学斜体显示出来，夹在两个美元符号中间的中文句子也一样。这个分支会看两个定界符中间是什么——shell 变量名、只有 CJK 文本才有的标点、若干个汉字——并把那段文字原样留下，而 `$E=mc^2$`、`$PV=nRT$` 和一个短汉字量名仍按公式渲染。原版照 remark-math 本来的样子运行：任意两个 `$` 就开一个公式，中间是什么它都不读（[remark-math](https://github.com/remarkjs/remark-math)）。（[说明](./agents/sessions.md#math-delimiters-and-prose-that-only-looks-like-a-formula)）
 
@@ -242,6 +244,10 @@ PI_WEB_PASSWORD='足够长的随机密码' pi-web --hostname 0.0.0.0
 
 密码认证不会加密连接。不要通过明文 HTTP 将 Pi Web 暴露到互联网；远程访问应使用可信反向代理提供 HTTPS，或通过可信 VPN。如果反向代理传递外部主机名，请把该名称精确加入 `PI_WEB_ALLOWED_HOSTS`。这个白名单不会改变 Pi Web 的监听地址。
 
+### Docker
+
+每次发布都会把镜像推到 `ghcr.io/agegr/pi-web`。镜像本身、Compose 示例和该保留哪些卷，见 [在 Docker 里运行 Pi Web](./docker.md)。
+
 ### HTTP 代理
 
 服务端的模型和 API 请求会读取标准的 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY` 环境变量。下面几条跑的是本分支从仓库启动的那个启动器；原版用的是 `npx @agegr/pi-web@latest`。
@@ -271,6 +277,41 @@ pi-web
 - **共享配置**：模型面板使用 pi 的模型、设置和凭据存储，因此两种界面都能看到相关更改。
 - **文件访问边界**：文件浏览器仅能访问在 Pi Web 中选择过的工作目录，以及它已识别的项目或会话根目录；它不是通用的文件系统浏览器。
 - **Git worktree**：切换器何时显示、如何创建 worktree，以及删除会产生什么影响，见 [Pi Web 里的 Worktree](./worktrees.zh-CN.md)。
+
+### 下游的会话行右键菜单
+
+Electron 封装和其他下游集成可以不改 `SessionSidebar` 就提供会话行的右键菜单。监听可取消的 `pi-web:session-row-contextmenu` 浏览器事件，集成方要自己接管时同步调用 `preventDefault()`：
+
+```js
+window.addEventListener("pi-web:session-row-contextmenu", (event) => {
+  event.preventDefault();
+  const { id, path, cwd, name, clientX, clientY, refresh } = event.detail;
+
+  void openSessionMenu({ id, path, cwd, name, clientX, clientY }).then((changed) => {
+    if (changed) refresh();
+  });
+});
+```
+
+detail 对象里有 `id`、`path`、`cwd`、可选的 `name`、指针坐标，以及一个 `refresh()` 回调，给那些会改动会话列表的动作。没有监听者取消这个事件时，Pi Web 就在指针处打开自己内置的会话菜单（置顶、重命名、分叉、标为已读或未读、归档、在新标签页打开、删除），而不是浏览器的原生右键菜单。行上的 `⋯` 按钮永远打开内置菜单，也不派发这个事件。还没写进磁盘的会话没有内置菜单，因此它们仍然会出现原生菜单。这个钩子在浏览器一侧，和 Pi 的 agent 扩展无关。
+
+### 扩展的会话存活
+
+服务端的 Pi 扩展如果有脱离会话自己在跑的工作，可以通过带版本号的全局注册表阻止会话被自动闲置回收：
+
+```js
+const liveness = globalThis[Symbol.for("@agegr/pi-web/session-liveness/v1")];
+const release = liveness?.version === 1
+  ? liveness.register({
+      name: "my-extension",
+      sessionId,
+      sessionFile: sessionFile || undefined,
+      isActive: () => detachedJobs.size > 0,
+    })
+  : () => {};
+```
+
+每个活跃的扩展会话注册一次，并在会话关闭、被替换或重载时调用返回的那个幂等 `release`。`isActive` 必须同步、开销很小，并且只针对传给它的精确会话 id 或文件。提供商错误按保住该会话处理。这份租约只影响自动闲置回收；显式关闭和 Stop 的兜底清理仍然优先。
 
 ## 开发
 
