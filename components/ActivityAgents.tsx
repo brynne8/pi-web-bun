@@ -21,6 +21,8 @@ export interface ActivityAgentsProps {
 }
 
 const STATS_POLL_MS = 3000;
+/** Subagent rows shown before the list folds. */
+const COLLAPSED_SUBAGENT_LIMIT = 10;
 
 /**
  * Usage of every agent in the family, as the toolbar's stats popover counts
@@ -247,6 +249,7 @@ export function ActivityAgents({
 }: ActivityAgentsProps) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
+  const [showAll, setShowAll] = useState(false);
   const sortedSubagents = useMemo(() => [...subagents].sort((a, b) => {
     const aRunning = runningSessionIds.has(a.id);
     const bRunning = runningSessionIds.has(b.id);
@@ -261,6 +264,10 @@ export function ActivityAgents({
           .some((value) => value?.toLowerCase().includes(normalizedQuery));
       })
     : sortedSubagents;
+  const listedSubagents = normalizedQuery || showAll
+    ? visibleSubagents
+    : visibleSubagents.slice(0, COLLAPSED_SUBAGENT_LIMIT);
+  const foldable = !normalizedQuery && visibleSubagents.length > COLLAPSED_SUBAGENT_LIMIT;
   const runningCount = countRunningSubagents(subagents, runningSessionIds);
   const familyIds = useMemo(() => [rootSession.id, ...subagents.map((session) => session.id)], [rootSession.id, subagents]);
   const runningKey = familyIds.filter((id) => runningSessionIds.has(id)).join(",");
@@ -321,7 +328,7 @@ export function ActivityAgents({
           usage={usage[rootSession.id]}
           onSelect={() => onSelectSession(rootSession)}
         />
-        {visibleSubagents.map((session) => (
+        {listedSubagents.map((session) => (
           <AgentRow
             key={session.id}
             session={session}
@@ -342,6 +349,18 @@ export function ActivityAgents({
         ))}
         {visibleSubagents.length === 0 && (
           <div className="agent-empty">{t("agentSwitcher.noMatches")}</div>
+        )}
+        {foldable && (
+          <button
+            type="button"
+            className="agent-fold"
+            onClick={() => setShowAll((open) => !open)}
+            aria-expanded={showAll}
+          >
+            {showAll
+              ? t("agentSwitcher.showLess")
+              : t("agentSwitcher.showAll", { count: visibleSubagents.length })}
+          </button>
         )}
       </div>
     </section>

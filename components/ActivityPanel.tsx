@@ -429,6 +429,19 @@ const ACTIVITY_PANEL_CSS = `
   }
   .agent-search:focus { border-color: var(--accent); }
   .agent-empty { padding: 8px; color: var(--text-dim); font-size: 11px; text-align: center; }
+  .agent-fold {
+    align-self: flex-start;
+    margin: 2px 0 0 6px;
+    padding: 2px 4px;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font: inherit;
+    font-size: 10px;
+  }
+  .agent-fold:hover { background: var(--bg-hover); color: var(--text); }
   .agent-tab {
     display: flex;
     flex-shrink: 0;

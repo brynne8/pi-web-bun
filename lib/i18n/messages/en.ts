@@ -210,6 +210,8 @@ export const enLocale: LocalePlugin = {
     "agentSwitcher.totalUsageHint": "Main agent and all sub-agents",
     "agentSwitcher.search": "Search agents",
     "agentSwitcher.noMatches": "No matching agents",
+    "agentSwitcher.showAll": "Show all {count}",
+    "agentSwitcher.showLess": "Show less",
     "agentSwitcher.status.starting": "Starting",
     "agentSwitcher.status.running": "Running",
     "agentSwitcher.status.completed": "Completed",

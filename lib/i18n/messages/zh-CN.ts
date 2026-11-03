@@ -210,6 +210,8 @@ export const zhCNLocale: LocalePlugin = {
     "agentSwitcher.totalUsageHint": "主 Agent 与全部子 Agent",
     "agentSwitcher.search": "搜索 Agents",
     "agentSwitcher.noMatches": "没有匹配的 Agent",
+    "agentSwitcher.showAll": "展开全部 {count} 个",
+    "agentSwitcher.showLess": "收起",
     "agentSwitcher.status.starting": "正在启动",
     "agentSwitcher.status.running": "运行中",
     "agentSwitcher.status.completed": "已完成",
