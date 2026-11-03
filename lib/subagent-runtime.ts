@@ -608,7 +608,7 @@ export function createSubagentController(
       const isolation = profile.isolation === "off" ? undefined : request.isolation ?? profile.isolation;
       const parentModelRuntime = (parent.inner as unknown as { modelRuntime: ModelRuntime }).modelRuntime;
       if (isolation === "worktree") {
-        isolatedWorktree = await addWorktree(parent.cwd, `pi-web-agent-${randomUUID()}`);
+        isolatedWorktree = await addWorktree(parent.cwd, `pi-web-agent-${randomUUID().slice(0, 8)}`);
       }
       const childCwd = isolatedWorktree?.path ?? parent.cwd;
       const inheritContext = profile.inheritContext;
