@@ -316,6 +316,21 @@ async function readLogTail(path: string, maxBytes = 4096): Promise<string> {
   }
 }
 
+/**
+ * The background bash tool's rules as the model reads them, in a block tagged with the tool they
+ * belong to. The 120 s figure is read from the handoff, so the two cannot drift.
+ */
+export function bashToolPromptBlock(): string {
+  return [
+    "<bash_tool>",
+    "- NEVER pipe a command through `| tail` or redirect its output with `>` or `>>`. Both end the output early, so nothing is saved to a file. Run the command plain.",
+    "- To see less, bound the command: `git log --oneline -20`, `gh run list -L 15`, `find . -maxdepth 2`, or pass `max_output_lines` when it has no such flag.",
+    "- When you can already expect a command to run for a long time (dev server, watcher, long build, large download), DO NOT force a timeout: set run_in_background=true.",
+    `- A foreground command auto-backgrounds after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000} seconds; treat that as a handoff, not a failure.`,
+    "</bash_tool>",
+  ].join("\n");
+}
+
 export function createProjectCommandBashExtension(options: {
   cwd: string;
   settings: ProjectShellSettings;
@@ -353,13 +368,6 @@ export function createProjectCommandBashExtension(options: {
                 run_in_background: Type.Optional(Type.Boolean({ description: "Run this command in the background immediately; you will be notified when it completes." })),
                 max_output_lines: Type.Optional(Type.Number({ description: "Line count before the command goes to the background. Always set it unless you already know the output is short." })),
               }),
-              promptGuidelines: [
-                ...(displayDefinition.promptGuidelines ?? []),
-                "NEVER pipe a command through `| tail` or redirect its output with `>` or `>>`. Both end the output early, so nothing is saved to a file. Run the command plain.",
-                "To see less, bound the command: `git log --oneline -20`, `gh run list -L 15`, `find . -maxdepth 2`, or pass `max_output_lines` when it has no such flag.",
-                "When you can already expect a command to run for a long time (dev server, watcher, long build, large download), DO NOT force a timeout: set run_in_background=true.",
-                "A foreground command auto-backgrounds after 120 seconds; treat that as a handoff, not a failure.",
-              ],
             }
           : {}),
         // This stands in for pi's built-in bash, so like it, it is active only when named:
@@ -401,6 +409,15 @@ export function createProjectCommandBashExtension(options: {
           }
         },
       });
+
+      // The tool's own rules ride the prompt in a `<bash_tool>` block, named after the tool they
+      // belong to; `promptGuidelines` would flatten them into pi's single `<rules>` list, where no
+      // line says which tool it came from. Same shape as the subagent extension's `<delegation>`.
+      if (bg) {
+        pi.on?.("before_agent_start", (event) => ({
+          systemPrompt: `${event.systemPrompt}\n\n${bashToolPromptBlock()}`,
+        }));
+      }
     },
   };
 }
