@@ -769,7 +769,7 @@ function ChangesFolderRow({
         gap: 4,
         paddingLeft: 8 + depth * 14,
         paddingRight: 8,
-        height: 24,
+        height: "var(--file-row-height)",
         cursor: "pointer",
         background: hovered ? "var(--bg-hover)" : "transparent",
         borderRadius: 4,

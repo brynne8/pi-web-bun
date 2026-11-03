@@ -1,6 +1,6 @@
 {
   "name": "@agegr/pi-web",
-  "version": "0.14.1",
+  "version": "0.14.2",
   "description": "Web UI for the pi coding agent",
   "homepage": "https://github.com/agegr/pi-web#readme",
   "repository": {
@@ -46,13 +46,14 @@
     "release": "npm version patch --no-git-tag-version"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "1.4.0",
-    "@earendil-works/pi-ai": "1.4.0",
-    "@earendil-works/pi-codemode": "1.4.0",
-    "@earendil-works/pi-coding-agent": "1.4.0",
-    "@earendil-works/pi-mcp": "1.4.0",
-    "@earendil-works/pi-telemetry": "1.4.0",
-    "@earendil-works/pi-tui": "1.4.0",
+    "@earendil-works/pi-agent-core": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.0",
+    "@earendil-works/pi-codemode": "1.5.0",
+    "@earendil-works/pi-coding-agent": "1.5.0",
+    "@earendil-works/pi-mcp": "1.5.0",
+    "@earendil-works/pi-schema": "1.5.0",
+    "@earendil-works/pi-telemetry": "1.5.0",
+    "@earendil-works/pi-tui": "1.5.0",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
     "js-yaml": "^5.2.3",
@@ -62,7 +63,8 @@
     "react-dom": "^19.3.1",
     "react-server-dom-webpack": "19.3.1",
     "semver": "7.8.5",
-    "undici": "8.11.0",
+    "typebox": "1.3.27",
+    "undici": "8.12.3",
     "vinext": "1.3.0",
     "web-push": "^3.6.7"
   },

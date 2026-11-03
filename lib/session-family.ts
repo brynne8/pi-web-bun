@@ -121,3 +121,12 @@ export function countRunningSubagents(
 ): number {
   return subagents.filter((session) => runningSessionIds.has(session.id)).length;
 }
+
+/** The top bar's Agents badge: how many run while any does, else how many there are. */
+export function getAgentsBadge(
+  subagents: readonly SessionInfo[],
+  runningSessionIds: ReadonlySet<string>,
+): { count: number; running: boolean } {
+  const running = countRunningSubagents(subagents, runningSessionIds);
+  return running > 0 ? { count: running, running: true } : { count: subagents.length, running: false };
+}

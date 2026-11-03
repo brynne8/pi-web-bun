@@ -3526,9 +3526,11 @@ export async function startRpcSession(
     if (chatOnly && deferredInitialModel && !allowInitialModelFallback) {
       throw chatOnlyExtensionModelError(deferredInitialModel.provider, deferredInitialModel.id);
     }
+    // A model outside `enabledModels` is a valid explicit choice, as pi's --model with --models.
+    const availableModels = await services.modelRuntime.getAvailable();
     const effectiveInitialModel = initialModel && !deferredInitialModel && (
       !allowInitialModelFallback
-      || scope.visible.some((model) => model.provider === initialModel.provider && model.id === initialModel.modelId)
+      || availableModels.some((model) => model.provider === initialModel.provider && model.id === initialModel.modelId)
     )
       ? initialModel
       : undefined;
@@ -3550,6 +3552,7 @@ export async function startRpcSession(
         ...(effectiveInitialModel ? { requestedModel: effectiveInitialModel } : {}),
         ...(defaultModel ? { defaultModel } : {}),
         ...(thinkingLevel ? { thinkingLevel } : {}),
+        availableModels,
       });
     const startupModel = restoredModel && services.modelRuntime.hasConfiguredAuth(restoredModel.provider)
       ? restoredModel

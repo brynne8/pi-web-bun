@@ -76,6 +76,19 @@ git push bun <branch> v<version>-fork
 
 Push the release tag by name. Never `git push --tags`: this clone holds upstream's tags and tags fetched from other remotes, and `--tags` would push all of them (upstream's own checklist records the same accident, a stray `v0.10.5` landing during its v0.11.0 release). If you ever need `--tags`, compare `git tag` with `git ls-remote --tags bun` first.
 
+If the `container` job fails after npm has the version, the tag can no longer move. A passing cause: `gh run rerun <run-id> --failed`, which reruns that job only; image tags are overwritten, so a partial push does no harm. A rerun builds the tagged commit again, so a fix to the Dockerfile or the workflow reaches GHCR only with the next release.
+
+### Pushed the tag too early
+
+If the tag went out before the release was ready (a commit still missing, say), cancel the Release run before `npm publish` runs:
+
+```bash
+gh run cancel <run-id>
+curl -s https://registry.npmjs.org/@agegr%2Fpi-web/<version> | head -c 80   # still "version not found"
+```
+
+Then either move the tag once the fix is on `main`, as above, or release the next patch instead. The second leaves an unpublished `v<version>` tag on origin, as `v0.14.0` was: base the next release notes on the last version that was published, and say there that the skipped tag was never released.
+
 ## 4. Generate Release Notes from Commits
 
 Two ranges, because a release of this branch is both things at once:
@@ -165,6 +178,18 @@ gh release view v<version>-fork --repo brynne8/pi-web-bun
 git status --short --branch
 git log --oneline --decorate -3
 git ls-remote --tags bun | grep "v<version>"
+```
+
+Check that the image can be pulled without signing in:
+
+```bash
+T=$(curl -s "https://ghcr.io/token?scope=repository:agegr/pi-web:pull" | node -p 'JSON.parse(require("fs").readFileSync(0)).token')
+for tag in <version> <major>.<minor> latest; do
+  printf '%s: ' "$tag"
+  curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $T" \
+    -H 'Accept: application/vnd.oci.image.index.v1+json' \
+    "https://ghcr.io/v2/agegr/pi-web/manifests/$tag"
+done
 ```
 
 Expected:
