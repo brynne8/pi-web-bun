@@ -1912,6 +1912,23 @@ function MarkdownResult({ text, isError, cwd, onOpenFile }: {
   );
 }
 
+/**
+ * A shell tool's closing line, which pi appends after a blank line when the command
+ * did not exit 0 (`Command exited with code 1`, `Command aborted`, …).
+ */
+const SHELL_STATUS_RE =
+  /(?:^|\n\n)(Command (?:exited with code \d+|aborted|timed out after [\d.]+ seconds|terminated without an exit code))\s*$/;
+
+/** The output apart from that line: the command's own text, colours and all. */
+function splitShellStatus(text: string): { body: string; status: string | null } {
+  const match = SHELL_STATUS_RE.exec(text);
+  if (!match) return { body: text, status: null };
+  const status = match[1];
+  const start = match.index + match[0].indexOf(status);
+  // The blank line that separated the two is the status div's own spacing now.
+  return { body: text.slice(0, start).replace(/\n+$/, ""), status };
+}
+
 function PairedResult({ text, isEmpty, isError, powershell }: {
   text: string;
   isEmpty: boolean;
@@ -1920,6 +1937,16 @@ function PairedResult({ text, isEmpty, isError, powershell }: {
   powershell?: boolean;
 }) {
   const { t } = useI18n();
+  // A `powershell` call colours its own output, so its card prints the text as it
+  // came: the body keeps the muted colour and only the status line pi appended
+  // takes the error one, as `(exit N)` alone does in pi's TUI
+  // (bash-execution.js paints every output line muted). Painting the whole
+  // block red turned output that carries no colour of its own into a failure
+  // too. Every other card keeps the whole-result error colour it had.
+  const split = powershell ? splitShellStatus(text) : null;
+  const body = split ? split.body : text;
+  const status = split ? split.status : null;
+  const showPre = isEmpty || body !== "";
   return (
     <div
       style={{
@@ -1927,24 +1954,44 @@ function PairedResult({ text, isEmpty, isError, powershell }: {
         background: isError ? "rgba(248,113,113,0.04)" : "var(--bg-subtle)",
       }}
     >
-      <pre
-        style={{
-          margin: 0,
-          padding: "8px 10px",
-          color: isError ? "#f87171" : (isEmpty ? "var(--text-dim)" : "var(--text-muted)"),
-          fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
-          lineHeight: 1.5,
-          overflow: "auto",
-          maxHeight: 400,
-          background: "var(--bg)",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-all",
-          fontStyle: isEmpty ? "italic" : "normal",
-          opacity: isEmpty ? 0.6 : 1,
-        }}
-      >
-        {isEmpty ? t("i18n.noOutput") : powershell ? <PowerShellOutput text={text} /> : text}
-      </pre>
+      {showPre && (
+        <pre
+          style={{
+            margin: 0,
+            padding: "8px 10px",
+            color: powershell
+              ? (isEmpty ? "var(--text-dim)" : "var(--text-muted)")
+              : isError ? "#f87171" : (isEmpty ? "var(--text-dim)" : "var(--text-muted)"),
+            fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
+            lineHeight: 1.5,
+            overflow: "auto",
+            maxHeight: 400,
+            background: "var(--bg)",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+            fontStyle: isEmpty ? "italic" : "normal",
+            opacity: isEmpty ? 0.6 : 1,
+          }}
+        >
+          {isEmpty ? t("i18n.noOutput") : powershell ? <PowerShellOutput text={body} /> : body}
+        </pre>
+      )}
+      {status !== null && (
+        <div
+          style={{
+            padding: showPre ? "0 10px 8px" : "8px 10px",
+            background: "var(--bg)",
+            color: "#f87171",
+            fontFamily: "var(--font-mono)",
+            fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
+            lineHeight: 1.5,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+          }}
+        >
+          {status}
+        </div>
+      )}
     </div>
   );
 }
