@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
-import { countRunningSubagents } from "@/lib/session-family";
+import { countRunningSubagents, sideChatTitle } from "@/lib/session-family";
 import type { SessionUsageSummary } from "@/lib/session-stats";
 import { formatActiveDuration, formatCompactCount, formatCostShort } from "@/lib/session-stats-format";
 import type { SessionInfo, SubagentSessionStatus } from "@/lib/types";
@@ -161,6 +161,8 @@ export function StatusIcon({ status, label }: { status: SubagentSessionStatus; l
 
 interface RowProps {
   session: SessionInfo;
+  /** A side chat's row title: the family's creation-order number, since every side chat shares a name. */
+  sideTitle?: string;
   /** The family's root: the chat on screen, or the session its subagents belong to. */
   main?: boolean;
   selected: boolean;
@@ -186,7 +188,7 @@ function MainGlyph() {
  * moved, the usage breakdown — the way a task card's line names the command and its tooltip holds
  * the whole one.
  */
-function AgentRow({ session, main, selected, running, usage, onSelect, tabShown, onToggleTab }: RowProps) {
+function AgentRow({ session, sideTitle, main, selected, running, usage, onSelect, tabShown, onToggleTab }: RowProps) {
   const { locale, t } = useI18n();
   const relation = session.relation?.kind === "subagent" ? session.relation : null;
   // A side chat is a family member too (ADR 0007), so it gets a row here: its
@@ -194,7 +196,11 @@ function AgentRow({ session, main, selected, running, usage, onSelect, tabShown,
   const side = session.relation?.kind === "side";
   const status: SubagentSessionStatus = running ? "running" : relation?.status ?? "completed";
   const statusLabel = t(`agentSwitcher.status.${status}`);
-  const primary = main ? t("agentSwitcher.main") : relation?.description || sessionTitle(session);
+  const primary = main
+    ? t("agentSwitcher.main")
+    : side
+      ? sideTitle ?? t("agentSwitcher.sideChat")
+      : relation?.description || sessionTitle(session);
   const profile = side ? t("agentSwitcher.sideChat") : relation?.profile ?? t("agentSwitcher.subagent");
   const model = usage?.model ? `${usage.model.provider}/${usage.model.modelId}` : null;
   const thinkingLevel = usage?.thinkingLevel && usage.thinkingLevel !== "off" ? usage.thinkingLevel : null;
@@ -332,6 +338,7 @@ export function ActivityAgents({
           <AgentRow
             key={session.id}
             session={session}
+            sideTitle={session.relation?.kind === "side" ? sideChatTitle(session, t("agentSwitcher.sideChat"), subagents) : undefined}
             selected={session.id === selectedSessionId}
             running={runningSessionIds.has(session.id)}
             usage={usage[session.id]}
