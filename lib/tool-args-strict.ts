@@ -52,14 +52,30 @@ export function unknownToolArgNames(input: unknown, declared: ReadonlySet<string
   return Object.keys(input).filter((name) => !declared.has(name));
 }
 
+/**
+ * The address this server answers on. `vinext start -p <port>` passes the port as an argument, not
+ * in `process.env.PORT`, so the launcher's own flags are where it is read from.
+ */
+export function serverOrigin(argv: readonly string[] = process.argv, port = process.env.PORT): string {
+  const index = argv.findIndex((arg) => arg === "-p" || arg === "--port" || arg.startsWith("--port="));
+  const flag = argv[index];
+  const value = flag?.startsWith("--port=") ? flag.slice("--port=".length) : argv[index + 1];
+  const chosen = value && /^\d+$/.test(value) ? value : port?.trim();
+  return `http://127.0.0.1:${chosen && /^\d+$/.test(chosen) ? chosen : "30141"}`;
+}
+
+/** The route that serves `toolName`'s definition, as the model is told to read it. */
+export function toolSchemaUrl(toolName: string): string {
+  return `${serverOrigin()}/api/tool_schema/${encodeURIComponent(toolName)}`;
+}
+
 export function strictToolArgsBlockReason(
   toolName: string,
   unknownNames: readonly string[],
-  declared: ReadonlySet<string>,
+  schemaUrl: string,
 ): string {
-  const fields = [...declared].join(", ");
   return `Tool "${toolName}" was called with fields its schema does not define: ${unknownNames.join(", ")}. `
-    + `Its fields are: ${fields}. Re-issue the call with only those fields.`;
+    + `Its schema: ${schemaUrl}. Fetch it, then re-issue the call with the fields it declares.`;
 }
 
 /**
@@ -79,7 +95,7 @@ export function createStrictToolArgsExtension(): InlineExtension {
         if (!declared) return undefined;
         const unknownNames = unknownToolArgNames(event.input, declared);
         if (unknownNames.length === 0) return undefined;
-        return { block: true, reason: strictToolArgsBlockReason(event.toolName, unknownNames, declared) };
+        return { block: true, reason: strictToolArgsBlockReason(event.toolName, unknownNames, toolSchemaUrl(event.toolName)) };
       });
     },
   };

@@ -39,6 +39,12 @@ export function proxy(request: NextRequest) {
     return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
   }
 
+  // A tool's definition is open to a local caller: a blocked call is answered with this route's
+  // address, and a session's bash carries no PI_WEB_PASSWORD to authenticate with.
+  if (request.nextUrl.pathname.startsWith("/api/tool_schema/")) {
+    return NextResponse.next();
+  }
+
   const password = process.env.PI_WEB_PASSWORD;
   if (!isWebPasswordEnabled(password)) {
     if (request.nextUrl.pathname === "/login") {
