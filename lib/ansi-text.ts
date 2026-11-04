@@ -199,6 +199,16 @@ export function hasAnsi(text: string): boolean {
   return text.indexOf("\x1b") >= 0;
 }
 
+/**
+ * True for pwsh's `$PSStyle.Error`: bold plus ANSI red. A `2>&1` redirect puts
+ * it on every line a command wrote to stderr, so on its own it marks which
+ * stream a line came from rather than a failure
+ * (components/PowerShellOutput.tsx).
+ */
+export function isErrorStreamStyle(style: AnsiStyle | undefined): style is AnsiStyle {
+  return style?.bold === true && style.color === ANSI_16[1];
+}
+
 /** Split terminal text into the runs a screen can draw, one per style or link. */
 export function parseAnsiRuns(text: string): AnsiRun[] {
   const runs: AnsiRun[] = [];
