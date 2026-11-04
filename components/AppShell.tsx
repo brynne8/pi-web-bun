@@ -8,6 +8,7 @@ import { ChatWindow } from "./ChatWindow";
 import { NewSessionContextBar, type NewSessionContextControl } from "./NewSessionContextBar";
 import type { ChatScrollPosition } from "@/lib/chat-scroll-position";
 import { TabBar, type Tab } from "./TabBar";
+import { movePanelTab, orderPanelTabs } from "@/lib/panel-tab-order";
 import { openFileTab, saveFileViewerState, saveParkedFileViewerState, switchFileWorkspace, type ParkedFileWorkspace } from "./file-tab-state";
 import type { ProjectTrustFailure } from "./ProjectTrustDialog";
 import { BranchNavigator, hasSessionBranches } from "./BranchNavigator";
@@ -42,6 +43,7 @@ const SettingsSectionIcon = lazy(() =>
   import("./SettingsPanel").then((module) => ({ default: module.SettingsSectionIcon })),
 );
 import { newTerminalTab, restoreTerminalTabs, TERMINAL_TABS_KEY, type TerminalTab } from "./terminal-tab-state";
+import { appendSideTab, restoreSideTabs, sideTabsKey } from "./side-tab-state";
 import { useTheme } from "@/hooks/useTheme";
 import { useFontPreferences } from "@/hooks/useFontPreferences";
 import { useI18n } from "@/hooks/useI18n";
@@ -99,7 +101,7 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
 import { formatActiveDuration, formatCompactCount, formatCostShort } from "@/lib/session-stats-format";
 import type { FileViewerState } from "@/lib/file-viewer-state";
 import { PRESET_READ_ONLY, type ToolEntry } from "@/lib/tool-presets";
-import { countRunningSubagents, getSessionFamily, isHiddenRelation, sideChatNameFrom, sideChatTitle } from "@/lib/session-family";
+import { countRunningSubagents, getSessionFamily, isHiddenRelation, sideChatTitle } from "@/lib/session-family";
 import { getLastSettingsSection, settingsSectionRequiresProject, type SettingsSection } from "@/lib/settings-navigation";
 
 type SessionCopyField = "file" | "id" | "projectDir" | "gitBranch" | "gitWorktree";
@@ -190,8 +192,10 @@ export function AppShell() {
   const selectedSessionRef = useRef(selectedSession);
   selectedSessionRef.current = selectedSession;
   const [sessionCatalog, setSessionCatalog] = useState<SessionInfo[]>([]);
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
   const handleSessionsChange = useCallback((sessions: SessionInfo[]) => {
     setSessionCatalog(sessions);
+    setCatalogLoaded(true);
     // The sidebar hydrates metadata after the selected session has already
     // mounted. Merge that update into the active session without changing the
     // ChatWindow key or restarting its history load.
@@ -596,15 +600,20 @@ export function AppShell() {
   const fileWorkspaceGenerationRef = useRef(0);
   const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
   const [terminalsRestored, setTerminalsRestored] = useState(false);
-  // Subagent work tabs are session-scoped and transient: no persistence, and
-  // they are dropped when the project changes (they belong to its sessions).
+  // Subagent tabs remain open within a project; side tabs follow their main session.
   const [agentTabs, setAgentTabs] = useState<{ sessionId: string; label: string; side?: boolean }[]>([]);
+  const sideTabOwnerRef = useRef<string | null>(null);
+  const sideTabsReadyRef = useRef(false);
+  const sideTabsSavedOnWorkspaceSwitchRef = useRef(false);
+  const [activeCwd, setActiveCwd] = useState<string | null>(null);
+  const activeProjectKeyRef = useRef<string | null>(null);
+  const [panelTabOrder, setPanelTabOrder] = useState<string[]>([]);
   // Read snapshots are as transient as sub-agent tabs: each holds the slice one
   // `read` call returned, which only this chat's messages carry.
   const [readTabs, setReadTabs] = useState<{ toolCallId: string; snapshot: ReadSnapshot }[]>([]);
   // A background task's log: one tab per task, opened from the activity view's grid.
   const [bgOutputTabs, setBgOutputTabs] = useState<{ taskId: string; label: string }[]>([]);
-  const panelTabs: Tab[] = [
+  const panelTabs: Tab[] = orderPanelTabs([
     {
       id: "bg-tasks",
       label: activityRunningCount > 0
@@ -630,7 +639,7 @@ export function AppShell() {
     })),
     ...agentTabs.map((tab) => {
       const session = tab.side ? sessionCatalog.find((item) => item.id === tab.sessionId) : undefined;
-      const label = session ? sideChatTitle(session, tab.label) : tab.label;
+      const label = session ? sideChatTitle(session, translate("agentSwitcher.sideChat"), activeSessionFamily?.subagents ?? []) : tab.label;
       return {
         id: `agent:${tab.sessionId}`,
         label,
@@ -644,7 +653,13 @@ export function AppShell() {
       filePath: tab.snapshot.filePath,
       kind: "read-snapshot" as const,
     })),
-  ];
+  ], panelTabOrder);
+  // A closed tab leaves the saved order, so reopening it appends it like any new tab.
+  const panelTabIds = panelTabs.map((tab) => tab.id).join("\n");
+  useEffect(() => {
+    const open = new Set(panelTabIds.split("\n"));
+    setPanelTabOrder((order) => order.every((id) => open.has(id)) ? order : order.filter((id) => open.has(id)));
+  }, [panelTabIds]);
 
   useEffect(() => {
     try {
@@ -668,6 +683,22 @@ export function AppShell() {
       }));
     } catch { /* storage is optional */ }
   }, [terminalTabs, activeFileTabId, rightPanelOpen, terminalsRestored]);
+
+  const rememberSideTabs = useCallback((key: string) => {
+    try {
+      const tabs = agentTabs.filter((tab) => tab.side);
+      // A session without side tabs keeps no entry: one per visited session otherwise.
+      if (!tabs.length) {
+        window.sessionStorage.removeItem(sideTabsKey(key));
+        return;
+      }
+      window.sessionStorage.setItem(sideTabsKey(key), JSON.stringify({
+        tabs,
+        activeId: tabs.some((tab) => `agent:${tab.sessionId}` === activeFileTabId) ? activeFileTabId : null,
+        open: rightPanelOpen,
+      }));
+    } catch { /* storage is optional */ }
+  }, [agentTabs, activeFileTabId, rightPanelOpen]);
 
   const handleFileViewerStateChange = useCallback((
     generation: number,
@@ -693,16 +724,21 @@ export function AppShell() {
     fileWorkspaceGenerationRef.current += 1;
     setFileWorkspaceGeneration(fileWorkspaceGenerationRef.current);
     setFileTabs(next.tabs);
-    // Subagent tabs belong to the previous project's sessions: dropped, not parked.
-    setAgentTabs([]);
-    // So do its reads' snapshots: their content came from those messages.
+    // Subagent tabs are project-scoped; side tabs are saved under their main session.
+    setAgentTabs((tabs) => tabs.filter((tab) => tab.side));
+    if (sideTabsReadyRef.current && sideTabOwnerRef.current) {
+      rememberSideTabs(sideTabOwnerRef.current);
+      sideTabsSavedOnWorkspaceSwitchRef.current = true;
+    }
+    // A read's snapshots go with the previous project's messages: their content
+    // came from those messages.
     setReadTabs([]);
     // Terminal tabs span workspaces and keep control of the panel while active.
     if (!activeFileTabId || activeFileId || activeFileTabId.startsWith("agent:") || activeFileTabId.startsWith("read:")) {
       setActiveFileTabId(next.activeTabId);
       setRightPanelOpen(next.open);
     }
-  }, [activeFileTabId, fileTabs, rightPanelOpen]);
+  }, [activeFileTabId, fileTabs, rememberSideTabs, rightPanelOpen]);
 
   // Same @mention format as the chat input's @ autocomplete, so the agent's
   // read tool resolves it the same way (it strips the @ prefix).
@@ -724,10 +760,35 @@ export function AppShell() {
 
   const initialSessionId = initialNavigation.sessionId;
   const initialLinkedSessionId = linkedSessionId(initialNavigation);
-  const [activeCwd, setActiveCwd] = useState<string | null>(null);
-  const activeProjectKeyRef = useRef<string | null>(null);
   // True once the initial ?session= URL param has been resolved (or confirmed absent)
   const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !initialSessionId);
+  const sideTabOwner = activeSessionFamily?.root.id ?? null;
+  useEffect(() => {
+    if (!catalogLoaded || !initialSessionRestored) return;
+    const previous = sideTabOwnerRef.current;
+    if (!sideTabsReadyRef.current || previous !== sideTabOwner) {
+      if (sideTabsReadyRef.current && previous && !sideTabsSavedOnWorkspaceSwitchRef.current) rememberSideTabs(previous);
+      sideTabsSavedOnWorkspaceSwitchRef.current = false;
+      sideTabsReadyRef.current = true;
+      sideTabOwnerRef.current = sideTabOwner;
+      let restored = { tabs: [] as { sessionId: string; label: string; side: true }[], activeId: null as string | null, open: false };
+      if (sideTabOwner) {
+        try { restored = restoreSideTabs(window.sessionStorage.getItem(sideTabsKey(sideTabOwner)), sideTabOwner, sessionCatalog); }
+        catch { /* storage is optional */ }
+      }
+      setAgentTabs((tabs) => [...tabs.filter((tab) => !tab.side), ...restored.tabs]);
+      const nextId = restored.activeId === `agent:${selectedSession?.id}` ? null : restored.activeId;
+      if (nextId || activeFileTabId?.startsWith("agent:") || !activeFileTabId) {
+        // The panel always carries the activity tab, so the tab that left with the
+        // previous session's side chats always has somewhere to go.
+        setActiveFileTabId(nextId ?? fileTabs.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? "bg-tasks");
+        if (nextId) setRightPanelOpen(restored.open);
+      }
+      return;
+    }
+    if (sideTabOwner) rememberSideTabs(sideTabOwner);
+    sideTabsSavedOnWorkspaceSwitchRef.current = false;
+  }, [activeFileTabId, catalogLoaded, fileTabs, initialSessionRestored, rememberSideTabs, rightPanelOpen, selectedSession?.id, sessionCatalog, sideTabOwner, terminalTabs]);
   // sessionStorage is empty during SSR. Applying the tab's remembered session
   // in the useState initializer made the first client tree differ from the
   // server HTML (sidebar "select project" vs ""). Restore after mount instead.
@@ -1331,14 +1392,9 @@ export function AppShell() {
 
   // Subagent work opens in a right-panel tab instead of hijacking the main chat.
   const handleOpenSubagentTab = useCallback((sessionId: string, label: string, side?: boolean) => {
-    setAgentTabs((prev) => {
-      if (prev.some((tab) => tab.sessionId === sessionId)) return prev;
-      // Every side chat has the same name, and `/btw` can be used again and
-      // again: the lowest number no open tab shows tells them apart.
-      let numbered = label;
-      for (let number = 2; side && prev.some((tab) => tab.label === numbered); number += 1) numbered = `${label} ${number}`;
-      return [...prev, { sessionId, label: numbered, ...(side ? { side: true } : {}) }];
-    });
+    setAgentTabs((prev) => prev.some((tab) => tab.sessionId === sessionId)
+      ? prev
+      : [...prev, { sessionId, label, ...(side ? { side: true } : {}) }]);
     setActiveFileTabId(`agent:${sessionId}`);
     setRightPanelOpen(true);
     if (isMobile) setSidebarOpen(false);
@@ -1378,7 +1434,18 @@ export function AppShell() {
   // the family's badge folds the new member in.
   const handleSideSession = useCallback((session: SessionInfo, prompt: string | null) => {
     if (prompt) setSideChatPrompts((prev) => ({ ...prev, [session.id]: prompt }));
-    handleOpenSubagentTab(session.id, sideChatTitle(session, (prompt && sideChatNameFrom(prompt)) || translate("sideChat.title")), true);
+    setSessionCatalog((prev) => [session, ...prev.filter((item) => item.id !== session.id)]);
+    const label = translate("agentSwitcher.sideChat");
+    const parentId = session.relation?.kind === "side" ? session.relation.parentSessionId : null;
+    if (parentId && parentId !== sideTabOwnerRef.current) {
+      // The fork landed after the main chat moved on: the tab waits with its own session.
+      try {
+        const key = sideTabsKey(parentId);
+        window.sessionStorage.setItem(key, appendSideTab(window.sessionStorage.getItem(key), session.id, label));
+      } catch { /* storage is optional */ }
+    } else {
+      handleOpenSubagentTab(session.id, label, true);
+    }
     setRefreshKey((key) => key + 1);
   }, [handleOpenSubagentTab, translate]);
 
@@ -2863,6 +2930,7 @@ export function AppShell() {
               activeTabId={activeFileTabId ?? ""}
               onSelectTab={setActiveFileTabId}
               onCloseTab={handleCloseFileTab}
+              onReorderTab={(source, target, after) => setPanelTabOrder(movePanelTab(panelTabs.map((tab) => tab.id), source, target, after))}
             />
           </div>
           <button
