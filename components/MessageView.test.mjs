@@ -4,9 +4,14 @@ import test from "node:test";
 import { createJiti } from "jiti";
 import ts from "typescript";
 
+// tryNative: false — under Bun jiti would import MessageView.tsx natively, and
+// its `@/hooks/useI18n` would be a second copy of the module: the component and
+// the provider above would read two Context instances (`useI18n must be used
+// inside I18nProvider`).
 const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
+  tryNative: false,
 });
 const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
