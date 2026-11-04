@@ -71,6 +71,7 @@ import type { DebugMcpHost, DebugSessionLifecycle, DebugWrapperSnapshot } from "
 import { mcpPromptPreparation, type McpCommandCandidate } from "./mcp-command";
 import { createReadOnlyMcpPolicyExtension, createSubagentMcpPolicyExtension } from "./mcp-read-only-policy";
 import { createOmitEmptyToolsExtension } from "./omit-empty-tools";
+import { createStrictToolArgsExtension } from "./tool-args-strict";
 import { createSubagentCompactionGuardExtension } from "./subagent-compaction-guard";
 import { createSubagentSkillsBinding } from "./subagent-skills";
 import { isNestedToolExecutionEvent } from "./agent-event-wire";
@@ -3452,6 +3453,7 @@ export async function startRpcSession(
     const subagentExtensionFactories = [
       createSubagentCompactionGuardExtension(),
       createOmitEmptyToolsExtension(),
+      createStrictToolArgsExtension(),
       ...(subagentCodemode ? [subagentCodemode] : []),
       ...(subagentMcp && subagentResources
         ? [...subagentMcp.extensions, createSubagentMcpPolicyExtension(() => subagentResources)]
@@ -3484,6 +3486,7 @@ export async function startRpcSession(
             extensionFactories: [
               ...(builtins?.extensions ?? []),
               createReadOnlyMcpPolicyExtension(),
+              createStrictToolArgsExtension(),
               createProjectCommandBashExtension({
                 cwd: sessionCwd,
                 settings: settingsManager,
