@@ -101,6 +101,8 @@ export interface SubagentController {
   beginDirectPrompt(sessionId: string, task: string): DirectSubagentPromptRun | undefined;
   /** A turn in a child's own chat ended: settles the run a restart cut off, if that is what the file holds. */
   settleDirectTurn(sessionId: string, aborted: boolean): void;
+  /** Stop in a child's own chat: the mark lives on the run, not on the wrapper's current send. */
+  markRunStopped(sessionId: string): void;
 }
 
 /** A run adopted from a prompt sent to a child's own chat: the run and the call that finishes it. */
@@ -118,6 +120,11 @@ type StoredSubagentExecution = {
   cancelQueued?: () => boolean;
   /** Ends the wait for the child's MCP servers before its prompt (`prepareChildMcp()`). */
   mcpWait?: AbortController;
+  /**
+   * Settles a run adopted from the child's own chat whose Stop arrived, so the next prompt typed
+   * there can take the run map's slot without waiting for that run's `finish()`.
+   */
+  settleStopped?: () => void;
   /**
    * When this run (or resume) entered the run map, for the debug panel: a resumed run keeps the
    * first run's `createdAt`. Absent on a run stored before a hot reload.
@@ -1113,8 +1120,14 @@ export function createSubagentController(
 
   function beginDirectPrompt(sessionId: string, task: string): DirectSubagentPromptRun | undefined {
     // A live run already owns this child: the prompt joins it (steering, follow-up) and the
-    // run's own completion records the result.
-    if (getSubagentRuns().has(sessionId)) return undefined;
+    // run's own completion records the result. One already stopped is settled here instead, or
+    // the prompt now starting a turn would have no run of its own and the list would keep the
+    // stopped run's status. A run this controller did not adopt (a dispatched one) is left alone.
+    const live = getSubagentRuns().get(sessionId);
+    if (live) {
+      if (!live.abortRequested || !live.settleStopped) return undefined;
+      live.settleStopped();
+    }
     const wrapper = dependencies.getSession(sessionId);
     if (!wrapper?.isAlive()) return undefined;
     const manager = wrapper.inner.sessionManager;
@@ -1142,6 +1155,39 @@ export function createSubagentController(
     let resolveCompletion!: (run: SubagentRunInfo) => void;
     const completion = new Promise<SubagentRunInfo>((resolve) => { resolveCompletion = resolve; });
     const stored: StoredSubagentExecution = { run: initialRun, completion, abortRequested: false };
+    let settled = false;
+    // One settlement per run: the run map moves on to the next prompt typed into this chat, and
+    // the stopping run's own `finish()` arrives after that.
+    const settle = (outcome: { aborted?: boolean; error?: string }): SubagentRunInfo => {
+      if (settled) return stored.run;
+      settled = true;
+      const text = wrapper.inner.getLastAssistantText()?.trim();
+      const stop = outcome.aborted || stored.abortRequested ? undefined : lastAssistantStop(manager);
+      const aborted = Boolean(outcome.aborted || stored.abortRequested || stop?.aborted);
+      const message = aborted ? undefined : stop?.error ?? outcome.error;
+      const result = recordResult(manager, {
+        ...initialRun,
+        status: aborted ? "aborted" : message ? "failed" : "completed",
+        completedAt: new Date().toISOString(),
+        ...(text ? { result: text } : {}),
+        ...(message ? { error: message } : {}),
+      });
+      stored.run = result;
+      // Only this run's own slot: a newer run of this child may already hold it.
+      if (dropSubagentRun(sessionId, stored)) dependencies.invalidateSessionList();
+      resolveCompletion(result);
+      // The user chatted with the child directly, so its parent was not waiting on this run
+      // and must be told when it settles. Recorded first: a slow parent must not hold the
+      // child's status back.
+      void notifyParent(result).catch((error) => {
+        console.error(
+          `[pi-web] failed to deliver subagent completion for ${sessionId}:`,
+          error instanceof Error ? error.message : error,
+        );
+      });
+      return result;
+    };
+    stored.settleStopped = () => { settle({ aborted: true }); };
     getSubagentRuns().set(sessionId, stored);
     manager.appendCustomEntry(SUBAGENT_STATUS_TYPE, { version: 1, status: "running" });
     dependencies.invalidateSessionList();
@@ -1149,31 +1195,7 @@ export function createSubagentController(
     return {
       run: initialRun,
       async finish(outcome) {
-        const text = wrapper.inner.getLastAssistantText()?.trim();
-        const stop = outcome.aborted || stored.abortRequested ? undefined : lastAssistantStop(manager);
-        const aborted = Boolean(outcome.aborted || stored.abortRequested || stop?.aborted);
-        const message = aborted ? undefined : stop?.error ?? outcome.error;
-        const result = recordResult(manager, {
-          ...initialRun,
-          status: aborted ? "aborted" : message ? "failed" : "completed",
-          completedAt: new Date().toISOString(),
-          ...(text ? { result: text } : {}),
-          ...(message ? { error: message } : {}),
-        });
-        stored.run = result;
-        getSubagentRuns().delete(sessionId);
-        dependencies.invalidateSessionList();
-        resolveCompletion(result);
-        // The user chatted with the child directly, so its parent was not waiting on this run
-        // and must be told when it settles. Recorded first: a slow parent must not hold the
-        // child's status back.
-        void notifyParent(result).catch((error) => {
-          console.error(
-            `[pi-web] failed to deliver subagent completion for ${sessionId}:`,
-            error instanceof Error ? error.message : error,
-          );
-        });
-        return result;
+        return settle(outcome);
       },
     };
   }
@@ -1366,6 +1388,16 @@ export function createSubagentController(
     await wrapper.inner.abort();
   }
 
+  /**
+   * Stop typed in a child's own chat. The wrapper's `lastRunAborted` belongs to a send: the next
+   * prompt typed there resets it before this run's `finish()` reads it, which recorded a stopped
+   * run as `failed` with the stop's own error text.
+   */
+  function markRunStopped(sessionId: string): void {
+    const stored = getSubagentRuns().get(sessionId);
+    if (stored) stored.abortRequested = true;
+  }
+
   function settleDirectTurn(sessionId: string, aborted: boolean): void {
     // A run in the map records its own result, and a settled run keeps its report.
     if (getSubagentRuns().has(sessionId)) return;
@@ -1396,5 +1428,6 @@ export function createSubagentController(
     abort,
     beginDirectPrompt,
     settleDirectTurn,
+    markRunStopped,
   };
 }

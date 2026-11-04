@@ -188,6 +188,8 @@ type AgentSessionWrapperOptions = {
   onPromptAccepted?: (task: string) => DirectSubagentPromptRun | undefined;
   /** A subagent's wrapper: a run ended and nothing is left to do. */
   onDirectTurnSettled?: (aborted: boolean) => void;
+  /** A subagent's wrapper: Stop was pressed, so the live run is marked stopped before it unwinds. */
+  onAbortRequested?: () => void;
   /** Connects the session's MCP servers before a prompt starts a run, and lets go of them when it closes (lib/mcp-host.ts). */
   mcpHost?: WrapperMcpHost;
   /** Chat only: the extension-provided model the session wanted, named when a prompt finds no model. */
@@ -377,6 +379,7 @@ export class AgentSessionWrapper {
   private readonly onAgentRunComplete?: AgentRunCompleteListener;
   private readonly onPromptAccepted?: (task: string) => DirectSubagentPromptRun | undefined;
   private readonly onDirectTurnSettled?: (aborted: boolean) => void;
+  private readonly onAbortRequested?: () => void;
   private readonly suppressCompletionNotifications: boolean;
   private readonly mcpHost?: WrapperMcpHost;
   private readonly chatOnlyExtensionModel?: { provider: string; id: string };
@@ -421,6 +424,7 @@ export class AgentSessionWrapper {
     this.onAgentRunComplete = options.onAgentRunComplete;
     this.onPromptAccepted = options.onPromptAccepted;
     this.onDirectTurnSettled = options.onDirectTurnSettled;
+    this.onAbortRequested = options.onAbortRequested;
     this.suppressCompletionNotifications = options.suppressCompletionNotifications ?? false;
     this.mcpHost = options.mcpHost;
     this.chatOnlyExtensionModel = options.chatOnlyExtensionModel;
@@ -1477,6 +1481,9 @@ export class AgentSessionWrapper {
       }
 
       case "abort": {
+        // Before any await: a prompt that starts the next turn resets the wrapper's own
+        // `lastRunAborted`, and the run being stopped is the one this Stop is for.
+        this.onAbortRequested?.();
         this.forceShutdownOnIdle = true;
         // Arm the forced cleanup now: the reset above ran before this flag,
         // and the final reset only runs once the SDK run has unwound.
@@ -2780,6 +2787,7 @@ const SUBAGENT_CONTROLLER = createSubagentController({
       suppressCompletionNotifications: true,
       onPromptAccepted: (task) => SUBAGENT_CONTROLLER.beginDirectPrompt(inner.sessionId, task),
       onDirectTurnSettled: (aborted) => SUBAGENT_CONTROLLER.settleDirectTurn(inner.sessionId, aborted),
+      onAbortRequested: () => SUBAGENT_CONTROLLER.markRunStopped(inner.sessionId),
       ...(options?.mcpHost ? { mcpHost: options.mcpHost } : {}),
     });
     registerRpcWrapper(wrapper);
@@ -3619,6 +3627,7 @@ export async function startRpcSession(
       suppressCompletionNotifications: Boolean(subagentResources) || isSideChat,
       // A prompt typed into a child's own chat is a resumed run, not an untracked prompt.
       onPromptAccepted: (task) => SUBAGENT_CONTROLLER.beginDirectPrompt(inner.sessionId, task),
+      onAbortRequested: () => SUBAGENT_CONTROLLER.markRunStopped(inner.sessionId),
       ...(subagentResources
         ? { onDirectTurnSettled: (aborted: boolean) => SUBAGENT_CONTROLLER.settleDirectTurn(inner.sessionId, aborted) }
         : {}),
