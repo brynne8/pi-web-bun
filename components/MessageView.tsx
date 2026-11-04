@@ -1939,10 +1939,9 @@ function PairedResult({ text, isEmpty, isError, powershell }: {
   const { t } = useI18n();
   // A `powershell` call colours its own output, so its card prints the text as it
   // came: the body keeps the muted colour and only the status line pi appended
-  // takes the error one, as `(exit N)` alone does in pi's TUI
-  // (bash-execution.js paints every output line muted). Painting the whole
-  // block red turned output that carries no colour of its own into a failure
-  // too. Every other card keeps the whole-result error colour it had.
+  // takes the error one, as `(exit N)` alone does in pi's TUI, where every output
+  // line is painted muted. Painting the whole block red turned output that carries
+  // no colour of its own into a failure too; every other card keeps its colour.
   const split = powershell ? splitShellStatus(text) : null;
   const body = split ? split.body : text;
   const status = split ? split.status : null;
@@ -1973,7 +1972,7 @@ function PairedResult({ text, isEmpty, isError, powershell }: {
             opacity: isEmpty ? 0.6 : 1,
           }}
         >
-          {isEmpty ? t("i18n.noOutput") : powershell ? <PowerShellOutput text={body} /> : body}
+          {isEmpty ? t("i18n.noOutput") : powershell ? <PowerShellOutput text={body} succeeded={!isError} /> : body}
         </pre>
       )}
       {status !== null && (
