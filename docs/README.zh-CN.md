@@ -46,7 +46,7 @@ bun install
 bun run dev
 ```
 
-开发服务器启动在 [http://127.0.0.1:30141](http://127.0.0.1:30141)。生产服务器（`bun run start`）和构建（`bun run build`）在 Bun 与 Node.js 上都能跑；开发服务器目前还不行：`bun run dev` 让 Vite 跑在 Bun 上，而 Bun 1.4.4 在那里会丢掉写请求的方法（[oven-sh/bun#42759](https://github.com/oven-sh/bun/issues/42759)），每个 `POST` 到达时都成了 `GET`。在带修复的 Bun 发布之前，请用 Node.js 跑 `npm run dev`，或者用 `bunx bun-pr 46528` 装上修复后的构建。
+开发服务器启动在 [http://127.0.0.1:30141](http://127.0.0.1:30141)。构建、生产服务器和开发服务器都能跑在 Bun 1.4.4 上。若所用的 Bun 还没有带上 [oven-sh/bun#42759](https://github.com/oven-sh/bun/issues/42759) 的修复，`bun run dev` 让 Vite 跑在 Bun 上时会丢掉写请求的方法，每个 `POST` 到达时都成了 `GET`；那种情况改用 Node.js 跑 `npm run dev`，或者用 `bunx bun-pr 46528` 装上带修复的构建。
 
 本分支不发布 npm 包，按上面的方式从仓库运行即可。`bun.lock` 已加入忽略列表，每次 `bun install` 都会重新解析依赖，也不要把它提交。真正被跟踪的是 `package-lock.json`：CI 靠它 `npm ci`，以改依赖后用 `bun x npm install --package-lock-only` 记录并提交结果。
 
@@ -130,7 +130,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **再长的文件也能滚动，并且一直有颜色。** 源码视图只渲染视口附近的那些行，不再一次渲染全部，于是多大的文件滚动起来标签页都不会卡，屏幕上的行无论文件多长都保持语法高亮。文件内查找——工具栏的放大镜，或指针在查看器内时按 ⌘/Ctrl+F——搜索全部已加载的行，而不只是渲染出来的窗口，匹配落在很靠下时也会滚动到眼前。原版渲染每一行，并在一千行之后停止高亮。（[说明](./agents/files-and-access.md#long-files-a-window-of-lines-and-find-across-all-of-them)）
 
-**运行时按钮不挪位。** 「停止」放在输入框里，与「引导」和「后续消息」并排，输入框下方那一排在运行中和结束后只有一套摆法——你正要点的东西不会在这次运行结束的一瞬变成别的东西。模型选择器也在这一排里，运行进行途中照样能用：换上去的模型从这次运行的下一个请求起生效，每条回答的标签写的就是写出它的那个模型。原版的处理是挡住一次运行刚结束时的误点（[#1131](https://github.com/agegr/pi-web/pull/1131)）；本分支把这道守卫留着，而在桌面上，它所要防的那种按钮替换已经不存在了。原版的模型选择器在一次运行的整个过程里是禁用的，到 [#1527](https://github.com/agegr/pi-web/pull/1527) 才放开。（[说明](./agents/sessions.md#composer-action-row-nothing-moves-under-the-pointer-at-a-run-boundary)）
+**运行时按钮不挪位。** 「停止」放在输入框里，与「引导」和「后续消息」并排，输入框下方那一排在运行中和结束后只有一套摆法——你正要点的东西不会在这次运行结束的一瞬变成别的东西。原版在一次运行进行时把工具和压缩这两个控件从这一排里撤走，运行结束再放回「停止」自己的位置上，另外挡住一次运行刚结束时的误点（[#1131](https://github.com/agegr/pi-web/pull/1131)）。（[说明](./agents/sessions.md#composer-action-row-nothing-moves-under-the-pointer-at-a-run-boundary)）
 
 **「停止」会回答你排下的消息。** 按下「停止」结束这次运行，还在排队等引导的消息会送进属于它自己的那次运行：模型照着你写下的内容回答，而不是压在它下面一声不响。队列在运行停下之前清空，所以不会有消息被送进一个正在死去的运行、留在那里没有人回答。带着附件的那条消息会连图片一起回到输入框，而不是丢了附件被发出去。队列空了之后再按一次「停止」，结束一切。原版的「停止」只收回它自己的召回覆盖的那一段：挡在压缩后面的提示词（[#1426](https://github.com/agegr/pi-web/pull/1426)）和服务端根本没收到的发送（[#1457](https://github.com/agegr/pi-web/pull/1457)）；队列里剩下的仍交给 pi，那条消息就继续等一个永远不会来的运行。（[说明](./agents/sessions.md#stop-and-the-messages-still-queued-librpc-managerts-hooksuseagentsessionts)）
 
