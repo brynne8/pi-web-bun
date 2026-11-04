@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { stripTypeScriptTypes } from "node:module";
+import { runStripped } from "../lib/__fixtures__/strip-types.mjs";
 import test from "node:test";
 import vm from "node:vm";
 import { createJiti } from "jiti";
@@ -9,7 +9,7 @@ const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8"
 const start = source.indexOf("  const sideTabOwner = activeSessionFamily?.root.id ?? null;");
 const end = source.indexOf("  // sessionStorage is empty during SSR.", start);
 assert.ok(start !== -1 && end > start);
-const effect = stripTypeScriptTypes(source.slice(start, end));
+const effect = source.slice(start, end);
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
 const { restoreSideTabs, sideTabsKey } = await jiti.import("./side-tab-state.ts");
 const { sideChatTitle } = await jiti.import("../lib/session-family.ts");
@@ -46,7 +46,7 @@ test("switching main sessions swaps their side tabs without removing subagent ta
     setRightPanelOpen(value) { context.rightPanelOpen = value; },
     useEffect(callback) { callback(); },
   });
-  const run = () => vm.runInContext(`{ ${effect} }`, context);
+  const run = () => runStripped(`{ ${effect} }`, context);
   run();
   assert.equal(context.sideTabOwnerRef.current, "main-b");
   assert.deepEqual(Array.from(context.agentTabs, (tab) => tab.sessionId), ["child-a", "side-b"]);
@@ -75,7 +75,7 @@ test("two unnamed side tabs match the Agents list regardless of open order", () 
     { id: "side-a", name: "Side chat", created: "2026-01-01", relation: { kind: "side" } },
     { id: "side-b", name: "Side chat", created: "2026-01-02", relation: { kind: "side" } },
   ];
-  const open = vm.runInContext(`${stripTypeScriptTypes(source.slice(start, end))}\nhandleOpenSubagentTab`, context);
+  const open = runStripped(`${source.slice(start, end)}\nhandleOpenSubagentTab`, context);
   open("side-b", sideChatTitle(family[1], "Side chat", family), true);
   open("side-a", sideChatTitle(family[0], "Side chat", family), true);
   assert.deepEqual(Array.from(context.tabs, (tab) => tab.label), ["Side chat 2", "Side chat 1"]);
@@ -103,10 +103,12 @@ test("a project switch still drops subagent tabs but saves the current side tabs
     rememberSideTabs(key) { store.set(key, context.agentTabs.filter((tab) => tab.side)); },
     setFileWorkspaceGeneration() {}, setFileTabs() {},
     setAgentTabs(update) { context.agentTabs = update(context.agentTabs); },
+    // The read-snapshot tabs are this fork's, and they go with the project too.
+    setReadTabs() {},
     setActiveFileTabId(value) { context.activeFileTabId = value; },
     setRightPanelOpen(value) { context.rightPanelOpen = value; },
   });
-  vm.runInContext(`${stripTypeScriptTypes(source.slice(start, end))}\nchangeFileWorkspace("/a", "/b")`, context);
+  runStripped(`${source.slice(start, end)}\nchangeFileWorkspace("/a", "/b")`, context);
   assert.deepEqual(Array.from(context.agentTabs, (tab) => tab.sessionId), ["side-a"]);
   assert.deepEqual(Array.from(store.get("main-a"), (tab) => tab.sessionId), ["side-a"]);
   assert.equal(context.sideTabsSavedOnWorkspaceSwitchRef.current, true);
