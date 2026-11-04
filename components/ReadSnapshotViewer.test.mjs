@@ -191,7 +191,9 @@ test("the tab reaches the panel through the same machinery as file, terminal and
   // The "no file open" placeholder must not show behind an active snapshot tab.
   assert.match(appShell, /&& !activeAgentTab && !activeReadTab && !activeBgTasksTab && !activeBgOutputTab \? \(/);
   // A snapshot came from this project's chat: a project switch drops them, unparked.
-  assert.match(appShell, /setAgentTabs\(\[\]\);[\s\S]{0,160}setReadTabs\(\[\]\);/);
+  // The agent tabs in the same path keep only the side tabs, which belong to their
+  // main session rather than to the project (upstream #1512).
+  assert.match(appShell, /setAgentTabs\(\(tabs\) => tabs\.filter\(\(tab\) => tab\.side\)\);[\s\S]{0,400}setReadTabs\(\[\]\);/);
   assert.match(appShell, /activeFileTabId\.startsWith\("agent:"\) \|\| activeFileTabId\.startsWith\("read:"\)\)/);
   // It is a snapshot of a read, so no viewer state, watcher or path is involved:
   // FileViewer keeps the live-file tabs to itself.
