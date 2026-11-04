@@ -149,6 +149,12 @@ const SUBAGENT_LIST_DESCRIPTION_MAX = 120;
  */
 const DELEGATION_INTRO = `\`${AGENT_TOOL_NAME}\` runs a whole task in a fresh session and returns only the result, so this conversation stays small. Delegate as soon as the goal is clear; a goal and known paths are enough.`;
 
+/** How to write the delegated task itself: what the parent has and wants, and nothing more. */
+const DELEGATION_BRIEF_RULES = [
+  "Write its `prompt` as what you have and what you want: the paths, facts and constraints it cannot infer, and the result you need.",
+  "It reads the same harness prompt you do and plans its own steps, so restate no rule, prescribe no order, and add nothing the request did not ask for. A one-line request takes a one-line prompt.",
+];
+
 const DELEGATION_RULES = [
   "Split independent implementation across subagents; scopes may overlap, and an isolated run can use a worktree.",
   "Do not duplicate work already delegated.",
@@ -158,7 +164,7 @@ const DELEGATION_RULES = [
 export function subagentDelegationBlock(profiles: readonly SubagentProfile[]): string {
   const available = profiles.filter((profile) => profile.enabled);
   const named = new Set(available.map((profile) => profile.name));
-  const rules = [DELEGATION_INTRO];
+  const rules = [DELEGATION_INTRO, ...DELEGATION_BRIEF_RULES];
   if (named.has("explore")) {
     rules.push("Use `explore` when you need to map an unfamiliar codebase, or when a change ripples through code you have not mapped and must be handled carefully. It only reads. Never use it for a file, symbol or call site you already know; read those yourself.");
   }
@@ -509,7 +515,7 @@ export function createSubagentExtension(
         // a call written against the old schema still validates and the extra key is ignored.
         parameters: Type.Object({
           subagent_type: Type.Optional(Type.String({ description: `Configured agent profile. Available types: ${availableTypes}. Default: general-purpose.` })),
-          prompt: Type.String({ description: "The complete task for the subagent." }),
+          prompt: Type.String({ description: "The task for the subagent. Say what you have and what you want." }),
           resume: Type.Optional(Type.String({ description: "Existing subagent: its 8-character id, as its report shows it (the full session id also works). Continues with its current profile, model, thinking, and context. Omit new-session options." })),
           description: Type.String({ description: "Short activity label shown in the UI." }),
           run_in_background: Type.Optional(Type.Boolean({ description: "Return immediately and notify this session when complete. `plan` should always run in the foreground." })),
