@@ -743,8 +743,8 @@ test("a tooltip holds the view still: the mouse on a titled element freezes what
 test("the activity view is one panel: faults, agents, commands, sessions, then one fold", () => {
   // Neither the Debug button nor the Agents button survives in the top bar: both are sections now.
   assert.doesNotMatch(shellSource, /renderDebugButton|debugButtonRef|closeDebugPanel|toggleTopPanel\("debug"|AgentSessionPanel|toggleTopPanel\("agents"/);
-  // One tab the rail always carries, without a close button, ahead of whatever is open.
-  assert.match(shellSource, /const panelTabs: Tab\[\] = \[\s*\{\s*id: "bg-tasks",[^]*?kind: "bg-tasks" as const,\s*closable: false,\s*\},/);
+  // One tab the rail always carries, without a close button, first in the default order.
+  assert.match(shellSource, /const panelTabs: Tab\[\] = orderPanelTabs\(\[\s*\{\s*id: "bg-tasks",[^]*?kind: "bg-tasks" as const,\s*closable: false,\s*\},/);
   assert.doesNotMatch(shellSource, /id: "debug",/);
   // Its count, and the button's badge, say what runs inside: the session's commands and its subagents.
   assert.match(shellSource, /const runningSubagents = activeSessionFamily\n\s*\? countRunningSubagents\(activeSessionFamily\.subagents, runningSessionIds\)/);
