@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createJiti } from "jiti";
 
-const jiti = createJiti(import.meta.url, { tsconfigPaths: true, jsx: { runtime: "automatic" } });
+const jiti = createJiti(import.meta.url, { tsconfigPaths: true, tryNative: false, jsx: { runtime: "automatic" } });
 const { ModelContextWindow } = await jiti.import("./ModelContextWindow.tsx");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 

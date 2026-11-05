@@ -26,6 +26,10 @@ GitHub CI runs on pushes to `main` and `dev`, and on pull requests (`.github/wor
 
 `lib/server-shutdown.test.mjs` dispatches the registered signal event directly on Windows: `process.kill()` there terminates the fixture rather than exercising its JavaScript shutdown listener. Unix still uses actual OS signal delivery. The Windows case tests cleanup ordering, duplicate requests and the deadline; it does not claim Unix signal semantics on Windows. `lib/start-supervised.test.mjs` separately exercises real child exits and hard termination, while `lib/crash-diagnostics.integration.test.mjs` verifies that rate-limited SSE warnings still leave every backlog closure on disk.
 
+## Shared i18n context in component tests
+
+Component tests that render `I18nProvider` load the component and provider through jiti with `tryNative: false`. On Windows, jiti's native-import path can use forward slashes while a component's native alias import uses backslashes. Bun can evaluate the same physical `hooks/useI18n.tsx` twice, creating different Context objects: the test supplies one while the component reads the other. Adding `.tsx` or disabling the filesystem cache does not unify those identities. Keep the provider and consuming component in the same jiti module graph, as `MessageView.test.mjs` and `TabBar.test.mjs` already do; do not bypass the provider guard or change production context state to accommodate a test loader. `BranchNavigator.test.mjs` and `ChatInput.test.mjs` exercise actual provider-wrapped rendering as regressions. Tests that alias a shared component dependency must also clear both native and forward-slash Windows cache keys before and after loading, as `SessionSidebar.tabs.test.mjs` does; clearing only the native key can leave the mocked component cached for the next real-provider test.
+
 ## Reading a failure
 
 - Red when the file runs alone (`bun test path/to/x.test.mjs`) → that file is not Bun-ready: a `node:module` export that is not there, or real React because an alias was bypassed.

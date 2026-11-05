@@ -5,6 +5,7 @@ import { createJiti } from "jiti";
 const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
+  tryNative: false,
 });
 const { BranchNavigator, buildActivePath, compressChain, hasSessionBranches, selectTopLevelBranches } = await jiti.import("./BranchNavigator.tsx");
 const React = await jiti.import("react");

@@ -7,7 +7,7 @@ import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
-  tsconfigPaths: true,
+  tsconfigPaths: true, tryNative: false,
 });
 const { MarkdownBody } = await jiti.import("./MarkdownBody.tsx");
 const { normalizeDisplayMath, markdownPreviewRemarkPlugins, markdownPreviewRehypePlugins, markdownRemarkPlugins, markdownRehypePlugins } = await jiti.import("../lib/markdown.ts");

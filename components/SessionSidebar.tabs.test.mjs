@@ -25,14 +25,15 @@ const placementHook = fileURLToPath(new URL("../hooks/useFilesPlacement", import
 // hook again. Under Node each file has its own process.
 const nodeRequire = createRequire(import.meta.url);
 const reloaded = ["./SessionSidebar.tsx", "../hooks/useFilesPlacement.ts"];
-for (const id of reloaded) {
-  delete nodeRequire.cache[realpathSync(fileURLToPath(new URL(id, import.meta.url)))];
-}
-after(() => {
+function clearReloadedModules() {
   for (const id of reloaded) {
-    delete nodeRequire.cache[realpathSync(fileURLToPath(new URL(id, import.meta.url)))];
+    const absolute = realpathSync(fileURLToPath(new URL(id, import.meta.url)));
+    delete nodeRequire.cache[absolute];
+    delete nodeRequire.cache[absolute.replaceAll("\\", "/")];
   }
-});
+}
+clearReloadedModules();
+after(clearReloadedModules);
 const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
