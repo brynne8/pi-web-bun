@@ -46,7 +46,7 @@ bun install
 bun run dev
 ```
 
-开发服务器启动在 [http://127.0.0.1:30141](http://127.0.0.1:30141)。构建、生产服务器和开发服务器都能跑在 Bun 1.4.4 上。若所用的 Bun 还没有带上 [oven-sh/bun#42759](https://github.com/oven-sh/bun/issues/42759) 的修复，`bun run dev` 让 Vite 跑在 Bun 上时会丢掉写请求的方法，每个 `POST` 到达时都成了 `GET`；那种情况改用 Node.js 跑 `npm run dev`，或者用 `bunx bun-pr 46528` 装上带修复的构建。
+开发服务器启动在 [http://127.0.0.1:30141](http://127.0.0.1:30141)。构建、生产服务器和开发服务器都支持 Bun 1.4.4。已安装的可执行启动器仍可能选择 Node.js，Windows 上也会如此；生产诊断日志会记录实际运行时。若所用的 Bun 还没有带上 [oven-sh/bun#42759](https://github.com/oven-sh/bun/issues/42759) 的修复，`bun run dev` 让 Vite 跑在 Bun 上时会丢掉写请求的方法，每个 `POST` 到达时都成了 `GET`；那种情况改用 Node.js 跑 `npm run dev`，或者用 `bunx bun-pr 46528` 装上带修复的构建。
 
 本分支不发布 npm 包，按上面的方式从仓库运行即可。`bun.lock` 已加入忽略列表，每次 `bun install` 都会重新解析依赖，也不要把它提交。真正被跟踪的是 `package-lock.json`：CI 靠它 `npm ci`，以改依赖后用 `bun x npm install --package-lock-only` 记录并提交结果。
 
@@ -117,6 +117,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 **这次会话在做的一切，收在右侧面板里。** 活动视图按你能动手的东西排序：看着不对的、这次对话委派出去的 subagent、它的后台命令，以及服务器还为它留着 wrapper 或事件流的会话；而支撑这些说法的那些数字（这个页面的连接数和轮询往返、服务器的总计、哪些页面连着）单独收进一个折叠里，合上就把它们清出视线。一张任务的卡片打开它的输出；一个 subagent 的行可以把对话切到它，或者读它的 transcript。原版只把正在跑的命令留在它自己的工具卡片里。（[说明](./agents/background-bash.md#the-rails-activity-view)）
 
 **跑完的东西不会再看不见。** 后台命令或子代理没法在父会话运行途中报告自己。已结算的报告汇成一批送达，只把父会话唤醒一次，每份仍保留自己的卡片；在还没有结果、而后台仍在跑的时候，`await_notifications` 会等到下一份报告；等待期间每个轮次都会收到一次提醒。模型已经用 `get_subagent_result` 读过的结果会从这一批里撤下。原版是一份发一条消息，而且要等父会话空闲。（[说明](./agents/pending-notifications.md)）
+
+**服务停了，故障证据还在。** 生产启动会留下本地诊断日志，终端输出丢失后仍可查看。日志记录实际运行时、进程关系、资源趋势和会话/事件流数量；独立父进程另存子进程的退出状态。重启时，未完成的日志会标出中断的运行。日志自动轮转，不记录对话正文或凭据。原版直接启动生产服务器，不保留持久化故障日志。（[说明](./agents/sessions.md#persistent-runtime-diagnostics)）
 
 **断流不再赔上整次运行。** 有些中继会在响应中途掐断 HTTP/2 流，运行就连同写到一半的回答一起停下。pi 自己的重试表从 1.4.0 起收录了常见的措辞，本分支再补上它还没收的那些，沿用 pi 自己的重试次数与退避，同时仍然把你按下的「停止」、额度被拒、上下文装满当作致命错误处理。原版的立场是浏览器应当和终端里的 pi 重试得一模一样（[#1134](https://github.com/agegr/pi-web/pull/1134)）。（[重试什么、不重试什么](./agents/sessions.md#agentsession-lifecycle-librpc-managerts)）
 

@@ -78,6 +78,7 @@ import { createSubagentSkillsBinding } from "./subagent-skills";
 import { isNestedToolExecutionEvent } from "./agent-event-wire";
 import { retryHttp2StreamDrops } from "./retry-http2-stream-drops";
 import { onServerShutdown } from "./server-shutdown";
+import { recordRuntimeDiagnostic } from "./runtime-diagnostics";
 import { collectLiveAssistantNotices, readShowCacheMissNotices, withSessionPrices } from "./transcript-notices-server";
 import {
   appendClearedSessionToolSelection,
@@ -2682,9 +2683,9 @@ function getRegistry(): Map<string, AgentSessionWrapper> {
   if (!globalThis.__piSessions) {
     globalThis.__piSessions = new Map();
     const destroy = () => globalThis.__piSessions?.forEach((session) => session.destroy());
-    const shutdown = () => {
+    const shutdown = async () => {
       const sessions = Array.from(globalThis.__piSessions?.values() ?? []);
-      void Promise.allSettled(sessions.map((session) => session.shutdown()));
+      await Promise.allSettled(sessions.map((session) => session.shutdown()));
     };
     // Node cannot await work from an exit handler; direct destruction starts
     // extension cleanup synchronously as a final best effort.
@@ -2739,6 +2740,7 @@ function recordSessionClosed(wrapper: { readonly sessionId: string }): void {
   try {
     const lifecycle = readSessionLifecycles()?.get(wrapper.sessionId);
     if (lifecycle) lifecycle.lastClosedAt = Date.now();
+    recordRuntimeDiagnostic("session-closed", {});
   } catch {
     // The panel shows no close time for this id.
   }
@@ -2763,6 +2765,7 @@ function registerRpcWrapper(wrapper: AgentSessionWrapper): void {
   recordSessionStart(sessionId);
   registry.set(sessionId, wrapper);
   wrapper.start();
+  recordRuntimeDiagnostic("session-start", { subagent: wrapper.hasSuppressedCompletionNotifications() });
   if (!wrapper.isChatOnly()) wrapper.beginExtensionBinding();
 }
 

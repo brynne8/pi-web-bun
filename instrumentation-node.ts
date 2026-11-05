@@ -7,11 +7,17 @@
 import { reportRealpathCoverage } from "@/lib/dlp-realpath-compat";
 import { configureHttpDispatcher, readHttpIdleTimeoutMs } from "@/lib/http-dispatcher";
 import { closeAllAgentEventStreams } from "@/lib/agent-event-stream";
-import { onServerShutdown } from "@/lib/server-shutdown";
+import { onServerShutdown, subscribeShutdownOutcome } from "@/lib/server-shutdown";
 import { pruneBgLogs } from "@/lib/bash-bg-tasks";
 import { applyCodemodeWorkerDefault } from "@/lib/codemode-workers";
+import { installRuntimeDiagnostics, recordRuntimeDiagnostic, runtimeDiagnosticsDirectory } from "@/lib/runtime-diagnostics";
 
 export function registerNodeInstrumentation(): void {
+  try {
+    installRuntimeDiagnostics({ directory: runtimeDiagnosticsDirectory() });
+  } catch {
+    console.warn("[pi-web] runtime diagnostics initialization failed");
+  }
   // Before any session can run a codemode script (lib/codemode-workers.ts).
   applyCodemodeWorkerDefault();
   // Which of the shim's two ways in a consumer of `node:fs/promises` actually
@@ -29,6 +35,9 @@ export function registerNodeInstrumentation(): void {
   // only ends when the client disconnects, so an open one would hold the process
   // open past the deadline. The exit itself belongs to `lib/server-shutdown.ts`,
   // which every shutdown path goes through.
+  subscribeShutdownOutcome(({ signal, phase, graceful, rejectedCleanups }) => {
+    recordRuntimeDiagnostic("shutdown", { signal, phase, graceful, rejectedCleanups });
+  });
   onServerShutdown(closeAllAgentEventStreams);
 
   // Background bash logs are swept from `bgLogPath()` too, but that only runs as a task

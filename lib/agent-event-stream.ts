@@ -5,6 +5,7 @@ import {
   type AgentEventLike,
 } from "./agent-event-wire";
 import type { DebugEventStream } from "./debug-types";
+import { recordRuntimeDiagnostic } from "./runtime-diagnostics";
 
 export interface AgentEventStreamSession {
   readonly isStreaming: boolean;
@@ -75,8 +76,10 @@ function logBackpressure(
   closing: boolean,
 ): void {
   const now = Date.now();
+  if (closing) recordRuntimeDiagnostic("backpressure", { queuedBytes, droppedEvents, action: "close" });
   if (now - lastBackpressureLogAt < BACKPRESSURE_LOG_INTERVAL_MS) return;
   lastBackpressureLogAt = now;
+  if (!closing) recordRuntimeDiagnostic("backpressure", { queuedBytes, droppedEvents, action: "drop" });
   const queued = `${Math.round(queuedBytes / 1024)} KB`;
   console.warn(closing
     ? `[pi-web] Agent event stream for ${sessionId} closed: client backlog ${queued} exceeds ${Math.round(limitBytes / 1024)} KB; it reconnects and re-snapshots.`
@@ -228,27 +231,34 @@ export function createAgentEventStream(
         queuedBytes: () => Math.max(0, STREAM_HIGH_WATER_MARK_BYTES - (controller.desiredSize ?? STREAM_HIGH_WATER_MARK_BYTES)),
       };
       streamInfos.set(cleanup, info);
-      const enqueueText = (text: string, options?: { droppable?: boolean }) => {
-        if (closed) return;
+      const canEnqueue = (droppable = false) => {
+        if (closed) return false;
         const desiredSize = controller.desiredSize;
         if (desiredSize === null) {
           cleanup(false);
-          return;
+          return false;
         }
         const queuedBytes = STREAM_HIGH_WATER_MARK_BYTES - desiredSize;
-        if (options?.droppable && queuedBytes > STREAM_HIGH_WATER_MARK_BYTES) {
-          droppedEvents += 1;
-          logBackpressure(sessionId, queuedBytes, backlogLimitBytes, droppedEvents, false);
-          return;
-        }
+        // The hard limit is checked against the backlog already queued. One accepted event may
+        // overshoot it (large readable images must remain deliverable), but the next event must
+        // close the stream even when that event itself could otherwise be dropped.
         if (queuedBytes > backlogLimitBytes) {
           logBackpressure(sessionId, queuedBytes, backlogLimitBytes, droppedEvents, true);
           cleanup(
             "error",
             new Error(`pi-web agent event stream closed: client backlog exceeded ${Math.round(backlogLimitBytes / 1024)} KB`),
           );
-          return;
+          return false;
         }
+        if (droppable && queuedBytes > STREAM_HIGH_WATER_MARK_BYTES) {
+          droppedEvents += 1;
+          logBackpressure(sessionId, queuedBytes, backlogLimitBytes, droppedEvents, false);
+          return false;
+        }
+        return true;
+      };
+      const enqueueText = (text: string, options?: { droppable?: boolean }) => {
+        if (!canEnqueue(options?.droppable)) return;
         try {
           controller.enqueue(encoder.encode(text));
           info.lastWriteAt = Date.now();
@@ -257,6 +267,10 @@ export function createAgentEventStream(
         }
       };
       const encode = (data: unknown, options?: { droppable?: boolean }) => {
+        // Avoid materializing events that will be dropped, and avoid invoking payload getters
+        // after the client has already closed the stream. Recheck in enqueueText in case
+        // serialization itself caused reentrant stream activity.
+        if (!canEnqueue(options?.droppable)) return;
         enqueueText(`data: ${JSON.stringify(data)}\n\n`, options);
       };
       const flushToolUpdates = () => {
@@ -266,7 +280,9 @@ export function createAgentEventStream(
         for (const update of updates) encode(update, { droppable: true });
       };
       const sendClientEvent = (clientEvent: AgentEventLike) => {
+        if (closed) return;
         if (clientEvent.type === "tool_execution_update") {
+          if (!canEnqueue(true)) return;
           pendingToolUpdates.set(clientEvent.toolCallId, clientEvent);
           toolUpdateTimer ??= setTimeout(flushToolUpdates, TOOL_UPDATE_COALESCE_MS);
           return;
@@ -282,6 +298,7 @@ export function createAgentEventStream(
         encode(clientEvent, { droppable: isDroppableEvent(clientEvent) });
       };
       const forwardEvent = (event: AgentEventLike, snapshot: unknown) => {
+        if (closed) return;
         if (isEventIncludedInSnapshot(event, snapshot)) return;
         const clientEvent = toClientAgentEvent(event);
         if (clientEvent) sendClientEvent(clientEvent);
@@ -296,7 +313,7 @@ export function createAgentEventStream(
             return;
           }
 
-          const bufferedEvents: AgentEventLike[] = [];
+          let bufferedEvents: AgentEventLike[] | null = [];
           let snapshotPublished = false;
           const handleEvent = (event: AgentEventLike) => {
             if (event.type === "session_shutdown") {
@@ -304,10 +321,12 @@ export function createAgentEventStream(
               return;
             }
             if (!snapshotPublished) {
-              bufferedEvents.push(event);
+              bufferedEvents?.push(event);
               return;
             }
-            forwardEvent(event, snapshot);
+            // Snapshot identity is only useful for filtering events replayed during subscription.
+            // A later live event may legitimately refer to the same message object.
+            forwardEvent(event, undefined);
           };
 
           const stopListening = session.onEvent(handleEvent);
@@ -323,22 +342,27 @@ export function createAgentEventStream(
           unsubscribe = stopListening;
 
           const snapshot = session.streamingMessage;
+          const replayEvents = bufferedEvents ?? [];
           encode({
             type: "connected",
             sessionId,
             isStreaming: session.isStreaming,
             // onEvent() has just replayed every request the session still holds,
             // so a reconnecting client can drop the ones closed while it was away.
-            pendingExtensionUiIds: bufferedEvents
+            pendingExtensionUiIds: replayEvents
               .filter((event) => event.type === "extension_ui_request" && typeof event.id === "string")
               .map((event) => event.id as string),
           });
           info.connectedAt = Date.now();
-          for (const event of bufferedEvents) forwardEvent(event, snapshot);
+          for (const event of replayEvents) forwardEvent(event, snapshot);
           if (snapshot !== undefined && snapshot !== null) {
             forwardEvent({ type: "message_start", message: snapshot }, undefined);
           }
           snapshotPublished = true;
+          // The subscription callback lives for the whole stream. Do not let it retain the
+          // replayed events (or their initial snapshot) once publication is complete.
+          if (bufferedEvents) bufferedEvents.length = 0;
+          bufferedEvents = null;
         } catch (error) {
           if (closed) return;
           encode({
