@@ -1,9 +1,13 @@
 import { randomUUID } from "crypto";
+import { createRequire } from "node:module";
 import { getPowerShellConfig } from "@earendil-works/pi-coding-agent";
 import { homeDir } from "./home-dir";
 import type { PtyProcess, PtySpawn } from "./terminal-bun-pty";
 import { samePath } from "./paths";
 import type { DebugServerGlobal } from "./debug-types";
+
+// Keep node-pty lazy: vinext's CommonJS transform hoists plain require() calls.
+const requirePty = createRequire(import.meta.url);
 
 export type TerminalEvent =
   | { type: "output"; data: string; offset: number; reset?: boolean }
@@ -143,8 +147,7 @@ function loadPtySpawn(): PtySpawn {
   }
   try {
     // Load inside creation so native module failures reach the API's JSON error handler.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { spawn } = require("node-pty") as typeof import("node-pty");
+    const { spawn } = requirePty("node-pty") as typeof import("node-pty");
     return spawn as unknown as PtySpawn;
   } catch (error) {
     throw new Error(

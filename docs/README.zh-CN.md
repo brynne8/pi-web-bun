@@ -102,7 +102,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 | 锁文件 | `package-lock.json` | `bun.lock` 已加入忽略列表；`bun-types` 则写进被跟踪的 `package-lock.json`，因为 CI 的 `npm ci` 不接受与它对不上的 `package.json` |
 | CI | Node.js 上跑 `.github/workflows/ci.yml` | 同一个 `ci.yml`，只把它要装的浏览器换成 `--with-deps webkit`——本分支不加 Bun 的 job，所以上面那些 Bun 检查在本地跑 |
 
-**终端。** node-pty 的原生插件在 Bun 下无法维持 pty master fd 的生命周期：fd 在 `spawn()` 之后立即被关闭，子进程的 stdin 直接读到 EOF，交互式 shell 还没来得及打印提示符就退出了（[agegr/pi-web#745](https://github.com/agegr/pi-web/issues/745)，另见 [oven-sh/bun#7362](https://github.com/oven-sh/bun/issues/7362)）。Bun 原生的 PTY 支持（`Bun.spawn({ terminal })`）会为进程的整个生命周期持有该 fd，因此 `lib/terminal-bun-pty.ts` 实现了 `lib/terminal-manager.ts` 所需要的那一小部分 node-pty 兼容接口——spawn、`onData`、`onExit`、`write`、`resize`、`kill` 和 `pid`——Node.js 和 Windows 则继续使用 node-pty。没有轮询读取器，没有 fd 生命周期补丁，也没有额外依赖。
+**终端。** node-pty 的原生插件在 Bun 下无法维持 pty master fd 的生命周期：fd 在 `spawn()` 之后立即被关闭，子进程的 stdin 直接读到 EOF，交互式 shell 还没来得及打印提示符就退出了（[agegr/pi-web#745](https://github.com/agegr/pi-web/issues/745)，另见 [oven-sh/bun#7362](https://github.com/oven-sh/bun/issues/7362)）。Bun 原生的 PTY 支持（`Bun.spawn({ terminal })`）会为进程的整个生命周期持有该 fd，因此 `lib/terminal-bun-pty.ts` 实现了 `lib/terminal-manager.ts` 所需要的那一小部分 node-pty 兼容接口——spawn、`onData`、`onExit`、`write`、`resize`、`kill` 和 `pid`——Node.js 和 Windows 则继续使用 node-pty。没有轮询读取器，没有 fd 生命周期补丁，也没有额外依赖。Alpine 下的 Bun 也不会加载未使用的 node-pty 插件；原版的普通 `require()` 可能被 vinext 提升为提前导入。（[加载说明](./agents/client-platform.md#terminal-native-module-loading-libterminal-managerts)）
 
 **技能与插件检查。** `lib/node-cli.ts` 把两个只读的包管理器调用映射到 Bun 的等价命令（npx 用 `bun x`，`bun pm view` 输出的 JSON 与 npm 一致）。安装仍走 SDK 自己的包管理器路径，由上面的 `npmCommand` 指向 bun。
 
