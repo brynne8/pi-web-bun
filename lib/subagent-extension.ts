@@ -504,7 +504,7 @@ export function createSubagentExtension(
         name: "Agent",
         label: "Agent",
         description: `Delegate a task to a configured subagent: a full Pi session whose profile decides its tools. Use background mode for work that can run while you continue, foreground mode when you need the result now. A foreground wait defaults to 30 minutes; set wait_timeout (seconds) for a longer budget, and an exhausted one leaves the child running, its report arriving on its own.\n\nAvailable agent types:\n${agentTypeDescription(profiles)}`,
-        promptSnippet: "Delegate a task to an inspectable subagent session. Whenever possible, delegate work to subagents instead of doing it yourself. Read the delegation section of the system prompt for which subagent to pick and when.",
+        promptSnippet: "Delegate a task to an inspectable subagent session. Read the delegation section of the system prompt for which subagent to pick and when.",
         exposure: SUBAGENT_TOOL_EXPOSURE,
         executionMode: "parallel",
         // Only the parameters a model can choose from the information this tool gives it. A profile
