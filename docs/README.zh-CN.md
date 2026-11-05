@@ -37,7 +37,7 @@
 
 ## Bun 安装
 
-本分支面向 Bun，不需要任何 Node.js 工具链。要求 [Bun](https://bun.sh) 1.4.2 或更高版本，可用 `bun --version` 检查。
+本分支面向 Bun，不需要任何 Node.js 工具链。要求 [Bun](https://bun.sh) 1.4.4 或更高版本，可用 `bun --version` 检查。
 
 ```bash
 git clone https://github.com/brynne8/pi-web-bun.git
@@ -89,7 +89,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 | 部分 | 原版 | 本分支 |
 | --- | --- | --- |
-| 运行时 | Node.js 22.19.0+ | Bun 1.4.2+ |
+| 运行时 | Node.js 22.19.0+ | Bun 1.4.4+ |
 | 内置终端 | 通过 `node-pty` 正常工作 | 通过一层薄薄的 node-pty 兼容封装使用 Bun 原生 PTY（见下，另见 [docs/terminal.md](./terminal.md)） |
 | SDK 包解析 | `node:module` 的 `findPackageJSON()` | `lib/pi-sdk-internals.ts` 里的 `findPackageManifest()` 向上遍历 `node_modules`，因为 Bun 不实现 `node:module` 的任何具名导出 |
 | 用户目录 | `os.homedir()` | 先看 `$HOME`，再回落到用户数据库（`lib/home-dir.ts` 的 `homeDir()`），因为 Bun 的 `os.homedir()` 会忽略 `$HOME`——agent 目录、默认 cwd、目录浏览器的根、路径里的 `~`，以及 HTTP dispatcher 读超时所在的 agent 目录。Windows 上通常没有 `$HOME`，所以那里同样走用户数据库 |
@@ -98,9 +98,9 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 | 测试套件 | Node 运行器（`npm test`） | 两种运行器都跑、都绿：`bun test` 与 `npm test` |
 | 浏览器回归测试 | Playwright Chromium（`npx playwright install --with-deps chromium`） | 用 Playwright 自带的 Apple WebKit：`npm run test:e2e:install` 拉取，CI 装 `--with-deps webkit`；本分支不安装也不启动任何 Chromium 二进制（见 [docs/agents/tests.md](./agents/tests.md#e2e-playwright)） |
 | 构建工具链 | Next.js 16（Turbopack；开发状态与构建产物都在 `.next/`） | vinext 跑在 Vite 8/Rolldown 上，由 `vite.config.ts` 与 `next-config.ts` 配置：`bun run dev` 的状态在 `.vinext/`，`bun run build` 输出到 `dist/`，`bun run start` 提供 `dist/` |
-| 停止服务器 | `next start` 用 `server.close()` 应答 SIGINT/SIGTERM，并等连接结束 | `vinext start` 不应答任何信号，所以收尾改为显式退出：清理动作一跑完就退出（`lib/server-shutdown.ts`；[说明](./agents/sessions.md#stopping-the-server-libserver-shutdownts)） |
+| 停止服务器 | `next start` 用 `server.close()` 应答 SIGINT/SIGTERM，并等连接结束 | `bun run start` 在 `vinext start` 前面加一个父观察者（`bin/start-supervised.cjs`），后者本身仍然不应答信号：观察者记下信号、转发给服务器，等清理动作跑完后带子进程的状态退出（`lib/server-shutdown.ts`；[说明](./agents/sessions.md#stopping-the-server-libserver-shutdownts)） |
 | 锁文件 | `package-lock.json` | `bun.lock` 已加入忽略列表；`bun-types` 则写进被跟踪的 `package-lock.json`，因为 CI 的 `npm ci` 不接受与它对不上的 `package.json` |
-| CI | Node.js 上跑 `.github/workflows/ci.yml` | 同一个 `ci.yml`，只把它要装的浏览器换成 `--with-deps webkit`——本分支不加 Bun 的 job，所以上面那些 Bun 检查在本地跑 |
+| CI | Node.js 上跑 `.github/workflows/ci.yml` | 同一个 `ci.yml`，只把它要装的浏览器换成 `--with-deps webkit`，并把推送本分支 `dev` 分支加进触发条件——本分支不加 Bun 的 job，所以上面那些 Bun 检查在本地跑 |
 
 **终端。** node-pty 的原生插件在 Bun 下无法维持 pty master fd 的生命周期：fd 在 `spawn()` 之后立即被关闭，子进程的 stdin 直接读到 EOF，交互式 shell 还没来得及打印提示符就退出了（[agegr/pi-web#745](https://github.com/agegr/pi-web/issues/745)，另见 [oven-sh/bun#7362](https://github.com/oven-sh/bun/issues/7362)）。Bun 原生的 PTY 支持（`Bun.spawn({ terminal })`）会为进程的整个生命周期持有该 fd，因此 `lib/terminal-bun-pty.ts` 实现了 `lib/terminal-manager.ts` 所需要的那一小部分 node-pty 兼容接口——spawn、`onData`、`onExit`、`write`、`resize`、`kill` 和 `pid`——Node.js 和 Windows 则继续使用 node-pty。没有轮询读取器，没有 fd 生命周期补丁，也没有额外依赖。Alpine 下的 Bun 也不会加载未使用的 node-pty 插件；原版的普通 `require()` 可能被 vinext 提升为提前导入。（[加载说明](./agents/client-platform.md#terminal-native-module-loading-libterminal-managerts)）
 
@@ -148,7 +148,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **一次子代理调用不带文件清单。** `Agent` 收的参数只有 `subagent_type`、`prompt`、`description`、`run_in_background`、`resume`、`model` 和 `isolation`：要让子代理看哪些文件，就写在 `prompt` 里，它用自己的 `read` 去打开。思考档位、轮次上限、是否继承这段对话都由 profile 决定，思考档位跟着模型引用一起写（写成 `x:high`）。原版在调用上保留 `input_files` 列表，和它从同一个 PR 拿到的 profile 参数并列（[#1138](https://github.com/agegr/pi-web/pull/1138)）。（[说明](./agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）
 
-**调用了工具没有的字段，这次调用会被拦下。** 模型给某个工具传了它的 schema 里没有的参数，这次调用就被停掉，回答里指出它编出来的那个字段，并给出这个工具定义所在的路由 `/api/tool_schema/<tool>`，让它去读字段，而不是靠猜。那份定义和工具菜单读的是同一处；模型已经记不清定义时，让它去读，比递给它一串字段名更可靠。只查字段名：已经声明的字段值仍交给 pi 自己的校验，schema 不限定字段的工具照原样调用。原版让多出来的字段原样通过，调用照跑，那个字段什么也不做。（[说明](./agents/tools.md#tool-selection-and-built-in-extensions)）
+**调用了工具没有的字段，这次调用会被拦下。** 模型给某个工具传了它的 schema 里没有的参数，这次调用就被停掉，回答里指出它编出来的那个字段，并指向这个工具的定义，由 `/api/tool_schema/<tool>` 提供——正是工具菜单读的那一份，于是模型是去读字段，而不是再猜一遍。只查字段名：已经声明的字段值仍交给 pi 自己的校验，schema 不限定字段的工具照原样调用。原版让多出来的字段原样通过，调用照跑，那个字段什么也不做。（[说明](./agents/tools.md#tool-selection-and-built-in-extensions)）
 
 **子代理的最后一轮不能再干活。** profile 里的 `max_turns` 给的那最后一轮，工具全被收走，这一次请求只能写答案；这一轮一个字都没交出来，就再给一次同样的机会，之后这次运行才算失败——报错里点出轮次上限，孩子已经写下的部分照样留着。运行一结束工具就还回来，resume 起来的孩子也会被告知这件事，用的是一条只有模型读得到、界面不显示的消息。resume 会把这个预算从零开始重算，所以每一次运行拿到的都是 profile 给的那一整套。原版的收尾轮保留全部工具。（[说明](./agents/subagents.md#built-in-subagents)）
 
