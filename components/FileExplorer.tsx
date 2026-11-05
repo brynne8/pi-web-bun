@@ -1445,7 +1445,13 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   // window, and the fixed content above the list (upload feedback, the search
   // box, the search results above the changed list) offsets where row 0 sits.
   // Measured on scroll, resize and whenever the content above it changes size.
+  // Rebind the measurement when conditional rendering replaces the list node.
+  const activeListSignature = [
+    changedShown ? "changes" : treeActive ? "tree" : "none",
+    changedShown ? changeDisplayRows.length : treeActive ? treeDisplayRows.length : 0,
+  ].join("|");
   const scrollLayoutSignature = [
+    activeListSignature,
     uploadPhase,
     uploadSummary ? uploadSummary.uploaded.length + uploadSummary.skipped.length + uploadSummary.errors.length : -1,
     pendingConflict ? pendingConflict.conflicts.length : -1,
@@ -1480,6 +1486,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     };
     scroller.addEventListener("scroll", onScroll, { passive: true });
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(list);
     observer?.observe(scroller);
     if (above) observer?.observe(above);
     return () => {
