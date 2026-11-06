@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { createRequire } from "node:module";
 import { getPowerShellConfig } from "@earendil-works/pi-coding-agent";
 import { homeDir } from "./home-dir";
-import type { PtyProcess, PtySpawn } from "./terminal-bun-pty";
+import { spawnBunPty, type PtyProcess, type PtySpawn } from "./terminal-bun-pty";
 import { samePath } from "./paths";
 import type { DebugServerGlobal } from "./debug-types";
 
@@ -141,10 +141,7 @@ function dimension(value: number, fallback: number): number {
  * for its pipe-based ConPTY and untranslated `\r` (docs/terminal.md).
  */
 function loadPtySpawn(): PtySpawn {
-  if (typeof Bun !== "undefined" && process.platform !== "win32") {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return (require("./terminal-bun-pty") as typeof import("./terminal-bun-pty")).spawnBunPty;
-  }
+  if (typeof Bun !== "undefined" && process.platform !== "win32") return spawnBunPty;
   try {
     // Load inside creation so native module failures reach the API's JSON error handler.
     const { spawn } = requirePty("node-pty") as typeof import("node-pty");
