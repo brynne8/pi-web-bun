@@ -152,7 +152,7 @@ const DELEGATION_INTRO = `\`${AGENT_TOOL_NAME}\` runs a whole task in a fresh se
 /** How to write the delegated task itself: what the parent has and wants, and nothing more. */
 const DELEGATION_BRIEF_RULES = [
   "Write its `prompt` as what you have and what you want: the paths, facts and constraints it cannot infer, and the result you need.",
-  "It reads the same harness prompt you do and plans its own steps, so restate no rule, prescribe no order, and add nothing the request did not ask for. A one-line request takes a one-line prompt.",
+  "It reads the same harness prompt you do and plans its own steps, so restate no rule and prescribe no order. A one-line request takes a one-line prompt.",
 ];
 
 const DELEGATION_RULES = [
@@ -515,7 +515,7 @@ export function createSubagentExtension(
         // a call written against the old schema still validates and the extra key is ignored.
         parameters: Type.Object({
           subagent_type: Type.Optional(Type.String({ description: `Configured agent profile. Available types: ${availableTypes}. Default: general-purpose.` })),
-          prompt: Type.String({ description: "The task for the subagent. Say what you have and what you want." }),
+          prompt: Type.String({ description: "Pass the user's request on faithfully: add no scope, no interpretation of your own, and no requirement they did not state. Say what you have and what you want." }),
           resume: Type.Optional(Type.String({ description: "Existing subagent: its 8-character id, as its report shows it (the full session id also works). Continues with its current profile, model, thinking, and context. Omit new-session options." })),
           description: Type.String({ description: "Short activity label shown in the UI." }),
           run_in_background: Type.Optional(Type.Boolean({ description: "Return immediately and notify this session when complete; this is the default. Set false to wait in the foreground, within wait_timeout. `explore` and `plan` should always run in the foreground." })),
