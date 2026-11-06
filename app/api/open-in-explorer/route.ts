@@ -2,22 +2,31 @@ import { stat } from "fs/promises";
 import { resolve } from "path";
 import { NextResponse } from "vinext/shims/server";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
-import { isFileManagerSupported, isLoopbackHost, launchFileManager } from "@/lib/open-in-file-manager";
+import {
+  fileManagerPlatform,
+  fileManagerViewFor,
+  isFileManagerSupported,
+  isLoopbackHost,
+  launchFileManager,
+} from "@/lib/open-in-file-manager";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /** Whether this request may raise a file-manager window on the server. */
-function availabilityFor(request: Request): { supported: boolean; reason: string | null } {
-  if (!isLoopbackHost(request.headers.get("host"))) return { supported: false, reason: "remote" };
-  if (!isFileManagerSupported(process.platform)) return { supported: false, reason: "unsupported-platform" };
-  return { supported: true, reason: null };
+function availabilityFor(request: Request): { supported: boolean; reason: string | null; platform: string } {
+  const platform = fileManagerPlatform();
+  if (!isLoopbackHost(request.headers.get("host"))) return { supported: false, reason: "remote", platform };
+  if (!isFileManagerSupported(platform)) return { supported: false, reason: "unsupported-platform", platform };
+  return { supported: true, reason: null, platform };
 }
 
 /** Lets the sidebar pick the button label and disable it when unavailable. */
 export async function GET(request: Request) {
-  const { supported, reason } = availabilityFor(request);
-  return NextResponse.json({ supported, reason, platform: process.platform });
+  const { supported, reason, platform } = availabilityFor(request);
+  // `platform` is which file manager the client's label should name: inside WSL it
+  // is the Windows one, so the browser says Explorer, not a generic file manager.
+  return NextResponse.json({ supported, reason, platform });
 }
 
 /** Opens the session workspace, or reveals one file in it, in the OS file manager. */
@@ -45,17 +54,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "access-denied" }, { status: 403 });
     }
     const stats = await stat(target);
-    if (revealFile) {
-      // A directory here would be revealed as a folder icon, which is not what a
-      // reveal of a row means; the caller passes a file path or opens the folder.
-      if (!stats.isFile()) {
-        return NextResponse.json({ error: "not-a-file" }, { status: 400 });
-      }
-    } else if (!stats.isDirectory()) {
-      return NextResponse.json({ error: "not-a-directory" }, { status: 400 });
+    // A row that turned out to be a folder opens that folder, and nothing that is
+    // neither file nor folder is asked of the file manager at all.
+    const view = fileManagerViewFor(revealFile !== null, stats);
+    if (!view) {
+      return NextResponse.json(
+        { error: revealFile ? "not-a-file" : "not-a-directory" },
+        { status: 400 },
+      );
     }
 
-    await launchFileManager(target, process.platform, revealFile ? "reveal" : "open");
+    await launchFileManager(target, process.platform, view);
     return NextResponse.json({ opened: true });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });

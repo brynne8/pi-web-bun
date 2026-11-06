@@ -13,6 +13,37 @@ export function isFileManagerSupported(platform: string): boolean {
   return FILE_MANAGER_BY_PLATFORM.has(platform);
 }
 
+/** The distro name is in the environment of every process WSL starts; "" off WSL. */
+export function wslDistroName(env: NodeJS.ProcessEnv = process.env): string {
+  return env.WSL_DISTRO_NAME?.trim() ?? "";
+}
+
+/**
+ * Which platform's file manager answers for this one: inside WSL it is Windows,
+ * reached through the interop PATH, because a Linux desktop opener is both
+ * usually absent there and blind to paths the Windows shell can show.
+ */
+export function fileManagerPlatform(
+  platform: string = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return platform === "linux" && wslDistroName(env) ? "win32" : platform;
+}
+
+/**
+ * The Windows form of a path inside WSL: a mounted drive keeps its letter, the
+ * rest of the distro is reached through the UNC root named after the distro.
+ */
+export function windowsPathForWsl(posixPath: string, distro: string): string {
+  const trimmed = posixPath.replace(/\/+$/, "") || "/";
+  const mount = /^\/mnt\/([a-zA-Z])(?:\/(.*))?$/.exec(trimmed);
+  if (mount) {
+    const rest = (mount[2] ?? "").replaceAll("/", "\\");
+    return `${mount[1].toUpperCase()}:${rest ? `\\${rest}` : "\\"}`;
+  }
+  return `\\\\wsl.localhost\\${distro}${trimmed.replaceAll("/", "\\")}`;
+}
+
 /**
  * What to ask the file manager for: show a folder's contents, or show one file
  * inside the folder that holds it. Receiving a reveal is what a reader means by
@@ -22,12 +53,26 @@ export function isFileManagerSupported(platform: string): boolean {
 export type FileManagerView = "open" | "reveal";
 
 /**
+ * Whether to reveal one path or open it. A reveal of a folder opens that folder:
+ * a right-clicked directory wants its contents, not its icon in its parent.
+ * Null is a path neither view can show (a socket, a device).
+ */
+export function fileManagerViewFor(
+  revealFile: boolean,
+  stats: { isDirectory(): boolean; isFile(): boolean },
+): FileManagerView | null {
+  if (revealFile && !stats.isDirectory()) return stats.isFile() ? "reveal" : null;
+  return stats.isDirectory() ? "open" : null;
+}
+
+/**
  * Builds the command that shows something in the OS file manager.
  *
  * A reveal selects one file where the platform can (`open -R`, `explorer /select,`)
  * and falls back to its folder where it cannot: no Linux file manager has a
  * reveal-from-the-terminal command, and opening the folder still answers the
- * question the reader asked.
+ * question the reader asked. A WSL caller passes `win32` and the Windows form of
+ * the path (`fileManagerPlatform()`, `windowsPathForWsl()`).
  * @param platform A Node `process.platform` value
  * @param target The directory to open, or the file to reveal
  * @param view `reveal` shows one file among its folder's contents
@@ -82,8 +127,12 @@ export function launchFileManager(
   target: string,
   platform: string = process.platform,
   view: FileManagerView = "open",
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
-  const spec = fileManagerCommand(platform, target, view);
+  const managerPlatform = fileManagerPlatform(platform, env);
+  const distro = platform === "linux" ? wslDistroName(env) : "";
+  const asked = distro ? windowsPathForWsl(target, distro) : target;
+  const spec = fileManagerCommand(managerPlatform, asked, view);
   if (!spec) return Promise.reject(new Error(`Unsupported platform: ${platform}`));
   // On macOS `open` launches an `.app` bundle instead of showing it, so the default
   // `open` view is for project directories such as the explorer root; only a `reveal`

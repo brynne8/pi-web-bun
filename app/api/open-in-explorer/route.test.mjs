@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -61,18 +61,17 @@ test("refuses a reveal outside the allowed roots before looking at it", async (t
   assert.deepEqual(await response.json(), { error: "access-denied" });
 });
 
-// A file that is allowed would really raise a Finder window on this machine, so
-// what is checked here is every answer the route gives before it spawns: a
-// reveal names one file, and a directory is not one. The command each platform
-// gets is pinned in lib/open-in-file-manager.test.mjs instead.
-test("refuses to reveal a directory, which is what opening a folder is for", async (t) => {
+// A path that would really be opened raises a Finder or Explorer window on this
+// machine, so what is checked here is every answer the route gives before it
+// spawns. Which of the two views a path gets, a folder reveal included, is
+// pinned in lib/open-in-file-manager.test.mjs (`fileManagerViewFor`).
+test("refuses to open a file as a folder", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "pi-web-open-in-explorer-root-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   allowFileRoot(root);
-  await mkdir(path.join(root, "folder"));
   await writeFile(path.join(root, "file.ts"), "export const a = 1;\n");
 
-  const response = await reveal(path.join(root, "folder"));
+  const response = await open(path.join(root, "file.ts"));
   assert.equal(response.status, 400);
-  assert.deepEqual(await response.json(), { error: "not-a-file" });
+  assert.deepEqual(await response.json(), { error: "not-a-directory" });
 });
