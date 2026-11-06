@@ -518,7 +518,7 @@ export function createSubagentExtension(
           prompt: Type.String({ description: "The task for the subagent. Say what you have and what you want." }),
           resume: Type.Optional(Type.String({ description: "Existing subagent: its 8-character id, as its report shows it (the full session id also works). Continues with its current profile, model, thinking, and context. Omit new-session options." })),
           description: Type.String({ description: "Short activity label shown in the UI." }),
-          run_in_background: Type.Optional(Type.Boolean({ description: "Return immediately and notify this session when complete. `plan` should always run in the foreground." })),
+          run_in_background: Type.Optional(Type.Boolean({ description: "Return immediately and notify this session when complete; this is the default. Set false to wait in the foreground, within wait_timeout. `plan` should always run in the foreground." })),
           wait_timeout: waitTimeoutParameter(),
           model: Type.Optional(Type.String({ description: 'Optional provider/modelId override. Append ":<level>" (off, minimal, low, medium, high, xhigh, max) to also set the thinking level for this run, e.g. "provider/model:high".' })),
           isolation: Type.Optional(Type.String({ description: 'Set to "worktree" to run the subagent in an isolated git worktree.' })),
