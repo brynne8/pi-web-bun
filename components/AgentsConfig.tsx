@@ -62,7 +62,7 @@ const EMPTY_PROFILE: EditableProfile = {
   mcp: "off",
   promptMode: "append",
   inheritContext: false,
-  runInBackground: false,
+  runInBackground: true,
   enabled: true,
 };
 

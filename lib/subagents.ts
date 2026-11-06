@@ -258,7 +258,7 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     mcp: "off",
     promptMode: "append",
     inheritContext: false,
-    runInBackground: true,
+    runInBackground: false,
     enabled: true,
     scope: "builtin",
   },

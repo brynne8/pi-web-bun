@@ -148,7 +148,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **一次子代理调用不带文件清单。** `Agent` 收的参数只有 `subagent_type`、`prompt`、`description`、`run_in_background`、`resume`、`model` 和 `isolation`：要让子代理看哪些文件，就写在 `prompt` 里，它用自己的 `read` 去打开。思考档位、轮次上限、是否继承这段对话都由 profile 决定，思考档位跟着模型引用一起写（写成 `x:high`）。原版在调用上保留 `input_files` 列表，和它从同一个 PR 拿到的 profile 参数并列（[#1138](https://github.com/agegr/pi-web/pull/1138)）。（[说明](./agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）
 
-**子代理默认在后台跑。** `Agent` 把任务交出去就返回，子代理干完再把报告送回来。写 `run_in_background: false` 就改成在前台等结果，最多等到 `wait_timeout`；profile 也可以把这个前台等待变成自己的默认。`plan` 出厂就是前台，所以它不会和自己要规划的那件事并行。原版除非调用明确要后台，否则每次委派都在前台等。（[说明](./agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）
+**子代理默认在后台跑。** `Agent` 把任务交出去就返回，子代理干完再把报告送回来。写 `run_in_background: false` 就改成在前台等结果，最多等到 `wait_timeout`；profile 也可以把这个前台等待变成自己的默认。`explore` 和 `plan` 出厂就是前台，所以调研结果和计划都在要用它们的那件事之前到手。原版除非调用明确要后台，否则每次委派都在前台等。（[说明](./agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）
 
 **调用了工具没有的字段，这次调用会被拦下。** 模型给某个工具传了它的 schema 里没有的参数，这次调用就被停掉，回答里指出它编出来的那个字段，并指向这个工具的定义，由 `/api/tool_schema/<tool>` 提供——正是工具菜单读的那一份，于是模型是去读字段，而不是再猜一遍。只查字段名：已经声明的字段值仍交给 pi 自己的校验，schema 不限定字段的工具照原样调用。原版让多出来的字段原样通过，调用照跑，那个字段什么也不做。（[说明](./agents/tools.md#tool-selection-and-built-in-extensions)）
 
