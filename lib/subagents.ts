@@ -251,6 +251,7 @@ const BUILTIN_PROFILES: SubagentProfile[] = [
     description: "Use when mapping an unfamiliar codebase or investigating a question deeply; read-only",
     systemPrompt: "Explore the codebase to answer the delegated question. Do not modify files. Report concrete findings with file paths and relevant symbols.",
     tools: [...PRESET_READ_ONLY],
+    thinking: "off",
     maxTurns: READ_ONLY_MAX_TURNS,
     loadSkills: false,
     loadExtensions: false,
