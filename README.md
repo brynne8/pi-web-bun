@@ -59,13 +59,13 @@ bun run dev:lan                        # dev server on 0.0.0.0:30141
 bun run build                          # production build into dist/
 bun run start                          # serve dist/ on 127.0.0.1:30141
 bun test                               # run the test suite
-bun x tsc --noEmit                     # typecheck
+bun check                     # typecheck
 bun run lint                           # lint
 ```
 
 Three notes on running the checks:
 
-- `bun test` replaces `npm test`. The `test` script in `package.json` still calls Node's test runner, which Bun cannot expand the glob arguments for; `bun test` needs no arguments and picks up every test file itself. Likewise `bun x tsc --noEmit` replaces `node_modules/.bin/tsc --noEmit`, because the `.bin` shims carry a `#!/usr/bin/env node` shebang and fail without Node on `PATH`.
+- `bun test` replaces `npm test`. The `test` script in `package.json` still calls Node's test runner, which Bun cannot expand the glob arguments for; `bun test` needs no arguments and picks up every test file itself. Likewise `bun check` replaces `node_modules/.bin/tsc --noEmit`, because the `.bin` shims carry a `#!/usr/bin/env node` shebang and fail without Node on `PATH`.
 - **Both runners are supported here, and both are kept green.** `npm test` on a real Node.js 22.19.0+ is the second opinion, and the only one upstream has, so it is the runner to compare after a rebase onto upstream. The two do not count alike — Node counts subtests and suites of its own accord — so compare failures, never totals. [docs/agents/tests.md](./docs/agents/tests.md) records what behaves differently under Bun and what to write instead.
 - The whole suite passes under `bun test` as well: every file under `app/`, `components/`, `hooks/`, `lib/` and `public/`. Where a behaviour can only be observed on one runtime the test says so and skips that half instead of failing — Bun's `fetch` ignores undici's global dispatcher, and Bun's `node:module` exports neither `stripTypeScriptTypes` nor `registerHooks`.
 
@@ -357,7 +357,7 @@ The development server runs at [http://127.0.0.1:30141](http://127.0.0.1:30141).
 
 ```bash
 npm test
-node_modules/.bin/tsc --noEmit
+bun check
 npm run lint
 ```
 

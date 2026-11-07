@@ -7,7 +7,7 @@ bun install   # bun.lock is gitignored and resolves fresh; never `npm install` h
 bun run dev   # port 30141
 ```
 
-Tests: `bun test` · Typecheck: `bun x tsc --noEmit` · Lint: `bun run lint`
+Tests: `bun test` · Typecheck: `bun check` · Lint: `bun run lint`
 
 Verifying a change while working on it runs on **Bun only**: `bun test`, or just the files you touched. Bun green is what a push waits for. Node's runner belongs to GitHub CI, which installs from the lockfile with `npm ci` and runs `npm test` on Node 22.19.0 — follow that run after the push instead of running node here. Outside CI, node and npm are in no gate: error triage, effect checks, reproductions, ad-hoc scripts and the dev server run under `bun`, and only Bun's result counts locally. The one local `npm test` that earns its keep is the comparison after a rebase onto upstream, whose runner is Node's; compare failures there, never totals.
 

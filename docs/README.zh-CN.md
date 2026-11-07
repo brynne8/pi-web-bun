@@ -61,13 +61,13 @@ bun run dev:lan                        # 开发服务器，监听 0.0.0.0:30141
 bun run build                          # 生产构建，输出到 dist/
 bun run start                          # 在 127.0.0.1:30141 上提供 dist/
 bun test                               # 运行测试
-bun x tsc --noEmit                     # 类型检查
+bun check                     # 类型检查
 bun run lint                           # 代码检查
 ```
 
 在 Bun 下运行检查命令有三点说明：
 
-- 用 `bun test` 代替 `npm test`。`package.json` 里的 `test` 脚本仍调用 Node 的测试运行器，Bun 无法展开它传入的 glob；`bun test` 不需要任何参数，会自己找出全部测试文件。同理用 `bun x tsc --noEmit` 代替 `node_modules/.bin/tsc --noEmit`，因为 `.bin` 下的启动脚本带 `#!/usr/bin/env node` shebang，没有 Node 时会执行失败。
+- 用 `bun test` 代替 `npm test`。`package.json` 里的 `test` 脚本仍调用 Node 的测试运行器，Bun 无法展开它传入的 glob；`bun test` 不需要任何参数，会自己找出全部测试文件。同理用 `bun check` 代替 `node_modules/.bin/tsc --noEmit`，因为 `.bin` 下的启动脚本带 `#!/usr/bin/env node` shebang，没有 Node 时会执行失败。
 - **两种运行器在本分支都受支持，并且都必须保持全绿**：真实的 Node.js 22.19.0+ 上跑 `npm test` 是第二意见，也是上游唯一有的那个，所以 rebase 上游后要靠它对比。两边计数方式不同——Node 会自己统计 subtest 与 suite——所以只比失败项，不比总数。Bun 下哪里行为不同、该怎么写，记在 [docs/agents/tests.md](./agents/tests.md)。
 - 整个测试套件在 `bun test` 下也全部通过——`app/`、`components/`、`hooks/`、`lib/`、`public/` 下的每个文件。只有在某个运行时才能观察到的行为，测试会说明并跳过不适用的那一半，而不是失败：Bun 的 `fetch` 不使用 undici 的全局 dispatcher，Bun 的 `node:module` 既不导出 `stripTypeScriptTypes` 也不导出 `registerHooks`。
 
@@ -338,7 +338,7 @@ npm run dev
 
 ```bash
 npm test
-node_modules/.bin/tsc --noEmit
+bun check
 npm run lint
 ```
 
