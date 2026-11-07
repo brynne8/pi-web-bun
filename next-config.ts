@@ -34,6 +34,9 @@ export const nextConfig: NextConfig = {
     // Vite's module runner hands out a frozen fs object to the dev server's
     // environments, which turns that patch into a 500. Node loads it directly.
     "graceful-fs",
+    // semver is CommonJS; Vite's module runner breaks its default-export interop
+    // (`m.default[k]`), so Node loads it directly.
+    "semver",
     "@earendil-works/pi-coding-agent",
     "@earendil-works/pi-agent-core",
     "@earendil-works/pi-ai",

@@ -38,12 +38,13 @@
     "build": "vite build",
     "start": "bun bin/start-supervised.cjs start -H 127.0.0.1 -p 30141",
     "start:lan": "bun bin/start-supervised.cjs start -H 0.0.0.0 -p 30141",
-    "lint": "eslint .",
+    "lint": "bun lint .",
     "test:terminal": "node e2e/terminal.mjs",
     "test:e2e": "node e2e/run.mjs",
     "test:e2e:install": "node e2e/install-browser.mjs",
     "test": "node --experimental-strip-types --test \"app/**/*.test.mjs\" \"components/**/*.test.mjs\" \"hooks/**/*.test.mjs\" \"lib/**/*.test.mjs\" \"public/**/*.test.mjs\"",
-    "release": "npm version patch --no-git-tag-version"
+    "release": "npm version patch --no-git-tag-version",
+    "lint:eslint": "eslint ."
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.5.0",
