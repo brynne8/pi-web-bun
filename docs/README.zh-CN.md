@@ -180,6 +180,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **删除会带走会话在别处留下的东西。** 隔离运行的 subagent 在自己的 git worktree 里工作，它的会话文件因此记在那个 worktree 路径下，自成目录。删除父会话时会通读整个 sessions 根目录去找这样的子会话，连它一起删，并把留下来的重新挂到最近一个仍然存在的祖先。被删空的东西也跟着走：它清空的目录，还有你在应用外删掉某个项目目录之后侧栏仍替它保有的位置和名称。原版寻找子会话、也寻找该改挂谁，只看被删文件所在的那些目录。（[说明](./agents/sessions.md#session-sidebar-project-groups-pins-and-archive)）
 
+**worktree 认的是你给整个仓库的信任。** 隔离运行的 subagent 在 git worktree 里工作，从侧边栏打开的每一个检出也是：项目的 `.pi/` 文件跟着一起过去，但那个目录住在仓库旁边，顺着路径往上找不到任何决定，于是被当作受限模式——项目的扩展、skills、设置和 MCP server 一个也不加载。如今自己没有决定的检出会直接用主检出的那一个，拒绝也一样跟着；为这个 worktree 本身写过的决定仍然优先。原版只按路径认信任，所以同一个仓库的每个 worktree 都要重新问一遍。（[说明](./agents/files-and-access.md#worktrees-and-project-grouping)）
+
 **你自己取的名字，撑得过「生成标题」。** 在侧边栏里、或者用 `/name` 给会话取过名字之后，再按「生成标题」，你的名字原样不动：按钮会说明它保留了你取的名字。应用归不到自己名下的名字同样保留——pi TUI 取的、扩展取的、旧版本取的，都一样。只有没有名字的会话，或者名字本来就是「生成标题」自己取的，才会得到一个新名字。原版用模型写下的标题盖掉这个会话原本被叫做什么。（[说明](./agents/sessions.md#auto-naming-never-replaces-a-name-a-person-set-post-apisessionsidauto-name)）
 
 **Code mode 默认开着，设置自成一页。** 会话一开始就能用 Code mode——模型写一小段脚本来调用工具——除非你的设置另有说法；它的设置都在同一页：始终开启或自动、内置工具是否同时声明给模型、工具列表能花多少 token、沙箱自检，以及当前会话可用的工具名。每个服务器自己的工具公开方式仍然留在那个服务器旁边。原版要等 MCP 服务器连上才打开 Code mode，设置也放在 MCP 那一页。（[说明](./agents/tools.md#settings--tools)）
