@@ -42,6 +42,7 @@ export function BgTaskOutputView({ task, sessionTitles }: Props) {
   const [outputLoaded, setOutputLoaded] = useState(false);
   const [outputState, setOutputState] = useState<"loading" | "live" | "retrying" | "unavailable">("loading");
   const [now, setNow] = useState(() => Date.now());
+  const [commandOpen, setCommandOpen] = useState(false);
   const [follow, setFollow] = useState(true);
   const outputRef = useRef<HTMLPreElement | null>(null);
   const offsetRef = useRef(0);
@@ -142,9 +143,23 @@ export function BgTaskOutputView({ task, sessionTitles }: Props) {
             kind={state === "succeeded" ? "ok" : state === "failed" || state === "signal" ? "error" : state === "stopped" ? "stopped" : "terminal"}
           />
         </span>
-        <span className="bg-output-name" title={task.command}>{task.command.split("\n")[0] || t("bgTasks.unnamed")}</span>
         {sessionTitle && <span className="bg-output-session" title={sessionTitle}>{sessionTitle}</span>}
         <span className={`bg-output-status is-${state}`}>{statusText}</span>
+      </div>
+      <div
+        className="bg-output-command"
+        onMouseEnter={() => setCommandOpen(true)}
+        onMouseLeave={() => setCommandOpen(false)}
+      >
+        <code
+          className="bg-output-command-text"
+          tabIndex={0}
+          onFocus={() => setCommandOpen(true)}
+          onBlur={() => setCommandOpen(false)}
+        >{task.command || t("bgTasks.unnamed")}</code>
+        {commandOpen && (
+          <code className="bg-output-command-full">{task.command || t("bgTasks.unnamed")}</code>
+        )}
       </div>
       <div className="bg-output-body">
         <pre ref={outputRef} onScroll={handleOutputScroll} className="bg-task-output">
@@ -187,16 +202,30 @@ export function BgTaskOutputView({ task, sessionTitles }: Props) {
         .bg-output .is-error { color: var(--bt-err); }
         .bg-output-head {
           display: flex; flex-shrink: 0; align-items: center; gap: 7px; min-width: 0;
-          padding: 7px 10px; border-bottom: 1px solid var(--border);
+          padding: 7px 10px 5px;
           background: var(--bg-panel); font-size: 11px;
         }
-        .bg-output-name {
-          min-width: 0; flex: 1; overflow: hidden; color: var(--text);
-          font-family: var(--font-mono); text-overflow: ellipsis; white-space: nowrap;
-        }
         .bg-output-session {
-          min-width: 0; max-width: 40%; flex-shrink: 1; overflow: hidden; color: var(--text-dim);
+          min-width: 0; flex: 1; overflow: hidden; color: var(--text-dim);
           font-size: 10px; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .bg-output-command {
+          position: relative; flex-shrink: 0; min-width: 0;
+          padding: 0 10px 6px; border-bottom: 1px solid var(--border);
+          background: var(--bg-panel); font-size: 11px; line-height: 1.45;
+        }
+        .bg-output-command-text {
+          display: block; min-width: 0; overflow: hidden; color: var(--text);
+          font-family: var(--font-mono); text-overflow: ellipsis; white-space: pre;
+        }
+        .bg-output-command-text:focus-visible { outline: none; }
+        .bg-output-command-full {
+          position: absolute; top: -7px; left: 1px; right: 1px; z-index: 3;
+          max-height: 60vh; padding: 6px 8px; overflow: auto;
+          color: var(--text); background: var(--bg-panel);
+          font-family: var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere;
+          border: 1px solid var(--border); border-radius: 6px;
+          box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
         }
         .bg-output-status { flex-shrink: 0; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
         .bg-output-status.is-running { color: var(--accent); }
