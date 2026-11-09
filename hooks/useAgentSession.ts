@@ -15,7 +15,7 @@ import type {
 } from "@/lib/types";
 import { isBlockingExtensionUiRequest } from "@/lib/browser-notifications";
 import { normalizeToolCalls } from "@/lib/normalize";
-import { AgentCommandError, agentStatusUrl, isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
+import { AgentCommandError, agentStatusUrl, EXTENSION_REPORTED_CODE, isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
 import { createSideChat, SIDE_REFUSAL_MESSAGES } from "@/lib/side-chat-client";
 import { missingCwdFromBody } from "@/lib/missing-cwd";
 import {
@@ -53,7 +53,9 @@ import { runStatePhase } from "@/lib/chat-phase-label";
 import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
 import { CODEMODE_TOOL_NAME, getCodemodeProgress } from "@/lib/codemode-view";
 import { updateExtensionWidgets } from "@/lib/extension-widgets";
+import { createShownNotices, extensionErrorMessage } from "@/lib/startup-issues";
 import { bareMcpOpensSettings } from "@/lib/mcp-command";
+import { copyText } from "@/lib/clipboard";
 import type { SettingsSection } from "@/lib/settings-navigation";
 import { withTranscriptNotices, type TranscriptNotice } from "@/lib/transcript-notices";
 import {
@@ -317,6 +319,9 @@ const MODELS_RETRY_DELAYS_MS = [2_000, 5_000, 10_000];
 const MAX_NOTICES = 5;
 const NOTICE_VISIBLE_MS = 5000;
 const NOTICE_EXIT_ANIMATION_MS = 180;
+// A session's startup issues come with every stream it opens (lib/rpc-manager.ts): this page
+// shows each once, through reconnects and returns to the session.
+const isFirstNoticeShowing = createShownNotices();
 function createNoticeId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -1507,6 +1512,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setExtensionDialogs((queue) => enqueueExtensionUiRequest(queue, request));
         break;
       case "notify": {
+        if (request.id && !isFirstNoticeShowing(request.id)) break;
         addNotice({
           id: request.id,
           message: stripAnsi(request.message),
@@ -1902,7 +1908,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       case "extension_error":
         addNotice({
           type: "error",
-          message: (event.error as string | undefined) ?? "Extension command failed",
+          message: extensionErrorMessage(event.extensionPath, (event.error as string | undefined) ?? "Extension command failed"),
         });
         break;
       case "message_start":
@@ -2290,6 +2296,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     try {
       const sid = sessionIdRef.current ?? session?.id ?? await ensureNewSession();
       if (!sid) throw new Error("Unable to create a session for the shell command");
+      // A `user_bash` handler's dialog (ctx.ui.confirm…) reaches the page only
+      // through the stream, which a fresh composer has not opened yet.
+      await ensureEventsConnected(sid).catch(() => {});
       await sendAgentCommand(sid, {
         type: "bash",
         command,
@@ -2299,14 +2308,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       promoteNewSession(1, inputText);
     } catch (e) {
       console.error("Failed to execute shell command:", e);
-      addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
+      // A handler's error showed already, as the runner's extension_error.
+      if (!(e instanceof AgentCommandError && e.code === EXTENSION_REPORTED_CODE)) {
+        addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
+      }
       restoreSubmission(inputText, undefined, composerDraftKey);
     } finally {
       bashRunningRef.current = false;
       setPendingBash(null);
       setBashRunning(false);
     }
-  }, [addNotice, composerDraftKey, ensureNewSession, loadSession, promoteNewSession, restoreSubmission, session]);
+  }, [addNotice, composerDraftKey, ensureEventsConnected, ensureNewSession, loadSession, promoteNewSession, restoreSubmission, session]);
   executeBashRef.current = executeBash;
 
   /** Recall's and Stop's queued texts, and the images of prompts parked behind a compaction, back in the composer. */
@@ -2819,7 +2831,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           const data = await sendAgentCommand<LastAssistantTextResponse>(sid, { type: "get_last_assistant_text" });
           const textToCopy = data?.text ?? "";
           if (!textToCopy) return complete({ handled: true, error: "No assistant message to copy" });
-          await navigator.clipboard.writeText(textToCopy);
+          // copyText falls back to execCommand where navigator.clipboard is
+          // missing: a page served over plain HTTP from a LAN address.
+          await copyText(textToCopy);
           return complete({ handled: true, message: "Copied last assistant message" });
         }
 

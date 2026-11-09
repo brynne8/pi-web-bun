@@ -6,10 +6,10 @@ import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { createPortal } from "react-dom";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, ExtensionUiRequest, SessionInfo, SessionTreeNode, TextContent, ToolResultMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, stripAnsi } from "@/lib/ansi";
-import { splitNoticeText } from "@/lib/notice-text";
+import { splitNoticeLinks, splitNoticeText } from "@/lib/notice-text";
 import { EXTENSION_DIALOG_BASE_WIDTH, fitExtensionDialogWidth } from "@/lib/extension-dialog-fit";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
-import { getAssistantErrorMessage, hasAssistantAnswer, isAssistantTruncated, isHiddenCustomMessage, isMessageGroupAnchor } from "@/lib/message-display";
+import { getAssistantErrorMessage, hasAssistantAnswer, isAssistantAborted, isAssistantTruncated, isHiddenCustomMessage, isMessageGroupAnchor } from "@/lib/message-display";
 import { extractTurnWrittenFiles } from "@/lib/turn-written-files";
 import { planTurnRender, splitTurnSegments, turnHasAnswer } from "@/lib/turn-segments";
 import { getTurnPart, type TurnPartCache } from "@/lib/turn-views";
@@ -1244,6 +1244,9 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       const notice = noticeMessage
         && (getAssistantErrorMessage(noticeMessage) || isAssistantTruncated(noticeMessage))
         ? noticeMessage : undefined;
+      // A stop is the turn's outcome, as pi's TUI marks it under the reply: named
+      // once, in the footer at the turn's end (#1533).
+      const turnAborted = noticeMessage ? isAssistantAborted(noticeMessage) : false;
       if (notice) {
         // A run cut off by the output limit with no answer anywhere in it can be
         // recovered from here, and only while it is the session's tail.
@@ -1268,7 +1271,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       // happens to hold the last sentence: stop a run mid-thinking and the turn
       // ends on a folded group, and pi-web saves one assistant entry per tool
       // call, so a per-part footer repeats down the turn.
-      if (turnCopyText || turnWrittenFiles.length > 0 || turnUsage) {
+      if (turnCopyText || turnWrittenFiles.length > 0 || turnUsage || turnAborted) {
         rendered.push({
           messageIdx: endIdx - 1,
           node: (
@@ -1279,6 +1282,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
               durationMs={turnDurationMs}
               text={turnCopyText}
               writtenFiles={turnWrittenFiles}
+              aborted={turnAborted}
               onOpenFile={onOpenFile}
             />
           ),
@@ -1765,7 +1769,17 @@ function NoticeShelf({ notices, floating = false, onPauseChange }: { notices: No
                 >
                   {part.text}
                 </span>
-              ) : part.text)}
+              ) : <Fragment key={partIndex}>{splitNoticeLinks(part.text).map((piece, pieceIndex) => piece.kind === "link" ? (
+                <a
+                  key={`${partIndex}-${pieceIndex}`}
+                  href={piece.text}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: "var(--accent)", textDecoration: "underline", textUnderlineOffset: 2, wordBreak: "break-all" }}
+                >
+                  {piece.text}
+                </a>
+              ) : piece.text)}</Fragment>)}
             </span>
           </div>
         );

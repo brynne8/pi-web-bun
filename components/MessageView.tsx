@@ -9,7 +9,7 @@ import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
-import { getAssistantErrorMessage, getThinkingPreview, hasAssistantAnswer, isAssistantTruncated, isEmptyThinkingBlock } from "@/lib/message-display";
+import { getAssistantErrorMessage, getThinkingPreview, hasAssistantAnswer, isAssistantAborted, isAssistantTruncated, isEmptyThinkingBlock } from "@/lib/message-display";
 import { diffGapLabel, parseUnifiedPatch, unifiedDiffLines, type SplitDiffCell, type SplitDiffFile, type SplitDiffGap, type UnifiedDiffLine } from "@/lib/patch";
 import { applyPatchPreviewToFiles, applyPatchResultHasFailures, extractApplyPatchPaths, getApplyPatchInputText, parseApplyPatchInput } from "@/lib/apply-patch";
 import { isApplyPatchToolName, isEditToolName, isPowerShellToolName, isShellToolName } from "@/lib/tool-names";
@@ -23,7 +23,7 @@ import { CodemodeCallList } from "./CodemodeToolView";
 import { PowerShellOutput } from "./PowerShellOutput";
 import { BashCommand } from "./BashCommand";
 import { KeyValueTable } from "./KeyValueTable";
-import { toolFieldsOfInput } from "@/lib/tool-fields";
+import { toolFieldsOfInput, toolInputPreview } from "@/lib/tool-fields";
 import { parseStreamingJson } from "@earendil-works/pi-ai/utils/json-parse";
 import { mcpToolLabel, prettyMcpResultText } from "@/lib/mcp-tool-display";
 import { BgTaskNotificationView } from "./BgTaskNotificationView";
@@ -807,6 +807,7 @@ function AssistantMessageView({
     .filter(({ block }) => !isEmptyThinkingBlock(block, { isStreaming })), [message.content, isStreaming, blockIndexOffset]);
   const blocks = useMemo(() => blockItems.map(({ block }) => block), [blockItems]);
   const providerError = getAssistantErrorMessage(message, { isStreaming });
+  const aborted = isAssistantAborted(message, { isStreaming });
   const truncated = isAssistantTruncated(message, { isStreaming });
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -880,6 +881,9 @@ function AssistantMessageView({
   const showsTurnFooter = !isTurnPart;
 
   const stats = message.usage ? formatUsage(message.usage) : [];
+  // A stop leads the line it ended on: "Stopped · ↑1.2k ↓567". A turn's mark is
+  // TurnFooter's, once at its end; this row is a message rendered on its own.
+  if (aborted) stats.unshift({ text: t("chat.operationAborted") }, ...(stats.length > 0 ? [{ text: "·" }] : []));
 
   const copyContent = () => {
     copyText(textContent).then(() => {
@@ -941,7 +945,7 @@ function AssistantMessageView({
 
   // An empty turn is not a message: pi opens the entry before the model writes, and
   // the wrapper was a 16px box around an empty column, one per empty entry.
-  if (blocks.length === 0 && !providerError && !truncated) return null;
+  if (blocks.length === 0 && !providerError && !truncated && !aborted) return null;
 
   return (
     <div
@@ -1349,7 +1353,7 @@ function ToolCallBlock({ block, result, duration, cwd, onOpenFile, onOpenSubagen
               ? t("chat.generatingToolInput")
               : shellCommand !== null
                 ? <BashCommand command={shellCommand} limit={TOOL_PREVIEW_LENGTH} />
-                : (patchLabel ?? (codemode ? codemodeScriptPreview(codemode.code) : getToolPreview(block, resultPatchPath)))}
+                : (patchLabel ?? (codemode ? codemodeScriptPreview(codemode.code) : toolInputPreview(block.input, resultPatchPath)))}
           </span>
           {shellBackground && (
             <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>(background)</span>
@@ -2394,24 +2398,6 @@ export function getCustomMessagePreview(text: string): string {
   return body.slice(0, 300).replace(/\s+/g, " ").trim();
 }
 
-
-function getToolPreview(block: ToolCallContent, resultPatchPath: string | null): string {
-  const input = block.input;
-  if (!input || typeof input !== "object") return "";
-  const keys = Object.keys(input);
-  if (keys.length === 0) return "";
-
-  // Common tool input patterns
-  if ("command" in input) return String(input.command).slice(0, TOOL_PREVIEW_LENGTH);
-  if ("path" in input) return String(input.path).slice(0, TOOL_PREVIEW_LENGTH);
-  if ("file_path" in input) return String(input.file_path).slice(0, TOOL_PREVIEW_LENGTH);
-  if (resultPatchPath) return resultPatchPath.slice(0, TOOL_PREVIEW_LENGTH);
-  if ("pattern" in input) return String(input.pattern).slice(0, TOOL_PREVIEW_LENGTH);
-  if ("query" in input) return String(input.query).slice(0, TOOL_PREVIEW_LENGTH);
-
-  const first = input[keys[0]];
-  return String(first).slice(0, TOOL_PREVIEW_LENGTH);
-}
 
 export function formatUsage(usage: {
   input: number;

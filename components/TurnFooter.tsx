@@ -17,7 +17,7 @@ import type { AssistantMessage } from "@/lib/types";
  * part would show its own copy, and a run stopped mid-thinking ends on a
  * folded group, where a footer is one nobody can reach.
  */
-export function TurnFooter({ usage, timestamp, durationMs, text, writtenFiles = [], onOpenFile }: {
+export function TurnFooter({ usage, timestamp, durationMs, text, writtenFiles = [], aborted = false, onOpenFile }: {
   usage?: AssistantMessage["usage"];
   /** When the turn's last response began, which is the time a message used to show. */
   timestamp?: number;
@@ -26,16 +26,19 @@ export function TurnFooter({ usage, timestamp, durationMs, text, writtenFiles = 
   /** Everything the turn wrote, which is what Copy hands over. */
   text?: string;
   writtenFiles?: WrittenFile[];
+  /** The turn was cut off by Stop, which pi's TUI marks as the turn ends. */
+  aborted?: boolean;
   onOpenFile?: (filePath: string, page?: number) => void;
 }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const [hovered, setHovered] = useState(false);
   const usageParts: StatPart[] = usage ? formatUsage(usage) : [];
+  const stopText = aborted ? t("chat.operationAborted") : "";
   const durationText = durationMs !== undefined ? t("chat.turnDuration", { time: formatTurnDuration(durationMs) }) : "";
   const timeText = formatTime(timestamp);
   // A time on its own is no footer: a turn with nothing else about it shows nothing.
-  if (usageParts.length === 0 && !durationText && !text && writtenFiles.length === 0) return null;
+  if (usageParts.length === 0 && !stopText && !durationText && !text && writtenFiles.length === 0) return null;
 
   const copy = () => {
     copyText(text ?? "").then(() => {
@@ -57,10 +60,11 @@ export function TurnFooter({ usage, timestamp, durationMs, text, writtenFiles = 
     >
       {writtenFiles.length > 0 && <TurnWrittenFiles files={writtenFiles} onOpenFile={onOpenFile} />}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-        {usageParts.length > 0 && (
+        {(stopText || usageParts.length > 0) && (
           // One item per count: a single space at 11px ran them together. The
           // spaces stay in the text for copying; the flex gap draws the room.
           <div style={{ display: "flex", flexWrap: "wrap", columnGap: 7, fontSize: 11, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
+            {stopText && <span>{usageParts.length > 0 ? `${stopText} ·` : stopText}</span>}
             {usageParts.map((part, index) => (
               <Fragment key={index}>{index > 0 && " "}<UsagePart part={part} /></Fragment>
             ))}
