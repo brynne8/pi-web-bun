@@ -235,7 +235,9 @@ test("a read card opens the panel from its header and keeps its body only as the
   assert.notEqual(messageView.indexOf("function ToolCallBlock("), -1);
   assert.ok(card.length > 1000);
   assert.doesNotMatch(card, /\{expanded && /);
-  assert.equal((card.match(/\{showBody && /g) ?? []).length, 5);
+  // The five body branches, plus the result footer a `!` command's truncated output
+  // carries: it sits under the result, so it follows the body and not the fold either.
+  assert.equal((card.match(/\{showBody && /g) ?? []).length, 6);
   // Result images stay put: an image read keeps the card that shows it.
   assert.match(messageView, /\{resultImages\.length > 0 && <ResultImages images=\{resultImages\} isError=\{isError\} \/>\}/);
 });

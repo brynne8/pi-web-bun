@@ -211,7 +211,9 @@ test("only the session-mount load probes disk for external appends", () => {
   assert.match(loadSessionSource, /d\.wrapperRebuilt[\s\S]*?eventConnectionRef\.current\?\.close\("rebuilt"\)[\s\S]*?maintain\(sid\)/);
   assert.match(mountSource, /loadSession\(session\.id, !cached, true, \{ force: true \}\)/);
   assert.match(source, /await loadSession\(sid\)/);
-  assert.equal([...source.matchAll(/\{ force: true \}/g)].length, 1);
+  // The mount's read, and the one a held `!` result makes once the run ends: a read that
+  // started before that cannot show it (see the `!` command note).
+  assert.equal([...source.matchAll(/\{ force: true \}/g)].length, 2);
 });
 
 test("forking stays available during a run while in-session branch switches wait for it", () => {
@@ -226,7 +228,7 @@ test("forking stays available during a run while in-session branch switches wait
 
   // Fork copies into a new file, so only a shell command blocks it; the
   // in-session edit still waits because pi refuses navigate_tree mid-run.
-  assert.match(chatWindowSource, /onFork=\{bashRunning \|\| isNew \? undefined : handleFork\}/);
+  assert.match(chatWindowSource, /onFork=\{bashRunning \|\| isNew \? undefined : forkFromMessage\}/);
   assert.match(chatWindowSource, /onEditContent=\{sessionBusy \? undefined : handleEditContent\}/);
   assert.match(forkSource, /addNotice\(\{ type: "error", message:/);
 
@@ -243,7 +245,7 @@ test("first user messages expose both branch actions and edit before their own e
     source.indexOf("  const handleLeafChange = useCallback"),
   );
 
-  assert.match(chatWindowSource, /onFork=\{bashRunning \|\| isNew \? undefined : handleFork\}/);
+  assert.match(chatWindowSource, /onFork=\{bashRunning \|\| isNew \? undefined : forkFromMessage\}/);
   assert.doesNotMatch(chatWindowSource, /idx === 0 && msg\.role === "user"/);
   assert.doesNotMatch(chatWindowSource, /prevAssistantEntryId/);
   assert.match(navigateSource, /type: "navigate_tree",\s*targetId: entryId/);
@@ -401,7 +403,8 @@ test("built-in clone switches to the independent child session", () => {
   );
 
   assert.match(builtinSource, /case "clone"/);
-  assert.match(builtinSource, /type: "clone",\s+leafId: activeLeafId/);
+  // The tail an idle message appended moved the view past the last full read's leaf.
+  assert.match(builtinSource, /type: "clone",\s+leafId: appended\?\.base === activeLeafId[\s\S]*?: activeLeafId,/);
   assert.match(builtinSource, /agentRunningRef\.current \|\| bashRunningRef\.current/);
   assert.match(builtinSource, /onSessionForked\?\.\(result\.newSessionId\)/);
 });
