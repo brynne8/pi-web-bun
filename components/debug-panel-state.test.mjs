@@ -260,8 +260,8 @@ test("a quiet page and server raise no issue", () => {
 });
 
 const ISSUE_CASES = [
-  ["the poll timed out", { server: { failure: { kind: "timeout", status: null, at: LOCAL - SECOND } } },
-    { id: "poll", tone: "warning", text: `${t("debug.poll.timeout")} · 1s ago` }],
+  ["the poll was given up on", { server: { failure: { kind: "timeout", status: null, at: LOCAL - SECOND } } },
+    { id: "poll", tone: "warning", text: `${t("debug.poll.timeout", { seconds: 30 })} · 1s ago` }],
   ["the poll failed", { server: { failure: { kind: "http", status: 502, at: LOCAL - SECOND } } },
     { id: "poll", tone: "error", text: "The server answered HTTP 502 · 1s ago" }],
   ["the poll is slow", { page: { pollInFlightSince: LOCAL - 2500 } },
@@ -459,7 +459,7 @@ test("a source's name and tooltip", () => {
 test("poll samples: round trips, failures at full height, at most thirty kept", () => {
   assert.deepEqual(state.debugPollSample(server({ roundTripMs: 38 })), { ms: 38, tone: "dim", failed: false });
   assert.deepEqual(state.debugPollSample(server({ roundTripMs: 2500 })), { ms: 2500, tone: "warning", failed: false });
-  assert.deepEqual(state.debugPollSample(server({ failure: { kind: "timeout", status: null, at: 1 } })), { ms: 5000, tone: "warning", failed: true });
+  assert.deepEqual(state.debugPollSample(server({ failure: { kind: "timeout", status: null, at: 1 } })), { ms: 30_000, tone: "warning", failed: true });
   assert.equal(state.debugPollSample(server({ failure: { kind: "network", status: null, at: 1 } })).tone, "error");
   assert.equal(state.debugPollSample(state.EMPTY_DEBUG_SERVER_READING), null);
 
@@ -483,12 +483,12 @@ test("poll samples: round trips, failures at full height, at most thirty kept", 
   assert.deepEqual(state.sparkStats([]), { count: 0, median: 0, max: 0 });
 });
 
-test("the sparkline's scale: the 5 s timeout is full height, on a square root", () => {
-  assert.equal(state.sparkHeight(5000), 1);
+test("the sparkline's scale: a poll given up on is full height, on a square root", () => {
+  assert.equal(state.sparkHeight(state.DEBUG_POLL_GIVE_UP_MS), 1);
   assert.equal(state.sparkHeight(60_000), 1);
   assert.equal(state.sparkHeight(0), 0.08);
   const px = (ms) => Math.max(1, Math.round(state.sparkHeight(ms) * 14));
-  assert.deepEqual([px(20), px(200), px(2000)], [1, 3, 9]);
+  assert.deepEqual([px(20), px(200), px(2000), px(8000)], [1, 1, 4, 7]);
 });
 
 test("bars and freshness by their thresholds", () => {
@@ -700,13 +700,26 @@ test("the poll asks once at a time, only while visible, and reports the round tr
   poller.dispose();
 });
 
-test("no answer in 5 s is reported as a timeout and keeps the last good answer", async () => {
-  const { poller, net, timers, readings } = setup();
+test("a poll is left to answer past the give-up mark, and only a stuck one is given up on", async () => {
+  const { poller, net, timers, readings, advance } = setup();
   poller.poll();
+
+  // Slower than the old 5 s abort, still answered: a round trip, not a failure. The beats that
+  // fire meanwhile ask nothing, so no second request queues behind the one under way.
+  advance(2000);
+  poller.poll();
+  advance(4500);
+  poller.poll();
+  assert.equal(net.calls.length, 1, "the request under way is not joined by another");
   net.calls[0].respond(snapshot());
   await flush();
+  assert.equal(readings.length, 1);
+  assert.equal(readings[0].roundTripMs, 6500);
+  assert.equal(readings[0].failure, null);
+  assert.deepEqual(state.debugPollSample(readings[0]), { ms: 6500, tone: "warning", failed: false });
+
   poller.poll();
-  assert.equal([...timers.pending][0].ms, state.DEBUG_POLL_TIMEOUT_MS);
+  assert.equal([...timers.pending][0].ms, state.DEBUG_POLL_GIVE_UP_MS);
   timers.fire();
   await flush();
   assert.equal(net.calls[1].aborted, true);

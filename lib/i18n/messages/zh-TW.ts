@@ -316,7 +316,7 @@ export const zhTWLocale: LocalePlugin = {
     "debug.time.due": "已到期",
     "debug.poll.waiting": "正在等待伺服器…",
     "debug.poll.inFlight": "已等待 {time}，尚無回應",
-    "debug.poll.timeout": "5 秒內無回應：瀏覽器到此伺服器的連線可能已全部占滿（HTTP/1.1 每個來源最多六個，所有分頁共用）",
+    "debug.poll.timeout": "{seconds} 秒內無回應：瀏覽器到此伺服器的連線可能已全部占滿（HTTP/1.1 每個來源最多六個，所有分頁共用）",
     "debug.poll.http": "伺服器回傳 HTTP {status}",
     "debug.poll.network": "請求失敗（網路或伺服器無法使用）",
     "debug.poll.invalid": "伺服器的回應不是除錯快照",

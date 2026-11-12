@@ -33,8 +33,8 @@ export type Translate = (key: string, params?: Record<string, string | number>) 
 export const DEBUG_TICK_MS = 1000;
 /** The server is asked this often while the panel is open and the page visible. */
 export const DEBUG_POLL_MS = 2000;
-/** A poll with no answer by then is given up: with HTTP/1.1 that is a sign every connection is taken. */
-export const DEBUG_POLL_TIMEOUT_MS = 5000;
+/** A poll the server never answers is given up on after this; a slow one is left to finish. */
+export const DEBUG_POLL_GIVE_UP_MS = 30_000;
 
 // ── Keys chosen at run time (literal maps, so the translation tests find them) ──
 
@@ -405,10 +405,11 @@ function debugSnapshotUrl(sessionId: string | null): string {
 }
 
 /**
- * The panel's poll of `GET /api/agent/debug`: one request at a time, given up after
- * DEBUG_POLL_TIMEOUT_MS (a controller and a timer: no AbortSignal.timeout on Safari 16.2), aborted
- * when the session changes and when the panel closes. The route reads registries only, so asking
- * resumes no session and moves no idle timer.
+ * The panel's poll of `GET /api/agent/debug`: one request at a time, so a beat that finds one under
+ * way asks nothing rather than queueing behind it. A slow one is left to finish and reads as a round
+ * trip; a request the server never answers is given up on after DEBUG_POLL_GIVE_UP_MS (a controller
+ * and a timer: no AbortSignal.timeout on Safari 16.2). A session change or the panel closing aborts
+ * the one under way. The route reads registries only: asking resumes no session and moves no idle timer.
  */
 export function createDebugPoller(options: DebugPollerOptions): DebugPoller {
   const now = options.now ?? (() => Date.now());
@@ -429,7 +430,7 @@ export function createDebugPoller(options: DebugPollerOptions): DebugPoller {
     const timer = startTimer(() => {
       timedOut = true;
       controller.abort();
-    }, DEBUG_POLL_TIMEOUT_MS);
+    }, DEBUG_POLL_GIVE_UP_MS);
     let reply: DebugSnapshotResponse | null = null;
     let failure: Omit<DebugPollFailure, "at"> | null = null;
     try {
@@ -719,7 +720,7 @@ function answeredSample(ms: number): DebugSample {
 export function debugPollSample(reading: DebugServerReading): DebugSample | null {
   if (reading.failure) {
     const timeout = reading.failure.kind === "timeout";
-    return { ms: timeout ? DEBUG_POLL_TIMEOUT_MS : 0, tone: timeout ? "warning" : "error", failed: true };
+    return { ms: timeout ? DEBUG_POLL_GIVE_UP_MS : 0, tone: timeout ? "warning" : "error", failed: true };
   }
   return reading.roundTripMs === null ? null : answeredSample(reading.roundTripMs);
 }
@@ -736,9 +737,9 @@ export function pushDebugSample(list: readonly DebugSample[], sample: DebugSampl
   return next.length > max ? next.slice(next.length - max) : next;
 }
 
-/** A bar's height, 0..1: the poll's 5 s timeout is full height, on a square-root scale (20 ms a stub, 2 s most of it). */
+/** A bar's height, 0..1: a poll given up on is full height, on a square-root scale (20 ms a stub, 2 s a third of it). */
 export function sparkHeight(ms: number): number {
-  return Math.min(1, Math.max(0.08, Math.sqrt(clampMs(ms) / DEBUG_POLL_TIMEOUT_MS)));
+  return Math.min(1, Math.max(0.08, Math.sqrt(clampMs(ms) / DEBUG_POLL_GIVE_UP_MS)));
 }
 
 /** Answered samples only: how many, their median and their longest. */
@@ -784,11 +785,11 @@ export function debugIssues({ page, server, detail, t, titleOf }: DebugIssueInpu
   const failure = server.failure;
   if (failure) {
     add("poll", failure.kind === "timeout" ? "warning" : "error", [
-      t(DEBUG_POLL_FAILURE_KEYS[failure.kind], { status: failure.status ?? "?" }),
+      t(DEBUG_POLL_FAILURE_KEYS[failure.kind], { status: failure.status ?? "?", seconds: DEBUG_POLL_GIVE_UP_MS / 1000 }),
       formatAgo(now - failure.at, t),
     ]);
   } else if (page.pollInFlightSince !== null && now - page.pollInFlightSince >= DEBUG_POLL_MS) {
-    // A slow answer is the first sign of a starved connection pool; said before it times out.
+    // A slow answer is the first sign of a starved connection pool; said before it is given up on.
     add("poll", "warning", [t("debug.poll.inFlight", { time: formatDebugDuration(now - page.pollInFlightSince, t) })]);
   }
 

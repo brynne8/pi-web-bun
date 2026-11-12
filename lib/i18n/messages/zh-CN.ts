@@ -316,7 +316,7 @@ export const zhCNLocale: LocalePlugin = {
     "debug.time.due": "已到期",
     "debug.poll.waiting": "正在等待服务器…",
     "debug.poll.inFlight": "已等待 {time}，尚无应答",
-    "debug.poll.timeout": "5 秒内无应答：浏览器到此服务器的连接可能已全部占满（HTTP/1.1 每个源最多六个，所有标签页共用）",
+    "debug.poll.timeout": "{seconds} 秒内无应答：浏览器到此服务器的连接可能已全部占满（HTTP/1.1 每个源最多六个，所有标签页共用）",
     "debug.poll.http": "服务器返回 HTTP {status}",
     "debug.poll.network": "请求失败（网络或服务器不可用）",
     "debug.poll.invalid": "服务器的应答不是调试快照",

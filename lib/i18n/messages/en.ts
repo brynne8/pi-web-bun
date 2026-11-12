@@ -316,7 +316,7 @@ export const enLocale: LocalePlugin = {
     "debug.time.due": "due",
     "debug.poll.waiting": "Waiting for the server…",
     "debug.poll.inFlight": "No answer yet after {time}",
-    "debug.poll.timeout": "No answer in 5 s: the browser's connections to this server may all be taken (HTTP/1.1 allows six per origin, for all tabs)",
+    "debug.poll.timeout": "No answer in {seconds} s: the browser's connections to this server may all be taken (HTTP/1.1 allows six per origin, for all tabs)",
     "debug.poll.http": "The server answered HTTP {status}",
     "debug.poll.network": "The request failed (network or server down)",
     "debug.poll.invalid": "The server's answer is not a debug snapshot",

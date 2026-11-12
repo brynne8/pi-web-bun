@@ -380,8 +380,8 @@ function Bar({ fraction, tone, width, height = 4, notches, title, className }: {
 const BAR_WIDTH = 120;
 
 /**
- * Round trips, newest on the right; the 5 s timeout is full height, a failure is a full bar. The
- * bars stand on a full-width baseline one pixel below them, so a few short answers read as a
+ * Round trips, newest on the right; a poll given up on is full height, a failure is a full bar.
+ * The bars stand on a full-width baseline one pixel below them, so a few short answers read as a
  * chart, not as a dashed line.
  */
 function Sparkline({ samples, label }: { samples: readonly DebugSample[]; label: string }) {

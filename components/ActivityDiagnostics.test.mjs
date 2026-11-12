@@ -314,9 +314,9 @@ test("a timeout: its sentence is written once, above the read-out", () => {
   const html = render({ server: server({ failure: { kind: "timeout", status: null, at: LOCAL - SECOND } }) });
   // The tone's mark and the sentence: no mark for what it is about, the sentence names it.
   assert.match(html, /<ul class="debug-issues"><li class="debug-issue is-warning"><svg[^>]*>(?:<path [^>]*><\/path>)+<\/svg><span class="debug-issue-text">/);
-  const sentence = `${t("debug.poll.timeout")} · 1s ago`;
+  const sentence = `${t("debug.poll.timeout", { seconds: 30 })} · 1s ago`;
   assert.ok(html.includes(`<span class="debug-issue-text">${sentence}</span>`));
-  assert.equal(html.split(t("debug.poll.timeout")).length - 1, 1, "once, in the issues");
+  assert.equal(html.split(t("debug.poll.timeout", { seconds: 30 })).length - 1, 1, "once, in the issues");
 });
 
 test("server countdowns run on the server's clock plus the time since its answer", () => {
@@ -650,14 +650,14 @@ test("a session closing after Stop carries a stop square, not the amber alone", 
   assert.match(panelSource, /\.debug-status-ring\.is-none \{\s*border-style: dotted;\s*border-color: var\(--text-dim\);/, "the no-wrapper ring is visible");
 });
 
-test("the sparklines draw the poll samples against the 5 s timeout", () => {
+test("the sparklines draw the poll samples against the give-up mark", () => {
   const html = render({
     samples: {
       poll: [
         { ms: 41, tone: "dim", failed: false },
         { ms: 1000, tone: "dim", failed: false },
         { ms: 20, tone: "dim", failed: false },
-        { ms: 5000, tone: "warning", failed: true },
+        { ms: 30_000, tone: "warning", failed: true },
       ],
       running: [],
     },
@@ -672,9 +672,9 @@ test("the sparklines draw the poll samples against the 5 s timeout", () => {
   assert.match(html, /<svg width="120" height="15" viewBox="0 0 120 15" aria-hidden="true"><rect x="0" y="14" width="120" height="1" style="fill:var\(--border\)"><\/rect><rect class="is-dim"/);
   const empty = section(html, "page", "server").split('aria-label="40 polls')[1];
   assert.match(empty, /^[^>]*><svg[^>]*><rect x="0" y="14" width="120" height="1" style="fill:var\(--border\)"><\/rect><\/svg>/, "drawn before the first sample");
-  // Newest on the right, standing on the baseline; 41 ms and 20 ms are 1px stubs, 1 s is 6px, a failure is a full bar.
+  // Newest on the right, standing on the baseline; 41 ms and 20 ms are 1px stubs, 1 s is 3px, a poll given up on is a full bar.
   assert.match(html, /<rect class="is-dim" x="105" y="13" width="3" height="1" fill="currentColor"><\/rect>/);
-  assert.match(html, /<rect class="is-dim" x="109" y="8" width="3" height="6" fill="currentColor"><\/rect>/);
+  assert.match(html, /<rect class="is-dim" x="109" y="11" width="3" height="3" fill="currentColor"><\/rect>/);
   assert.match(html, /<rect class="is-dim" x="113" y="13" width="3" height="1" fill="currentColor"><\/rect>/);
   assert.match(html, /<rect class="is-warning" x="117" y="0" width="3" height="14" fill="currentColor"><\/rect>/);
   assert.match(html, /<span class="debug-value is-warning">—<\/span>/, "no round trip for a failure");
