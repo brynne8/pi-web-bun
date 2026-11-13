@@ -753,12 +753,11 @@ export const SDK_BUILTIN_TOOLS: readonly string[] = ["read", "bash", "powershell
 const MCP_TOOL_PATTERNS = ["mcp__*", "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"];
 
 /**
- * The SDK tool options of a child, shared by spawn and reopen. A `tools` allowlist is fixed when
- * the session is created, so it admits only tools registered by then: one an extension registers
- * at `session_start` or later would never be callable (#883). A child that loads extensions
- * without `ext:` selectors therefore gets no allowlist: its built-ins are added to none
- * (`noTools: "builtin"`) and the rest excluded, so no extension can switch them on. `ext:`
- * selectors keep the allowlist, since the SDK admits tools by name, not by source.
+ * The SDK tool options of a child, shared by spawn and reopen. A `tools` allowlist is fixed
+ * when the session is created, so it admits only tools registered by then: one an extension
+ * registers at `session_start` or later would never be callable (#883). A child that loads
+ * extensions without `ext:` selectors therefore gets no allowlist: its built-ins are added to
+ * none (`noTools: "builtin"`) and the rest excluded, so no extension can switch them on.
  */
 export function subagentToolOptions(resources: { tools: readonly string[]; allExtensionTools?: boolean; mcp?: boolean }) {
   const excludeTools: string[] = [...SUBAGENT_CONTROL_TOOL_NAMES];
@@ -782,6 +781,7 @@ export function subagentToolOptions(resources: { tools: readonly string[]; allEx
         : [...excludeTools, ...MCP_TOOL_PATTERNS.filter((name) => !resources.tools.includes(name))],
     };
   }
+  // An `ext:` selector list keeps the allowlist: the SDK admits tools by name, not by source.
   const builtins = resources.tools.filter((name) => SDK_BUILTIN_TOOLS.includes(name));
   // Code mode registers inactive (`defaultActive: false`), so a child that has it names it too.
   const added = resources.tools.includes("codemode") ? [...builtins, "codemode"] : builtins;
@@ -943,16 +943,16 @@ export function selectSubagentExtensionTools(
 
 /**
  * Keep only the extensions an `extensions:` list names, after the SDK has loaded them, as
- * pi-subagents does. A dropped extension binds no handlers, tools, commands or providers,
- * but its factory has already run once: this scopes the child, it is not a sandbox. Names
- * resolve like `ext:` selectors (directory, file or package name, case-insensitive), so a
- * name two sources claim keeps neither. pi-web's own inline extensions always stay, as do the
- * built-ins a child with `mcp: on` names (`SUBAGENT_MCP_EXTENSION_PATHS`). The SDK
- * calls the override on every reload, so the scope holds without further wiring.
+ * pi-subagents does. A dropped extension binds no handlers, tools, commands or providers, but
+ * its factory has already run once: this scopes the child, it is not a sandbox. pi-web's own
+ * inline extensions always stay, as do the built-ins a child with `mcp: on` names
+ * (`SUBAGENT_MCP_EXTENSION_PATHS`).
  */
 export function scopeSubagentExtensions(names: readonly string[]) {
   const wanted = new Set(names.map((name) => name.toLowerCase()));
   return (base: LoadExtensionsResult): LoadExtensionsResult => {
+    // Names resolve like `ext:` selectors (directory, file or package name, case-insensitive),
+    // so a name two sources claim keeps neither.
     const owners = extensionNameOwners(base.extensions);
     const extensions = base.extensions.filter((extension) => (
       extension.path.startsWith("<inline:")
@@ -982,6 +982,7 @@ export function subagentExtensionLoaderOptions(resources: { loadExtensions: bool
   return {
     noExtensions: !resources.loadExtensions,
     ...(resources.mcp ? { additionalExtensionPaths: [...SUBAGENT_MCP_EXTENSION_PATHS] } : {}),
+    // The SDK calls the override on every reload, so the scope holds without further wiring.
     ...(resources.loadExtensions && resources.extensions !== undefined
       ? { extensionsOverride: scopeSubagentExtensions(resources.extensions) }
       : {}),

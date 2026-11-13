@@ -23,16 +23,16 @@ function fieldNames(properties: unknown): string[] {
 }
 
 /**
- * The top-level field names a tool's schema declares, or `undefined` when it does not
- * fix them: an open object, a keyed map, a union, a reference, or no fields at all. A
- * schema that names no field is not checked, because pi gives an MCP server's
- * free-form input schema an empty `properties` too, and such a tool may well take
- * anything. Only a fixed set is checked, since anything else would refuse fields the
- * schema does allow.
+ * The top-level field names a tool's schema declares, or `undefined` when it does not fix
+ * them: an open object, a keyed map, a union, a reference, or no fields at all. A schema
+ * that names no field is not checked, because pi gives an MCP server's free-form input
+ * schema an empty `properties` too, and such a tool may well take anything.
  */
 export function declaredToolArgNames(parameters: unknown): Set<string> | undefined {
   if (!isRecord(parameters)) return undefined;
   const schema = parameters;
+  // Only a fixed set of fields is ever checked: anything else would refuse fields the schema
+  // does allow, so a union, a reference or an open object returns undefined instead.
   if (schema.anyOf !== undefined || schema.oneOf !== undefined || schema.$ref !== undefined) return undefined;
   if (opensFields(schema)) return undefined;
   const branches = Array.isArray(schema.allOf) ? schema.allOf : [];

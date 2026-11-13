@@ -241,7 +241,6 @@ const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
  * `0` disables idle shutdown, and positive values up to Node's timer limit
  * (2147483647 ms) are used as-is. Invalid or out-of-range values fall back to
  * the default with a console warning.
- * @param rawValue Value to parse; defaults to the environment variable.
  */
 export function resolveSessionIdleTimeoutMs(
   rawValue: string | undefined = process.env.PI_WEB_IDLE_TIMEOUT_MS,
@@ -261,12 +260,10 @@ const DEFAULT_SESSION_SHUTDOWN_DEADLINE_MS = 5_000;
 
 /**
  * Resolves the PI_WEB_SHUTDOWN_DEADLINE_MS environment variable into the time
- * extensions get to handle `session_shutdown` before the wrapper disposes the
- * SDK session anyway. An unset/blank value returns the 5-second default, and
- * positive values up to Node's timer limit (2147483647 ms) are used as-is.
- * `0`, invalid and out-of-range values fall back to the default with a console
- * warning: shutdown always has a deadline.
- * @param rawValue Value to parse; defaults to the environment variable.
+ * extensions get to handle `session_shutdown` before the wrapper disposes the SDK
+ * session anyway. An unset/blank value returns the 5-second default, and positive
+ * values up to Node's timer limit (2147483647 ms) are used as-is. `0`, invalid and
+ * out-of-range values fall back to the default with a warning: shutdown always has one.
  */
 export function resolveSessionShutdownDeadlineMs(
   rawValue: string | undefined = process.env.PI_WEB_SHUTDOWN_DEADLINE_MS,
@@ -319,16 +316,10 @@ const CUSTOM_UI_KEYBINDINGS = new TuiKeybindingsManager(TUI_KEYBINDINGS);
 const SESSION_TOOL_NAMES = new Set<string>(["codemode", "tool_search", ...SUBAGENT_CONTROL_TOOL_NAMES]);
 
 /**
- * The active tools for a coding tool selection. The selection replaces only the coding
- * tools: every other tool named in `carry` that is still registered and not withdrawn stays
- * active, so a tool an extension, `tool_search`, or `defaultTools` activated survives, and a
- * tool one switched off stays off. Nothing else is added: pi itself activates the extension
- * tools it registers (all of them when it builds or reloads a session, then each new one), so
- * `carry` already holds them. An empty selection is Chat only.
- *
- * Order follows `carry`, the order the `pi` CLI declares for the same set: regrouping the
- * coding tools ahead rewrites the prompt's `<tools>` section and drops the provider's prompt
- * cache on every harness switch (#1405). Newly selected coding tools go at the end.
+ * The active tools for a coding tool selection: it replaces only the coding tools,
+ * and every other tool named in `carry` that is still registered and not withdrawn
+ * stays active, so a tool an extension, `tool_search` or `defaultTools` turned on
+ * survives and one it switched off stays off. An empty selection is Chat only.
  */
 export function resolveActiveToolNames(
   session: AgentSessionLike,
@@ -343,12 +334,17 @@ export function resolveActiveToolNames(
     requested.filter((name) => codingToolNames.has(name)),
     session.settingsManager.getDefaultTools(),
   );
+  // Nothing else is added: pi activates the extension tools it registers itself (all of
+  // them when it builds or reloads a session, then each new one), so `carry` holds them.
   const carriedToolNames = carry.filter((name) => {
     if (codingToolNames.has(name)) return selectedToolNames.includes(name);
     const tool = registered.get(name);
     return tool !== undefined && tool.exposure !== "hidden";
   });
 
+  // Order follows `carry`, the order the `pi` CLI declares for the same set: regrouping the
+  // coding tools ahead rewrites the prompt's <tools> section and drops the provider's prompt
+  // cache on every harness switch (#1405). Newly selected coding tools go at the end.
   return [...new Set([...carriedToolNames, ...selectedToolNames])];
 }
 
@@ -813,17 +809,14 @@ export class AgentSessionWrapper {
   }
 
   /**
-   * Deliver the prompts parked while compaction ran, FIFO: pi's TUI
-   * `flushCompactionQueue()` in the wrapper. Each goes through the prompt
-   * admission chain like any prompt, so the SDK decides start-or-join for one
-   * submission at a time and a prompt sent after compaction_end queues behind
-   * them. Each carries a `streamingBehavior` (a plain one as steer), so the
-   * first starts a run when idle and the rest join it. An entry stays listed
-   * until its delivery holds admission, so Recall and Stop still take it back.
+   * Deliver the prompts parked while compaction ran, FIFO — pi's TUI
+   * `flushCompactionQueue()` in the wrapper.
    */
   private flushParkedPrompts(): void {
     for (const entry of this.parkedDuringCompaction) {
       if (entry.delivering) continue;
+      // An entry stays listed until its delivery holds admission, so Recall and Stop
+      // still take it back; `delivering` keeps a later flush from queueing it twice.
       entry.delivering = true;
       void this.deliverParkedPrompt(entry);
     }
@@ -848,10 +841,13 @@ export class AgentSessionWrapper {
     };
     let disposition: "handled" | "queued" | "started" | undefined;
     let failure: unknown;
+    // Admission is the same chain any prompt takes, so the SDK decides start-or-join for
+    // one submission at a time and a prompt sent after compaction_end queues behind them.
     try {
       await this.inner.prompt(entry.message, {
         ...(entry.images?.length ? { images: entry.images } : {}),
         source: "rpc",
+        // A plain parked prompt goes as steer: the first starts a run when idle, the rest join it.
         streamingBehavior: entry.streamingBehavior ?? "steer",
         preflightResult: (result) => {
           disposition = result;
@@ -1504,13 +1500,11 @@ export class AgentSessionWrapper {
 
           this.pendingPromptCount += 1;
           promptCounted();
-          // A prompt that may start a run first connects the session's MCP servers and
-          // waits for the ones still connecting. The SDK runs before_agent_start before a
-          // run has an abort signal, so Stop is honoured here: it ends the wait, and the
-          // message is rejected unsent, which returns it to the composer. pi runs an
-          // extension command before anything else and starts no run for it: another
-          // extension's command skips this, and the built-in `/mcp`, which acts on the
-          // registered servers, registers them without waiting (`mcpPromptPreparation()`).
+          // A prompt that may start a run first connects the session's MCP servers and waits
+          // for the ones still connecting. pi runs an extension command before anything else
+          // and starts no run for it: another extension's command skips this, and the built-in
+          // `/mcp`, which acts on the registered servers, registers them without waiting
+          // (`mcpPromptPreparation()`).
           const mcpPreparation = this.mcpHost && !this.inner.isStreaming
             ? mcpPromptPreparation(typeof command.message === "string" ? command.message : "", this.extensionCommandCandidates())
             : "none";
@@ -1521,6 +1515,9 @@ export class AgentSessionWrapper {
                 console.error("[pi-web] MCP servers could not be prepared:", error instanceof Error ? error.message : error);
               })
               .then(() => {
+                // The SDK runs before_agent_start before a run has an abort signal, so Stop is
+                // honoured here: it ends the wait, and the message is rejected unsent, which
+                // returns it to the composer.
                 if (!controller.signal.aborted) return;
                 finishPrompt();
                 throw new Error(MCP_WAIT_STOPPED_MESSAGE);
@@ -3109,19 +3106,19 @@ const CLOSING_SESSION_WAIT_MARGIN_MS = 1_000;
 const closingSessionWaits = new WeakMap<AgentSessionWrapper, { done: boolean; promise: Promise<void> }>();
 
 /**
- * The wait for a wrapper of `sessionId` that is shutting down, or null when there is none
- * left to wait for. Until it is disposed the closing wrapper still owns the session: an
- * extension's session_shutdown may append to the file, which a replacement opened earlier
- * would branch away from, and dispose() releases provider resources (a Codex websocket) by
- * session id, which the replacement shares. The wait is bounded so a shutdown stuck in
- * extension binding cannot keep the session from starting again. One wait per closing
- * wrapper: its bound runs from the first caller and later callers share it, so a
- * shutdown still binding extensions can be overtaken.
+ * The wait for a wrapper of `sessionId` that is shutting down, or null when there is
+ * none left to wait for. Until it is disposed the closing wrapper still owns the
+ * session: an extension's `session_shutdown` may append to the file, which a
+ * replacement opened earlier would branch away from, and dispose() releases provider
+ * resources (a Codex websocket) by session id, which the replacement shares.
  */
 function closingRpcSessionWait(sessionId: string): Promise<void> | null {
   const closing = getRegistry().get(sessionId);
   // A wrapper from before a hot reload may lack waitUntilDisposed.
   if (!closing || closing.isAlive() || typeof closing.waitUntilDisposed !== "function") return null;
+  // Bounded, so a shutdown stuck in extension binding cannot keep the session from starting
+  // again. One wait per closing wrapper: its bound runs from the first caller and later
+  // callers share it, so a shutdown still binding extensions can be overtaken.
   let wait = closingSessionWaits.get(closing);
   if (!wait) {
     const entry = { done: false, promise: Promise.resolve() };
@@ -3167,25 +3164,27 @@ export function getRpcSession(sessionId: string): AgentSessionWrapper | undefine
 
 /**
  * The sidebar's rename (#1388). A session a wrapper holds is renamed through
- * `AgentSession.setSessionName()`, as pi's `/name`, so the `session_info` entry hangs off the live
- * leaf and extensions get `session_info_changed`; appended to the file from outside, it was a dead
- * branch the running session never saw. Like the `set_session_name` command it does not wait for
- * session_start: handlers are registered at load, and a session_start that never settles (an
- * unanswered dialog) must not hold the rename. A start in flight is awaited (its `SessionManager`
- * has already read the file), as is a wrapper shutting down (its extensions may still append from
- * its leaf). With no wrapper and no start, `writeToDisk` runs synchronously right after that check,
- * so nothing can open the file between the two. Resolves what `writeToDisk` returns, or true.
+ * `AgentSession.setSessionName()`, as pi's `/name`, so the `session_info` entry hangs off
+ * the live leaf and extensions get `session_info_changed`; appended to the file from
+ * outside, it was a dead branch the running session never saw.
  */
 export async function renameRpcSession(sessionId: string, name: string, writeToDisk: () => boolean): Promise<boolean> {
   for (;;) {
     const wrapper = getRegistry().get(sessionId);
+    // Like the `set_session_name` command this does not wait for session_start: handlers are
+    // registered at load, and a session_start that never settles (an unanswered dialog) must
+    // not hold the rename. Resolves what `writeToDisk` returns, or true when a wrapper did it.
     if (wrapper?.isAlive()) {
       wrapper.inner.setSessionName(name);
       appendSessionNameSource(wrapper.inner.sessionManager, name, "user");
       invalidateSessionListCache();
       return true;
     }
+    // A start in flight is awaited (its SessionManager has already read the file), as is a
+    // wrapper shutting down (its extensions may still append from its leaf).
     const pending = getLocks().get(sessionId) ?? closingRpcSessionWait(sessionId);
+    // With no wrapper and no start, writeToDisk runs synchronously right after that check,
+    // so nothing can open the file between the two.
     if (!pending) return writeToDisk();
     await pending.catch(() => undefined);
   }

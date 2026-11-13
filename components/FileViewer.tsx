@@ -533,15 +533,11 @@ function diffLines(patch: string): DiffLine[] {
   return files.flatMap(unifiedDiffLines);
 }
 
-// Renders one diff line's text through the same Prism pipeline the source view
-// uses. The red/green row background, gutter and +/- marker are drawn by the
-// row itself; this only colors the code tokens, with no <pre> wrapper so the
-// inline flow layout stays intact. The theme's <pre> rules (vs draws a border,
-// both set `white-space: pre` and their own font) would land on the wrapper
-// span: they are reset so the row keeps its 20.8px line box. The code span's
-// `white-space` is the highlighter's own (`wrapLongLines`), so the wrap toggle
-// reaches it as a prop. Memoized: a render of the view for any other reason
-// reuses each line's tokens instead of running Prism on every line again.
+// Renders one diff line's text through the same Prism pipeline the source view uses. The
+// red/green row background, gutter and +/- marker are drawn by the row itself; this only colors
+// the code tokens, with no <pre> wrapper so the inline flow layout stays intact. Memoized: a
+// render of the view for any other reason reuses each line's tokens instead of running Prism
+// on every line again.
 const DiffLineCode = memo(function DiffLineCode({
   text,
   language,
@@ -566,6 +562,10 @@ const DiffLineCode = memo(function DiffLineCode({
       wrapLongLines={wrapLines}
       PreTag="span"
       CodeTag="span"
+      // The theme's <pre> rules (vs draws a border, both set `white-space: pre` and their own
+      // font) would land on this wrapper span, so they are reset and the row keeps its 20.8px
+      // line box. The code span's `white-space` is the highlighter's own (`wrapLongLines`), so
+      // the wrap toggle reaches it as a prop.
       customStyle={{
         margin: 0,
         padding: 0,

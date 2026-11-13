@@ -397,18 +397,9 @@ function StreamingCodeChunks({ code }: { code: string }) {
 }
 
 /**
- * Syntax-highlighted code block with copy button.
- * Used as the "source" view for mermaid blocks and for all non-mermaid code fences.
- *
- * Memoized: parent markdown re-renders (e.g. streaming updates elsewhere in
- * the message list) must not re-run Prism tokenization on unchanged code.
- * While the owning message is still streaming, the block renders as plain
- * monospace text — highlighting a growing block re-tokenizes all of it on
- * every chunk, which is the single most expensive part of streamed rendering.
- * A finished block past this task's highlight budget (lib/highlight-queue.ts),
- * or mounted before the Prism languages have loaded (lib/prism-languages.ts),
- * renders through the same highlighter as `text` (same lines, numbers and
- * box, no tokens) until an idle slice lets it take its language.
+ * Syntax-highlighted code block with a copy button: the "source" view of a mermaid block, and
+ * every non-mermaid code fence. Memoized because a parent markdown re-render (a streaming
+ * update elsewhere in the message list) must not re-run Prism tokenization on unchanged code.
  */
 export const CodeBlock = memo(function CodeBlock({ code, lang, headerAction, isStreaming }: CodeBlockProps) {
   const { isDark } = useTheme();
@@ -417,10 +408,17 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, headerAction, isS
   // Loading starts with the first block, streaming or not, so a streamed
   // reply usually finds the languages ready when it ends.
   const languagesReady = usePrismLanguages();
+  // While the owning message is still streaming, the block renders as plain monospace text:
+  // highlighting a growing block re-tokenizes all of it on every chunk, which is the single
+  // most expensive part of streamed rendering.
   const [highlighted, setHighlighted] = useState(
     () => !isStreaming && prismLanguagesLoaded() && takeHighlightBudget(code.length),
   );
 
+  // A finished block past this task's highlight budget (lib/highlight-queue.ts), or mounted
+  // before the Prism languages have loaded (lib/prism-languages.ts), renders through the same
+  // highlighter as `text` (same lines, numbers and box, no tokens) until an idle slice lets it
+  // take its language.
   useEffect(() => {
     if (isStreaming || highlighted || !languagesReady) return;
     return waitForHighlight(() => setHighlighted(true));

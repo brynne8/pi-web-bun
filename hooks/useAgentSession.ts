@@ -1348,17 +1348,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     return request.promise;
   }, []);
 
-  // A page hidden for HIDDEN_PAGE_GRACE_MS lets go of the selected session's
-  // stream while nothing needs it (#1283): each one holds a browser connection,
-  // and over HTTP/1.1 a few background tabs exhaust the six per origin, so every
-  // other request (Settings, message sync) queues in the browser until a tab
-  // closes. A run, a `!` command, a compaction or an open extension dialog in the
-  // page keeps it without asking. Otherwise the grace ends with a lease request,
-  // and the stream closes only if its reply shows nothing under way
-  // (canReleaseHiddenEventStream(): a run another tab started, an extension
-  // dialog, a subagent whose end starts a turn here); the check repeats each
-  // grace while hidden. A run that settles while hidden starts the grace again,
-  // which also covers extension follow-ups right after prompt_done.
+  // Nothing this page is doing needs the selected session's event stream: no run, no `!`
+  // command, no compaction, no open extension dialog. A hidden page may then let it go — each
+  // stream holds a browser connection, and over HTTP/1.1 a few background tabs exhaust the six
+  // per origin, so every other request (Settings, message sync) queues in the browser until a
+  // tab closes (#1283).
   const eventStreamIdle = !agentRunning && !bashRunning && !isCompacting
     && extensionDialogs.length === 0 && extensionCustomUis.length === 0;
   useEffect(() => {
@@ -1375,6 +1369,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       && !agentRunningRef.current
       && !bashRunningRef.current
     );
+    // The grace ends with a lease request, and the stream closes only if its reply shows
+    // nothing under way (canReleaseHiddenEventStream(): a run another tab started, an
+    // extension dialog, a subagent whose end starts a turn here). The check repeats each
+    // grace while the page stays hidden.
     const check = async () => {
       timer = null;
       hiddenReleaseDueAtRef.current = null;
@@ -1389,6 +1387,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       releaseDebugRef.current = { count: releaseDebugRef.current.count + 1, lastAt: Date.now() };
       closeEvents("released");
     };
+    // A run that settles while hidden re-arms this effect, so the grace starts again — which
+    // also covers extension follow-ups right after prompt_done.
     const arm = () => {
       if (timer !== null) return;
       timer = setTimeout(() => void check(), HIDDEN_PAGE_GRACE_MS);
@@ -1469,19 +1469,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     addNotice({ type: "warning", message: translate("chat.sendUnconfirmed") });
   }, [addNotice, translate]);
 
-  // A normal send keeps its bubble while unconfirmed (#1432). Once the server is
-  // idle, a session read started after that settles it: the prompt arrived only
-  // if the read shows it, one more user message with its text past the view's
-  // last saved entry at the send than the view already had there. Otherwise
-  // the text goes back, as not received when the read ends on that entry, else
-  // as unconfirmed: a read that moved on (messages the view had not saved, or
-  // more than its window), failed, or a command, whose prompt need not become
-  // that user message. Any of the run's events clears the record first
-  // (markPromptLanded()).
-  // The text is back in the composer and the prompt is not in the transcript:
-  // its bubble goes, from the view and from the session's cached view. A read of
-  // a file the prompt never changed keeps the view's messages (the snapshot
-  // revision is the same), so it would never drop the bubble itself.
+  // The text is back in the composer and the prompt is not in the transcript: its bubble
+  // goes, from the view and from the session's cached view. A read of a file the prompt never
+  // changed keeps the view's messages (the snapshot revision is the same), so it would never
+  // drop the bubble itself.
   const dropUnconfirmedBubble = useCallback((pending: UnconfirmedSend) => {
     if (sessionHookMountedRef.current) setMessages((prev) => withoutMessage(prev, pending.bubble));
     const snapshot = getSessionViewSnapshot(pending.sid);
@@ -1489,6 +1480,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setSessionViewSnapshot({ ...snapshot, messages: withoutMessage(snapshot.messages, pending.bubble) });
     }
   }, []);
+  // A normal send keeps its bubble while unconfirmed (#1432). Once the server is idle, a
+  // session read started after that settles it: the prompt arrived only if the read shows it,
+  // one more user message with its text past the view's last saved entry at the send than the
+  // view already had there. Any of the run's events clears the record first
+  // (markPromptLanded()).
   const settleUnconfirmedSend = useCallback((sid: string, runId: number, readSeqBefore: number) => {
     const pending = unconfirmedSendRef.current;
     if (!pending || pending.runId !== runId || pending.sid !== sid) return;
@@ -1506,22 +1502,24 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     restoreSubmission(pending.message, pending.images, pending.draftKey);
     // A failed read leaves the view stale: the bubble stays with "could not confirm".
     if (reread) dropUnconfirmedBubble(pending);
+    // The notice says how it went: not received when the read ends on the send's entry,
+    // otherwise unconfirmed — a read that moved on (messages the view had not saved, or more
+    // than its window), a failed read, or a command, whose prompt need not become that message.
     addNotice(reread && !pending.command && start === reread.entryIds.length
       ? { type: "error", message: translate("chat.sendNotReceived") }
       : { type: "warning", message: translate("chat.sendUnconfirmed") });
   }, [addNotice, dropUnconfirmedBubble, restoreSubmission, translate]);
-  // The hook unmounts (a session switch) with a send still unconfirmed: nothing
-  // here will settle it, so its text goes back unless one of the run's events
-  // cleared the record. With the stream closed, a prompt that did arrive is
-  // given back too, without a notice. A fresh composer's goes to its cwd's
-  // parked draft: its session has no row and no draft of its own until a
-  // prompt reaches it (getRpcSessionInfos()). The cached view loses the bubble:
-  // coming back, a read of an unchanged file keeps that view, and a changed
-  // one replaces it with the prompt if it did arrive.
+  // The hook unmounts (a session switch) with a send still unconfirmed: nothing here will
+  // settle it, so its text goes back unless one of the run's events cleared the record. With
+  // the stream closed, a prompt that did arrive is given back too, without a notice. The
+  // cached view loses the bubble: coming back, a read of an unchanged file keeps that view,
+  // and a changed one replaces it with the prompt if it did arrive.
   const releaseUnconfirmedSend = useCallback(() => {
     const pending = unconfirmedSendRef.current;
     unconfirmedSendRef.current = null;
     if (!pending) return;
+    // A fresh composer's text goes to its cwd's parked draft: that session has no row and no
+    // draft of its own until a prompt reaches it (getRpcSessionInfos()).
     if (pending.parkedDraftKey) {
       const images = pending.images?.map(({ data, mimeType }) => ({ data, mimeType }));
       restoreDraftSubmission(pending.parkedDraftKey, pending.message, images);

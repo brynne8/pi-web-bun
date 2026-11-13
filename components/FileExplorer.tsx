@@ -597,13 +597,10 @@ function renderTreeRow(
 }
 
 /**
- * A windowed list: it renders only the rows intersecting the viewport (plus
- * overscan and any kept-mounted row), absolutely positioned inside a spacer of
- * the full height, so a 3000-entry directory mounts a few dozen rows. Rows are
- * `FileRow` / `ChangeRow` (both memoized on stable props), so an idle re-render
- * (the 2.5 s running poll, a Git refresh) touches none of them. The tree and the
- * changed-files list are mutually exclusive, so only one is mounted at a time;
- * `offsetAbove` is where its first row sits inside the sidebar's scroller.
+ * A windowed list: it renders only the rows intersecting the viewport (plus overscan and any
+ * kept-mounted row), absolutely positioned inside a spacer of the full height, so a
+ * 3000-entry directory mounts a few dozen rows. Rows are `FileRow` / `ChangeRow` (both memoized
+ * on stable props), so an idle re-render (the 2.5 s running poll, a Git refresh) touches none.
  */
 export const WindowedList = memo(function WindowedList({
   rows,
@@ -653,6 +650,8 @@ export const WindowedList = memo(function WindowedList({
     });
     return indices;
   }, [rows, highlightedPaths, dropTargetPath]);
+  // The tree and the changed-files list are mutually exclusive, so only one is mounted at a
+  // time; `offsetAbove` is where its first row sits inside the sidebar's scroller.
   const effectiveScrollTop = Math.max(0, scrollTop - offsetAbove);
   const visibleIndices = useMemo(
     () => getVisibleRowIndices(offsets, effectiveScrollTop, viewportHeight, OVERSCAN_PX, keepMounted),

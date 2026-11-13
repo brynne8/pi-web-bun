@@ -56,15 +56,14 @@ export function proxy(request: NextRequest) {
   let authenticated = isValidWebSessionToken(request.cookies.get(PI_WEB_SESSION_COOKIE)?.value, password);
   const authorization = isApiRequest ? request.headers.get("authorization") : null;
   if (!authenticated && authorization && /^Basic\s/i.test(authorization)) {
-    // Every Basic header is a password guess, so it shares the login form's
-    // throttle; otherwise any API path (or GET /api/web-auth) answers guesses
-    // at full speed. While blocked even the right password is refused, or the
-    // answer would leak. A success does not reset the counter: Basic clients
-    // authenticate on every request, and each reset would hand an interleaved
-    // guesser a fresh short block.
+    // Every Basic header is a password guess, so it shares the login form's throttle;
+    // otherwise any API path (or GET /api/web-auth) answers guesses at full speed. While
+    // blocked even the right password is refused, or the answer would leak.
     const retryAfterMs = getAuthRetryAfterMs();
     if (retryAfterMs > 0) return tooManyAttempts(retryAfterMs);
     authenticated = isValidBasicAuthorization(authorization, password);
+    // A success does not reset the counter: Basic clients authenticate on every request,
+    // and each reset would hand an interleaved guesser a fresh short block.
     if (!authenticated) recordAuthFailure();
   }
   if (request.nextUrl.pathname === "/login") {

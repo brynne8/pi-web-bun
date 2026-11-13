@@ -239,23 +239,11 @@ function pressedButton(): HTMLButtonElement | HTMLSelectElement | null {
 }
 
 /**
- * Settings › MCP: the servers of the global `mcp.json` and, with a project,
- * its `.pi/mcp.json`, from `GET /api/mcp`, which reads the files and nothing
- * else: no server is started or contacted to show this. Works without a
- * project; the Project group appears only with one. A server can be switched
- * on or off, a whole group at once, and removed with 60 seconds to undo,
- * through `POST /api/mcp`, whose answer is the overview after the change; open
- * sessions apply it at their next message. Test connects one server once
- * through `POST /api/mcp/test`, beside any change, and its result becomes the
- * row's state. An OAuth server signs in through `/api/mcp/sign-in`, whose flow
- * lives on the server and is polled here, and signs out through `POST /api/mcp`.
- * A server whose exposure needs Code mode says whether Code mode reaches it,
- * read from the overview; Settings › Tools changes that. An untrusted
- * project's notice offers Trust, which opens the page's trust dialog (AppShell
- * owns trust), and the panel reloads once the page's status changes. Add MCP
- * server opens the paste pane (`McpAddServer`); an Add that worked selects
- * the new server, tests it once, offers Sign in when it asks for one, and
- * hands the folder's new trust to the page when a project server was added.
+ * Settings › MCP: the servers of the global `mcp.json` and, with a project, its
+ * `.pi/mcp.json`, from `GET /api/mcp`, which reads the files and nothing else: no server is
+ * started or contacted to show this, and it works without a project. Switches, Remove with its
+ * undo, Test and Sign-in each post their own route and reload the overview they were shown
+ * from; states, notices and focus rules: docs/agents/mcp-settings.md.
  */
 export function McpConfig({
   cwd,
@@ -830,15 +818,13 @@ export function McpConfigView({
   // Trust only where the dialog would offer it: the folder requires trust and is not trusted.
   const onTrust = onTrustProject && mcpProjectTrustable(data?.project) ? onTrustProject : undefined;
   const offersTrust = trustNotice?.kind === "untrusted" && onTrust !== undefined;
-  // The trust dialog hands focus back to Trust… when it closes, and after a
-  // successful trust the reload removes that button with its notice: focus
-  // would fall to the page behind Settings. It goes to the selected row
-  // instead, which the reload keeps; focus anywhere else stays where it is.
-  // No row is selected while the add pane is open or the list is empty, so
-  // every fallback ends at the Add MCP server action, on screen whenever the
-  // overview has loaded.
   const selectedRowRef = useRef<HTMLButtonElement>(null);
   const addActionRef = useRef<HTMLButtonElement>(null);
+  // The trust dialog hands focus back to Trust… when it closes, and after a successful trust
+  // the reload removes that button with its notice: focus would fall to the page behind
+  // Settings. It goes to the selected row instead, which the reload keeps; focus anywhere else
+  // stays where it is. No row is selected while the add pane is open or the list is empty, so
+  // every fallback ends at the Add MCP server action, on screen whenever the overview loaded.
   const focusFallback = () => selectedRowRef.current ?? addActionRef.current;
   const offeredTrustRef = useRef(offersTrust);
   useEffect(() => {
@@ -867,14 +853,13 @@ export function McpConfigView({
   // Every control waits while a change or a load is on its way, so the listing a click
   // acts on is the one shown, and one write's answer never replaces what another just saved.
   const controlsBusy = busy !== null || refreshing;
-  // Waiting disables the control a change was started from, and a disabled
-  // element loses focus to the page behind Settings. Once nothing waits (a
-  // refused change waits for its reload too), focus goes back to it, or to the
-  // selected row when it went away or stays disabled; only when it fell to the
-  // page. Declared after the Undo effects: a removal that worked gives Undo
-  // focus, and a later fallback must not take it.
   const handledFocusBackRef = useRef<McpFocusBack | null>(null);
   useEffect(() => {
+    // Waiting disables the control a change was started from, and a disabled element loses
+    // focus to the page behind Settings. Once nothing waits (a refused change waits for its
+    // reload too), focus goes back to it, or to the selected row when it went away or stays
+    // disabled; only when it fell to the page. This effect is declared after the Undo ones:
+    // a removal that worked gives Undo focus, and a later fallback must not take it.
     if (!focusBack || controlsBusy || handledFocusBackRef.current === focusBack) return;
     handledFocusBackRef.current = focusBack;
     if (focusBack.toSelectedRow) focusIfLost(document, focusFallback());
@@ -1081,12 +1066,11 @@ export function McpConfigView({
 }
 
 /**
- * What the last Add wrote, above the list: the server and its file, the folder
- * it trusted in the same step, the test that follows, and Sign in when that
- * test found the server asks for one. A project file is named from the
- * panel's folder (`./.pi/mcp.json`), which the subtitle shows, and that folder
- * as "this folder", as the Add button named it: two absolute paths took a
- * quarter of a phone screen. The detail pane's File row keeps the full path.
+ * What the last Add wrote, above the list: the server and its file, the folder it trusted
+ * in the same step, the test that follows, and Sign in when that test found the server asks
+ * for one. A project file is named from the panel's folder (`./.pi/mcp.json`, which the
+ * subtitle shows) and that folder as "this folder", as the Add button named it; the detail
+ * pane's File row keeps the full path.
  */
 function McpAddedNoticeView({
   added,
@@ -1112,6 +1096,8 @@ function McpAddedNoticeView({
 }) {
   const { t } = useI18n();
   const name = revealHiddenCharacters(added.name);
+  // Two absolute paths took a quarter of a phone screen, so a project path is shown from the
+  // panel's folder and the folder itself as "this folder".
   const path = added.scope === "project" && cwd ? revealHiddenCharacters(displayPathWithin(added.path, cwd)) : displayPath(added.path);
   const status = server.status;
   const asksSignIn = !testing && status?.origin === "test" && status.state === "needs-auth" && server.usesOAuth;
@@ -1744,14 +1730,11 @@ function McpTestButton({
 }
 
 /**
- * The Status row: the entry's state, why a refused entry is refused, then
- * what the last test or open session saw, what to do about it where the label
- * does not say (`mcpRowStateDetailKey()`), why Test cannot be used, and what
- * the last test request did. The status's own state word is left out when
- * that status is what gave the entry its state, which the label has just
- * said. Test points at the line saying why it cannot be used: the refusal's
- * own line for a refused entry or one that references PI_WEB_PASSWORD, which
- * would otherwise be said twice.
+ * The Status row: the entry's state, why a refused entry is refused, then what the last test
+ * or open session saw, what to do about it where the label does not say
+ * (`mcpRowStateDetailKey()`), why Test cannot be used, and what the last test request did.
+ * The status's own state word is left out when that status is what gave the entry its state,
+ * which the label has just said.
  */
 function McpStatusRow({
   server,
@@ -1769,7 +1752,8 @@ function McpStatusRow({
   const { t } = useI18n();
   const status = server.status;
   const stateDetail = mcpRowStateDetailKey(state);
-  // The refusal's own line, when it already says why Test cannot be used.
+  // Test points at the line saying why it cannot be used: the refusal's own line for a
+  // refused entry or one that references PI_WEB_PASSWORD, which would otherwise be said twice.
   const blockSaidBy = testBlock === "invalid" && state === "invalid"
     ? "state"
     : testBlock === "web-password" && server.webPasswordField !== undefined

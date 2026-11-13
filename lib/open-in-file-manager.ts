@@ -66,17 +66,11 @@ export function fileManagerViewFor(
 }
 
 /**
- * Builds the command that shows something in the OS file manager.
- *
- * A reveal selects one file where the platform can (`open -R`, `explorer /select,`)
- * and falls back to its folder where it cannot: no Linux file manager has a
- * reveal-from-the-terminal command, and opening the folder still answers the
- * question the reader asked. A WSL caller passes `win32` and the Windows form of
- * the path (`fileManagerPlatform()`, `windowsPathForWsl()`).
- * @param platform A Node `process.platform` value
- * @param target The directory to open, or the file to reveal
- * @param view `reveal` shows one file among its folder's contents
- * @returns The command and its arguments, or null on an unsupported platform
+ * Builds the command that shows something in the OS file manager: the directory to open, or
+ * the file to reveal among its folder's contents, or null on an unsupported platform. A reveal
+ * selects one file where the platform can (`open -R`, `explorer /select,`) and falls back to
+ * its folder where it cannot: no Linux file manager has a reveal-from-the-terminal command,
+ * and opening the folder still answers the question the reader asked.
  */
 export function fileManagerCommand(
   platform: string,
@@ -88,21 +82,20 @@ export function fileManagerCommand(
   if (view !== "reveal") return { command, args: [target] };
   if (platform === "darwin") return { command, args: ["-R", target] };
   // explorer.exe takes the switch and the path as one argument, in its own
-  // separator: `explorer /select,C:\work\repo\file.ts`.
+  // separator: `explorer /select,C:\work\repo\file.ts`. A WSL caller reaches this
+  // branch too: it passes `win32` and the Windows form of the path
+  // (`fileManagerPlatform()`, `windowsPathForWsl()`).
   if (platform === "win32") return { command, args: [`/select,${target.replaceAll("/", "\\")}`] };
   return { command, args: [dirname(target)] };
 }
 
 /**
- * Whether the request's Host header points at this machine.
+ * Whether the request's Host header names a loopback address; a missing header is remote.
  *
- * `Host` is client-controlled, so this is a usability guard rather than access
- * control: it keeps a phone or another computer on the LAN from raising a
- * window on the server. The real boundaries are the default 127.0.0.1 bind
- * (only `dev:lan` / `start:lan` listen publicly) and the caller's path
- * allow-list. A missing Host header is treated as remote.
- * @param host The Host header
- * @returns Whether it names a loopback address
+ * `Host` is client-controlled, so this is a usability guard rather than access control: it
+ * keeps a phone or another computer on the LAN from raising a window on the server. The real
+ * boundaries are the default 127.0.0.1 bind (only `dev:lan` / `start:lan` listen publicly)
+ * and the caller's path allow-list.
  */
 export function isLoopbackHost(host: string | null | undefined): boolean {
   if (!host) return false;

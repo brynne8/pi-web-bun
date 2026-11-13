@@ -219,16 +219,12 @@ export function replaceLinksWithMarkdown(
 }
 
 /**
- * The composer's auto-grow step: fit the text to 200 px, then let a scrollbar
- * appear only when the text is still taller than the box.
+ * The composer's auto-grow step: fit the text to 200 px, then let a scrollbar appear only
+ * when the text is still taller than the box.
  *
- * The height comes from the value, not from scrollHeight: a wrapped
- * placeholder counts toward scrollHeight too, so an empty box would grow to
- * its own hint's lines. Only typed text scrolls, so a placeholder that
- * overflows the box stays cut off instead of showing a scrollbar.
- *
- * The "auto" step clamps scrollTop to 0, so the scroll the browser gave the
- * caret is captured first and restored last.
+ * The height comes from the value, not from scrollHeight: a wrapped placeholder counts toward
+ * scrollHeight too, so an empty box would grow to its own hint's lines. Only typed text
+ * scrolls, so a placeholder that overflows the box stays cut off instead of showing a bar.
  */
 export function autoGrowTextarea(ta: HTMLTextAreaElement): void {
   // The "auto" step fits the whole text, which clamps scrollTop to 0; keep the

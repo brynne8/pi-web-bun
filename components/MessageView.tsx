@@ -1318,12 +1318,11 @@ function ToolCallBlock({ block, result, notRun, duration, clock, cwd, onOpenFile
   // needs the card expanded to be seen.
   const shellBackground = shellInput?.run_in_background === true;
 
-  // Flat arguments read as facts instead of as JSON: a read's path and span, a
-  // write's path next to its text, a subagent's profile and prompt. Tools with a view of
-  // their own keep it, and one nested value — an `edit`'s `edits[]`, an MCP argument
-  // holding an object — takes the whole card back to the JSON, since a row that drops a
-  // subtree hides an argument. See `lib/tool-fields.ts`. Input still streaming goes
-  // through pi's own partial parse, the arguments its TUI draws live.
+  // Flat arguments read as facts, not as JSON (`lib/tool-fields.ts`): a read's path and span,
+  // a write's path next to its text, a subagent's profile and prompt. Tools with a view of
+  // their own keep it, and one nested value — an `edit`'s `edits[]`, an MCP argument holding
+  // an object — takes the whole card back to the JSON: a row that drops a subtree hides it.
+  // Input still streaming goes through pi's own partial parse, the arguments its TUI draws live.
   const toolFields =
     codemode === null && patchFiles === null && shellCommand === null
       ? toolFieldsOfInput(isStreamingInput ? parseStreamingJson(block.rawInput) : block.input)
@@ -1851,13 +1850,10 @@ function PatchTextView({ text }: { text: string }) {
 }
 
 /**
- * Split diff rows for an apply_patch-style tool call.
- *
- * Prefers parsing the V4A patch document from the call input. The extension's
- * applied result preview contains the complete old/new file with unchanged
- * lines, so it is only used as a fallback when the call input is unavailable.
- * A single call may contain several file operations — each becomes its own
- * file section.
+ * Split diff rows for an apply_patch-style tool call. Prefers the V4A patch document in the
+ * call input; the extension's applied result preview holds the complete old/new file with
+ * unchanged lines, so it is only a fallback when the call input is unavailable. One call may
+ * hold several file operations — each becomes its own file section.
  */
 function getApplyPatchFiles(block: ToolCallContent, result?: ToolResultMessage): SplitDiffFile[] | null {
   if (!isApplyPatchToolName(block.toolName)) return null;

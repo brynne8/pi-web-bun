@@ -16,23 +16,11 @@ export interface AgentEventStreamSession {
 }
 
 /**
- * Backpressure for one SSE connection. The client is often a phone: when it
- * stops reading (screen off, backgrounded tab, flaky network) every event we
- * keep enqueueing stays in this process.
- *
- *  - above STREAM_HIGH_WATER_MARK_BYTES we drop events a later event repairs
- *    (streaming deltas, partial tool output);
- *  - above the backlog limit we terminate the stream instead, so the client
- *    reconnects and re-snapshots.
- *
- * Measured before this: a single 24 MB command with a client that stopped
- * reading left 22.7 MB queued here, and that memory only comes back with a GC
- * this app never triggers (issue #923).
- *
- * The limit also has to absorb what a healthy client on a slow link has in
- * flight: one `read` of an image emits its base64 in the tool result's
- * `message_end` (its `message_start` goes as the role only), and that queues
- * up while earlier events are still being written to the socket.
+ * Backpressure for one SSE connection, since the client is often a phone: when it stops
+ * reading (screen off, backgrounded tab, flaky network) every event we keep enqueueing
+ * stays in this process. Above `STREAM_HIGH_WATER_MARK_BYTES` we drop the events a later
+ * event repairs (streaming deltas, partial tool output); above the backlog limit we
+ * terminate the stream, so the client reconnects and re-snapshots.
  */
 const STREAM_HIGH_WATER_MARK_BYTES = 512 * 1024;
 const DEFAULT_BACKLOG_LIMIT_BYTES = 16 * 1024 * 1024;
@@ -49,12 +37,11 @@ let lastBackpressureLogAt = 0;
 export const TOOL_UPDATE_COALESCE_MS = 150;
 
 /**
- * Whether a later event repairs this one if it is dropped. A `*_delta` only
- * extends a block that its `*_end` replaces with the authoritative content, and
- * `tool_execution_update` carries the whole partial result, which the next update
- * or `tool_execution_end` supersedes, as the next `bash_output` (a command's output
- * tail) or the command's result supersedes one. `*_start` / `*_end` are never dropped: the
- * client's stream reducer creates and finalizes blocks from them.
+ * Whether a later event repairs this one if it is dropped. A `*_delta` only extends a
+ * block that its `*_end` replaces with the authoritative content, and
+ * `tool_execution_update` carries the whole partial result, which the next update or
+ * `tool_execution_end` supersedes, as the next `bash_output` (a command's output tail)
+ * or its result supersedes one. `*_start` / `*_end` are never dropped.
  */
 function isDroppableEvent(event: AgentEventLike): boolean {
   if (event.type === "tool_execution_update" || event.type === "bash_output") return true;
@@ -90,20 +77,16 @@ function logBackpressure(
 
 /**
  * Registry of live SSE streams, closed from the SIGINT/SIGTERM hook in
- * instrumentation.ts.
- *
- * In production Next 16 handles those signals with `server.close()` and waits
- * for every connection to end, with no timeout and no `closeAllConnections`
- * (that call is dev-only in next/dist/server/lib/start-server.js). An SSE
- * stream only ends when the client disconnects, so without this the process
- * stops listening (502 upstream) but never exits.
- *
- * instrumentation.ts and the route handlers are bundled into separate module
- * graphs, each with its own copy of this module; a plain module-level Set
- * would be two disconnected registries. Symbol.for + globalThis shares one.
+ * instrumentation.ts. In production Next 16 handles those signals with `server.close()`
+ * and waits for every connection to end, with no timeout and no `closeAllConnections`
+ * (dev-only in next/dist/server/lib/start-server.js). An SSE stream only ends when the
+ * client disconnects, so without this the process stops listening but never exits.
  */
 const CLOSER_REGISTRY: symbol = Symbol.for("pi-web.agentEventStreamClosers");
 type StreamCloser = (closeController: boolean | "error") => void;
+// instrumentation.ts and the route handlers are bundled into separate module graphs, each
+// with its own copy of this module; a plain module-level Set would be two disconnected
+// registries. Symbol.for + globalThis shares one.
 const activeStreamClosers: Set<StreamCloser> =
   ((globalThis as Record<symbol, Set<StreamCloser>>)[CLOSER_REGISTRY] ??= new Set<StreamCloser>());
 
@@ -191,13 +174,8 @@ export function createAgentEventStream(
       const pendingToolUpdates = new Map<unknown, AgentEventLike>();
       let toolUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 
-      // "error": hard-terminate the response (SSE client sees a broken
-      // stream and reconnects). Used on process shutdown: a plain close() is
-      // swallowed by the Next/Node response pipeline without emitting a
-      // chunked termination, so the socket stays ESTABLISHED and Next's
-      // server.close() drain never completes (the original zombie bug).
-      // Also used when a client stops consuming: a graceful close() there
-      // would leave the socket (and the queued backlog) alive.
+      // "error": hard-terminate the response, so the SSE client sees a broken stream and
+      // reconnects — used on process shutdown and when a client stops consuming.
       // "true": graceful close after we finished writing a final event.
       const cleanup = (closeController: boolean | "error", reason?: Error) => {
         if (closed) return;
@@ -211,6 +189,10 @@ export function createAgentEventStream(
         unsubscribe = null;
         if (abortHandler) req.signal.removeEventListener("abort", abortHandler);
         if (closeController === "error") {
+          // A plain close() is swallowed by the Next/Node response pipeline without emitting a
+          // chunked termination, so the socket stays ESTABLISHED and Next's server.close() drain
+          // never completes (the original zombie bug). A graceful close would equally leave the
+          // socket and the queued backlog alive when the client stopped consuming.
           try { controller.error(reason ?? new Error("pi-web server shutting down")); } catch { /* already closed */ }
         } else if (closeController) {
           try { controller.close(); } catch { /* stream already closed */ }
@@ -244,6 +226,13 @@ export function createAgentEventStream(
         // The hard limit is checked against the backlog already queued. One accepted event may
         // overshoot it (large readable images must remain deliverable), but the next event must
         // close the stream even when that event itself could otherwise be dropped.
+        //
+        // Measured before this (issue #923): a single 24 MB command with a client that stopped
+        // reading left 22.7 MB queued here, and that memory only comes back with a GC this app
+        // never triggers. The limit also has to absorb what a healthy client on a slow link has
+        // in flight: one `read` of an image emits its base64 in the tool result's `message_end`
+        // (its `message_start` goes as the role only), and that queues up while earlier events
+        // are still being written to the socket.
         if (queuedBytes > backlogLimitBytes) {
           logBackpressure(sessionId, queuedBytes, backlogLimitBytes, droppedEvents, true);
           cleanup(

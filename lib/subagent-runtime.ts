@@ -289,6 +289,8 @@ function getParentNotifications(): Set<ParentNotification> {
  */
 function unsettledSubagentRuns(): ParentNotification[] {
   const consumed = getConsumedSubagentResults();
+  // A foreground run whose Agent wait expired notifies too, so collecting any terminal run
+  // can suppress its report.
   return [
     ...[...getSubagentRuns().values()].map((stored) => stored.run),
     ...[...getParentNotifications()].filter((run) => !run.completedAt || consumed.get(run.sessionId) !== run.completedAt),
@@ -299,11 +301,12 @@ function unsettledSubagentRuns(): ParentNotification[] {
  * Whether a subagent run under this session, at any depth, is still unsettled: its end can
  * start a turn there (`notifyParent()`, `triggerTurn`). A run counts from dispatch until its
  * result is written (the run map), then until the turn its parent notification triggers starts,
- * or the delivery is dropped or fails. A hidden page keeps the session's event stream while this
- * holds (#1283), and a main session's run that ends meanwhile announces no completion: the
- * turn a report starts decides that (#1434).
+ * or the delivery is dropped or fails.
  */
 export function hasUnsettledSubagentRun(sessionId: string): boolean {
+  // A hidden page keeps the session's event stream while this holds (#1283), and a main
+  // session's run that ends meanwhile announces no completion: the turn a report starts
+  // decides that (#1434).
   return subagentFamily(sessionId, unsettledSubagentRuns()).size > 1;
 }
 
@@ -367,15 +370,9 @@ function getSubagentQueue(): SubagentQueue<SubagentRunInfo> {
 type SubagentRunIdentity = Pick<SubagentRunInfo, "sessionId" | "completedAt">;
 
 /**
- * Runs whose terminal result the parent already collected with `get_subagent_result`,
- * keyed by subagent session ID and holding the collected run's `completedAt`. `resume` reruns
- * the same session ID, so the mark must name the run: a parent that polls *after* a run's
- * notification was delivered leaves a mark nothing consumes, and a bare session ID would let it
- * swallow the next run's notification (#987). `resume` deliberately does not clear the entry:
- * the parent can collect a run and resume it in the same turn while that run's notification is
- * still held, and the mark must keep suppressing it. A foreground run whose Agent wait expired
- * also notifies; collecting any terminal run can suppress its report. Each session holds at most
- * one entry.
+ * Runs whose terminal result the parent already collected with `get_subagent_result`, keyed
+ * by subagent session ID and holding the collected run's `completedAt`. Each session holds at
+ * most one entry.
  */
 function getConsumedSubagentResults(): Map<string, string> {
   // A hot reload can leave the pre-#987 Set on globalThis; replace it rather than call Map methods on it.
@@ -385,6 +382,13 @@ function getConsumedSubagentResults(): Map<string, string> {
 
 function recordResultConsumed(run: SubagentRunIdentity): void {
   // A terminal run without `completedAt` (interrupted) never notifies, so there is nothing to drop.
+  //
+  // The mark names the run, not just the session: `resume` reruns the same session ID, and a
+  // parent that polls *after* a run's notification was delivered leaves a mark nothing
+  // consumes, so a bare session ID would let it swallow the next run's notification (#987).
+  // `resume` deliberately does not clear the entry: the parent can collect a run and resume it
+  // in the same turn while that run's notification is still held, and the mark must keep
+  // suppressing it.
   if (!run.completedAt) return;
   getConsumedSubagentResults().set(run.sessionId, run.completedAt);
 }
