@@ -46,7 +46,6 @@ import {
   ConfigFooterStatus,
   ConfigNotice,
   ConfigPanelShell,
-  ConfigScopeSwitch,
   ConfigScopeTag,
   ConfigSidebar,
   ConfigSidebarGroupLabel,

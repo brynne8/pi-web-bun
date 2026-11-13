@@ -24,7 +24,6 @@ import { useI18n } from "@/hooks/useI18n";
 import { getVisibleRowIndices, revealScrollTop } from "@/lib/session-tree";
 import {
   flattenFileTree,
-  getFileTreeRowOffsets,
   FILE_TREE_ROW_HEIGHT,
   EMPTY_NOTE_HEIGHT,
   type DirResolve,
@@ -459,8 +458,6 @@ export const FileRow = memo(function FileRow({
 });
 
 type OpenFileOptions = { sourceSessionId?: string | null; modeHint?: "diff" };
-
-type OpenFileHandler = (filePath: string, fileName: string, options?: OpenFileOptions) => void;
 
 const ChangeRow = memo(function ChangeRow({
   status,
@@ -1093,7 +1090,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       (node) => node.children ?? null,
       () => ({ loading: false, error: null, pendingLink: null, allowError: null }),
     );
-  }, [fileSearchOpen, hasSearchQuery, searchLoading, searchError, searchRoots, searchExpanded]);
+  }, [fileSearchOpen, hasSearchQuery, searchLoading, searchError, searchRoots, searchExpanded, searchPaths.length]);
 
   // The windowed tree rows: the tree, or a one-line note while it loads, errors or is empty.
   const treeDisplayRows = useMemo(() => {
