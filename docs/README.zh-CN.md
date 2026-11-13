@@ -134,13 +134,13 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **运行时按钮不挪位。** 「停止」放在输入框里，与「引导」和「后续消息」并排，输入框下方那一排在运行中和结束后只有一套摆法——你正要点的东西不会在这次运行结束的一瞬变成别的东西。原版在一次运行进行时把工具和压缩这两个控件从这一排里撤走，运行结束再放回「停止」自己的位置上，另外挡住一次运行刚结束时的误点（[#1131](https://github.com/agegr/pi-web/pull/1131)）。（[说明](./agents/sessions.md#composer-action-row-nothing-moves-under-the-pointer-at-a-run-boundary)）
 
-**「停止」会回答你排下的消息。** 按下「停止」结束这次运行，还在排队等引导的消息会送进属于它自己的那次运行：模型照着你写下的内容回答，而不是压在它下面一声不响。队列在运行停下之前清空，所以不会有消息被送进一个正在死去的运行、留在那里没有人回答。带着附件的那条消息会连图片一起回到输入框，而不是丢了附件被发出去。队列空了之后再按一次「停止」，结束一切。原版的「停止」只收回它自己的召回覆盖的那一段：挡在压缩后面的提示词（[#1426](https://github.com/agegr/pi-web/pull/1426)）和服务端根本没收到的发送（[#1457](https://github.com/agegr/pi-web/pull/1457)）；队列里剩下的仍交给 pi，那条消息就继续等一个永远不会来的运行。（[说明](./agents/sessions.md#stop-and-the-messages-still-queued-librpc-managerts-hooksuseagentsessionts)）
+**「停止」会回答你排下的消息。** 按下「停止」结束这次运行，还在排队等引导的消息会送进属于它自己的那次运行：模型照着你写下的内容回答，而不是压在它下面一声不响。队列在运行停下之前清空，所以不会有消息被送进一个正在死去的运行、留在那里没有人回答。带着附件的那条消息会连图片一起回到输入框，而不是丢了附件被发出去。队列空了之后再按一次「停止」，结束一切。原版的「停止」只收回它自己的召回覆盖的那一段：挡在压缩后面的提示词（[#1426](https://github.com/agegr/pi-web/pull/1426)）和服务端根本没收到的发送（[#1457](https://github.com/agegr/pi-web/pull/1457)）；自 [#1576](https://github.com/agegr/pi-web/pull/1576) 起它也会清空 pi 的队列，把文字交回输入框，等着你再发一次。（[说明](./agents/sessions.md#stop-and-the-messages-still-queued-librpc-managerts-hooksuseagentsessionts)）
 
 **模型没回答的消息，「停止」把它还给你。** 在一次什么都没产出的运行上按「停止」——没有一个字、没有一段思考、没有启动过工具——那条消息就回到输入框里，对话也退回到它之前：记录里不会留着一条没有人回答的消息，再试一次也不需要开分支。已经开始思考的运行算已经有了回答，在那里按「停止」只是停下它。被放弃的提示词仍留在会话文件里，所以分支切换器还能把它显示出来。原版把那条消息连同一条空回复留在原处，而从那条消息编辑就会在你旁边另开一个分支。（[说明](./agents/sessions.md#stop-and-the-prompt-that-got-no-reply-librpc-managerts-hooksuseagentsessionts)）
 
 **`write` 卡片把路径和它写下的正文并排显示。** 参数都是单个值的工具卡片会一个参数一行地列出来，本身带换行的值保留成一块可以滚动的文本；这里连 `write` 也上表，它给出的两行就是文件路径和写下的正文。规则是全部参数都上表，否则一个也不上：只要有一个值是嵌套的，比如 MCP 参数里装着列表，这张卡片就照旧显示 JSON。行表本身是上游从本分支收走的（[#1324](https://github.com/agegr/pi-web/pull/1324)），而原版把 `write` 排除在外：那张卡片只显示文件正文，路径不跟在旁边。（[说明](./agents/sessions.md#tool-execution-events-on-the-sse-stream)）
 
-**模型写下的文字留在屏幕上，只折叠中间的过程。** 一次运行按片段渲染：它写的文字就在写下的位置显示，中间连着的思考块和工具调用各自折进自己那一组「处理详情」。最后一组下面只有一个结尾，写着这次运行的事：token 数与耗时、这一轮改过的文件、交出全部文字的「复制」；运行停在 Provider 报错或输出上限上时，那句原因就写在它上面一行（[#906](https://github.com/agegr/pi-web/issues/906)）。原版只保留最后一次工具调用之后的文字，并把数字、改动文件清单和失败原因挂到那条回复消息上。（[说明](./agents/sessions.md#a-turn-shows-every-word-it-wrote-only-the-workings-fold-processdetailsgroup-componentschatwindowtsx)）
+**模型写下的文字留在屏幕上，只折叠中间的过程。** 一次运行按片段渲染：它写的文字就在写下的位置显示，中间连着的思考块和工具调用各自折进自己那一组「处理详情」。最后一组下面只有一个结尾，写着这次运行的事：token 数与耗时、这一轮改过的文件、交出全部文字的「复制」；运行停在 Provider 报错或输出上限上时，那句原因就写在它上面一行（[#906](https://github.com/agegr/pi-web/issues/906)）。原版把一次运行的过程折进一个「处理详情」组，并把数字、改动文件清单和失败原因挂到那条回复消息上。（[说明](./agents/sessions.md#a-turn-shows-every-word-it-wrote-only-the-workings-fold-processdetailsgroup-componentschatwindowtsx)）
 
 **子代理的报告按 Markdown 渲染。** `Agent` 或 `get_subagent_result` 的结果会把标题、列表、表格和围栏代码真的渲染出来，字号仍是这张卡片自己那一号，不再把子代理写下的标记符号直接摆给你看。其他工具的输出仍是原始文本——在那里 `*` 和 `#` 只是字符，不是标题。后台运行的通知和子代理自己的标签页本来就已经按 Markdown 渲染，这一份报告在两处读起来是同一个样子。原版是把报告原样打印。（[说明](./agents/subagents.md#the-report-on-screen)）
 
@@ -180,11 +180,11 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **删除会带走会话在别处留下的东西。** 隔离运行的 subagent 在自己的 git worktree 里工作，它的会话文件因此记在那个 worktree 路径下，自成目录。删除父会话时会通读整个 sessions 根目录去找这样的子会话，连它一起删，并把留下来的重新挂到最近一个仍然存在的祖先。被删空的东西也跟着走：它清空的目录，还有你在应用外删掉某个项目目录之后侧栏仍替它保有的位置和名称。原版寻找子会话、也寻找该改挂谁，只看被删文件所在的那些目录。（[说明](./agents/sessions.md#session-sidebar-project-groups-pins-and-archive)）
 
-**worktree 认的是你给整个仓库的信任。** 隔离运行的 subagent 在 git worktree 里工作，从侧边栏打开的每一个检出也是：项目的 `.pi/` 文件跟着一起过去，但那个目录住在仓库旁边，顺着路径往上找不到任何决定，于是被当作受限模式——项目的扩展、skills、设置和 MCP server 一个也不加载。如今自己没有决定的检出会直接用主检出的那一个，拒绝也一样跟着；为这个 worktree 本身写过的决定仍然优先。原版只按路径认信任，所以同一个仓库的每个 worktree 都要重新问一遍。（[说明](./agents/files-and-access.md#worktrees-and-project-grouping)）
+**worktree 认的是你给整个仓库的信任。** 隔离运行的 subagent 在 git worktree 里工作，从侧边栏打开的每一个检出也是：项目的 `.pi/` 文件跟着一起过去，但那个目录住在仓库旁边，顺着路径往上找不到任何决定，于是被当作受限模式——项目的扩展、skills、设置和 MCP server 一个也不加载。如今自己没有决定的检出会直接用主检出的那一个，拒绝也一样跟着；为这个 worktree 本身写过的决定仍然优先。原版只按路径认信任，所以同一个仓库的每个 worktree 都要重新问一遍；委派出去的子会话跑在父会话的信任决定上（[#1613](https://github.com/agegr/pi-web/pull/1613)），对你自己打开的检出什么也没说。（[说明](./agents/files-and-access.md#worktrees-and-project-grouping)）
 
 **你自己取的名字，撑得过「生成标题」。** 在侧边栏里、或者用 `/name` 给会话取过名字之后，再按「生成标题」，你的名字原样不动：按钮会说明它保留了你取的名字。应用归不到自己名下的名字同样保留——pi TUI 取的、扩展取的、旧版本取的，都一样。只有没有名字的会话，或者名字本来就是「生成标题」自己取的，才会得到一个新名字。原版用模型写下的标题盖掉这个会话原本被叫做什么。（[说明](./agents/sessions.md#auto-naming-never-replaces-a-name-a-person-set-post-apisessionsidauto-name)）
 
-**Code mode 默认开着，设置自成一页。** 会话一开始就能用 Code mode——模型写一小段脚本来调用工具——除非你的设置另有说法；它的设置都在同一页：始终开启或自动、内置工具是否同时声明给模型、工具列表能花多少 token、沙箱自检，以及当前会话可用的工具名。每个服务器自己的工具公开方式仍然留在那个服务器旁边。原版要等 MCP 服务器连上才打开 Code mode，设置也放在 MCP 那一页。（[说明](./agents/tools.md#settings--tools)）
+**Code mode 默认开着，设置自成一页。** 会话一开始就能用 Code mode——模型写一小段脚本来调用工具——除非你的设置另有说法；它的设置都在同一页：始终开启或自动、内置工具是否同时声明给模型、工具列表能花多少 token、沙箱自检，以及当前会话可用的工具名。每个服务器自己的工具公开方式仍然留在那个服务器旁边。原版要等 MCP 服务器连上才打开 Code mode，设置放在 MCP 那一页，内置工具的开关则在「设置 › 常规」。（[说明](./agents/tools.md#settings--tools)）
 
 **Git 清单三个问题一起问。** 侧边栏的 Git 清单每次刷新都重新从 Git 读，所以它显示的就是此刻的目录树。仓库根目录、状态清单、改动行数这三个问题是一起发出的，不是一个接一个；未跟踪文件的行数只数一遍，只要它的字节数、时间戳和 inode 说明没变，就沿用这个结果。原版先等仓库根目录答复，再问另外两个，并且每次刷新都把所有未跟踪文件重数一遍。（[说明](./agents/files-and-access.md#when-the-file-tree-reloads)）
 

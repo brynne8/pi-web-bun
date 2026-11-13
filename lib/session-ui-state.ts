@@ -15,7 +15,7 @@ import {
   type SessionUiStateRequest,
 } from "./session-ui-state-shared";
 
-// The sidebar's pins, archive, project order and project names
+// The sidebar's pins, archive, project order, project names and read times
 // (`lib/session-ui-state-shared.ts` has the rules) in `pi-web-session-state.json`
 // beside pi's own files. It holds what the user chose, so unlike the session
 // index it is never rebuilt: writes are serialized in-process, locked against
@@ -26,7 +26,7 @@ import {
 
 const MAX_BYTES = 4 * 1024 * 1024;
 // `__proto__` is never copied: assigning it would set the object's prototype instead.
-const KNOWN_KEYS = new Set(["version", "revision", "sessions", "projects", "projectOrder", "projectNames", "__proto__"]);
+const KNOWN_KEYS = new Set(["version", "revision", "sessions", "projects", "projectOrder", "projectNames", "readAt", "__proto__"]);
 
 // Route handlers are bundled separately and hot reload re-evaluates modules; globalThis keeps one queue per process.
 const QUEUE_KEY: symbol = Symbol.for("pi-web:session-ui-state-write-queue");
@@ -229,6 +229,7 @@ function editState(
         projects: next.projects,
         ...(next.projectOrder?.length ? { projectOrder: next.projectOrder } : {}),
         ...(next.projectNames && Object.keys(next.projectNames).length > 0 ? { projectNames: next.projectNames } : {}),
+        ...(next.readAt && Object.keys(next.readAt).length > 0 ? { readAt: next.readAt } : {}),
         ...extras,
       };
       writePrivateFileAtomicSync(path, JSON.stringify(document, null, 2) + "\n");
@@ -317,28 +318,36 @@ function goneProjectKeys(state: SessionUiState): string[] {
  * No-op — no lock, nothing created — when nothing is forgotten: no session
  * entry present and no project folder gone. The `lstat`s are all that costs.
  * A file that cannot be read throws here: the locked read could not do better.
+ * Read times go with the sessions' entries.
  */
 export async function forgetSessionUiState(ids: Iterable<string>, path?: string): Promise<void> {
   const target = path ?? getSessionUiStatePath();
   const wanted = [...new Set(ids)];
   if (wanted.length === 0) return;
+  const hasOwn = (record: object | undefined, id: string) => record !== undefined && Object.prototype.hasOwnProperty.call(record, id);
   const forgets = (state: SessionUiState) => ({
-    ids: wanted.some((id) => Object.prototype.hasOwnProperty.call(state.sessions, id)),
+    ids: wanted.some((id) => hasOwn(state.sessions, id) || hasOwn(state.readAt, id)),
     gone: goneProjectKeys(state),
   });
   const before = forgets(loadState(target));
   if (!before.ids && before.gone.length === 0) return;
-  // Without this, a throwaway default directory (`~/pi-cwd/YYYYMMDD`, which
-  // users delete) keeps its row in the order forever and the file never
-  // shrinks.
+  // Deleting a session must not lock or create anything when it had no pin, archive
+  // or read time. Without this, a throwaway default directory (`~/pi-cwd/YYYYMMDD`,
+  // which users delete) keeps its row in the order forever and the file never shrinks.
   await editState(target, (state) => {
     const now = forgets(state);
     if (!now.ids && now.gone.length === 0) return { state, changed: false };
     let next = state;
     if (now.ids) {
       const sessions = { ...state.sessions };
-      for (const id of wanted) delete sessions[id];
+      const readAt = { ...state.readAt };
+      for (const id of wanted) {
+        delete sessions[id];
+        delete readAt[id];
+      }
       next = { ...state, sessions };
+      if (Object.keys(readAt).length > 0) next.readAt = readAt;
+      else delete next.readAt;
     }
     if (now.gone.length > 0) next = dropProjectUiState(next, now.gone).state;
     return { state: next, changed: true };

@@ -12,6 +12,7 @@ import { EXTENSION_REPORTED_CODE } from "./agent-client";
 import { cwdMissingError } from "./missing-cwd";
 import { invalidateModelsCache } from "./models-cache";
 import { invalidateModelRuntimeWithExtensions } from "./model-runtime";
+import { llamaCppExtension } from "./pi-sdk-internals";
 import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
 import { findDeferredModel, findDeferredStartupModel, rememberProviderModels } from "./deferred-provider-models";
 import { isBlockingExtensionUiRequest } from "./extension-ui-queue";
@@ -20,7 +21,7 @@ import {
   createProjectCommandBashOperations,
   preferUserBashExtension,
 } from "./project-command-env";
-import { cacheSessionPath, catalogFirstMessage, findSessionIdsByShortId, getLatestModelChange, invalidateSessionListCache, listAllSessions, readLatestSessionEntryId, resolveSessionPath } from "./session-reader";
+import { cacheSessionPath, catalogFirstMessage, findSessionIdsByShortId, getLatestModelChange, invalidateSessionListCache, invalidateSessionManagerCache, invalidateSessionPathCache, listAllSessions, readLatestSessionEntryId, resolveSessionPath } from "./session-reader";
 import { appendSessionNameSource } from "./session-name-source";
 import { computeLiveSessionTotalActiveMs } from "./session-timing";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
@@ -360,12 +361,19 @@ function isCompactionInProgressError(error: unknown): boolean {
 // Wraps AgentSession with the same interface the rest of the app expects
 // ============================================================================
 
+/** A running top-level tool call's start, when this process saw it, and its latest update. */
+interface ActiveToolEvents {
+  start: AgentEvent;
+  startedAt: number;
+  update?: AgentEvent;
+}
+
 export class AgentSessionWrapper {
   // A Set, not an array: an SSE stream unsubscribes from inside emit() when it
   // closes on session_shutdown, and splicing an array mid-iteration made the
   // next stream miss that same event.
   private listeners = new Set<EventListener>();
-  private activeToolEvents = new Map<string, AgentEvent>();
+  private activeToolEvents = new Map<string, ActiveToolEvents>();
   private pendingUiResponses = new Map<string, PendingUiResponse>();
   private pendingUiRequests = new Map<string, AgentEvent>();
   private activeCustomUis = new Map<string, ActiveCustomUi>();
@@ -409,6 +417,8 @@ export class AgentSessionWrapper {
   private onDestroyCallback: (() => void) | null = null;
   private shutdownPromise: Promise<void> | null = null;
   private sessionShutdownEmitted = false;
+  private extensionShutdownRequested = false;
+  private extensionShutdownComplete = false;
   private forceShutdownOnIdle = false;
   /** Stop's forced shutdown waits out a `!` command too (`abort_bash`); a run's Stop, only the run. */
   private forceShutdownCoversShell = false;
@@ -484,6 +494,11 @@ export class AgentSessionWrapper {
    */
   isAlive(): boolean {
     return this._alive && !this.closing;
+  }
+
+  /** Explicit exit keeps its stream through cleanup, even when it starts during binding. */
+  isExtensionShutdownRequested(): boolean {
+    return this.extensionShutdownRequested;
   }
 
   /**
@@ -664,6 +679,7 @@ export class AgentSessionWrapper {
             : event,
       );
       if (event.type === "agent_settled") this.notifyAgentRunCompleteIfIdle();
+      this.checkExtensionShutdown();
     });
     this.resetIdleTimer();
   }
@@ -694,8 +710,8 @@ export class AgentSessionWrapper {
   }
 
   /**
-   * Keep the latest start or update of each running tool call for onEvent() to
-   * replay. Calls a tool makes itself (a codemode script's, which carry
+   * Keep the start and the latest update of each running tool call for onEvent()
+   * to replay. Calls a tool makes itself (a codemode script's, which carry
    * `parentToolCallId`) are left out: a reconnecting client would show each as a
    * top-level tool, and the parent's own update already reports them. A nested
    * end can still arrive after its parent's, and is ignored like the rest.
@@ -703,8 +719,11 @@ export class AgentSessionWrapper {
   private trackActiveToolEvent(event: AgentEvent): void {
     const toolCallId = event.toolCallId;
     if (typeof toolCallId !== "string" || isNestedToolExecutionEvent(event)) return;
-    if (event.type === "tool_execution_start" || event.type === "tool_execution_update") {
-      this.activeToolEvents.set(toolCallId, event);
+    if (event.type === "tool_execution_start") {
+      this.activeToolEvents.set(toolCallId, { start: event, startedAt: performance.now() });
+    } else if (event.type === "tool_execution_update") {
+      const active = this.activeToolEvents.get(toolCallId);
+      if (active) active.update = event;
     } else if (event.type === "tool_execution_end") {
       this.activeToolEvents.delete(toolCallId);
       const nestedPrefix = `${toolCallId}/`;
@@ -924,13 +943,10 @@ export class AgentSessionWrapper {
           uiContext,
           mode: "rpc",
           commandContextActions: this.createExtensionCommandContextActions(),
-          shutdownHandler: () => this.emit({
-            type: "extension_ui_request",
-            id: randomUUID(),
-            method: "notify",
-            notifyType: "warning",
-            message: "Extension requested shutdown, but shutdown is not supported in Pi Web.",
-          } as ExtensionUiRequest as AgentEvent),
+          shutdownHandler: () => {
+            this.extensionShutdownRequested = true;
+            this.checkExtensionShutdown();
+          },
           onError: (error) => this.emit({
             type: "extension_error",
             extensionPath: error.extensionPath,
@@ -946,9 +962,20 @@ export class AgentSessionWrapper {
     })().catch((err) => {
       this.extensionBindingError = err;
       throw err;
-    });
+    }).finally(() => this.checkExtensionShutdown());
 
     return this.extensionBindingPromise;
+  }
+
+  /** Defer out of the extension callback, including session_start, before awaiting binding. */
+  private checkExtensionShutdown(): void {
+    if (!this.extensionShutdownRequested) return;
+    queueMicrotask(() => {
+      if (!this.isAlive() || this.isRunning() || this.activeMutatingCommands > 0) return;
+      void this.shutdown().catch((error) => {
+        console.error("[pi-web] extension-requested shutdown failed:", error);
+      });
+    });
   }
 
   private async waitForExtensionsBound(): Promise<void> {
@@ -1209,7 +1236,9 @@ export class AgentSessionWrapper {
     this.idleDeadlineAt = this.idleLastResetAt + timeoutMs;
     this.idleTimer = setTimeout(() => {
       this.idleDeadlineAt = null;
-      if (!this.forceShutdownOnIdle && (this.isRunning() || hasActiveSessionLivenessProvider({
+      // A subagent run that waits for a slot (or its MCP servers) holds this SDK session and will
+      // prompt it: disposing it now would leave that run on a dead session that records nothing (#1590).
+      if (!this.forceShutdownOnIdle && (this.isRunning() || getLiveSubagentStatus(this.sessionId) !== undefined || hasActiveSessionLivenessProvider({
         sessionId: this.sessionId,
         sessionFile: this.sessionFile || undefined,
       }))) {
@@ -1243,9 +1272,19 @@ export class AgentSessionWrapper {
   }
 
   onEvent(listener: EventListener): () => void {
+    if (this.extensionShutdownComplete) {
+      listener({ type: "session_ended", sessionId: this.sessionId });
+      return () => {};
+    }
     this.listeners.add(listener);
     for (const event of this.pendingUiRequests.values()) listener(event);
-    for (const event of this.activeToolEvents.values()) listener(event);
+    // A replayed start says how long the call has run (`elapsedMs`, this process's clock): the
+    // page's live elapsed time on its card counts from the start it saw, which a reload missed.
+    const now = performance.now();
+    for (const { start, startedAt, update } of this.activeToolEvents.values()) {
+      listener({ ...start, elapsedMs: Math.max(0, Math.round(now - startedAt)) });
+      if (update) listener(update);
+    }
     for (const event of this.startupNotices ?? []) listener(event);
     return () => {
       this.listeners.delete(listener);
@@ -1449,6 +1488,7 @@ export class AgentSessionWrapper {
             this.pendingPromptCount = Math.max(0, this.pendingPromptCount - 1);
             this.resetIdleTimer();
             this.notifyAgentRunCompleteIfIdle();
+            this.checkExtensionShutdown();
           };
           const finishDirectRun = async (outcome: { aborted?: boolean; error?: string }) => {
             const run = directRun;
@@ -1597,9 +1637,11 @@ export class AgentSessionWrapper {
           wait.controller.abort();
           await wait.done;
         }
-        // Stop ends the compaction, whose end would send the parked prompts:
-        // they go back to the composer instead, as the TUI's abort restores
-        // queued messages to the editor.
+        // pi's TUI clears every queue before it aborts (Esc, `restoreQueuedMessagesToEditor`)
+        // and puts the texts in the editor: left queued, a steer the stopped run would
+        // take at its next turn boundary was still sent, and the rest went out with the
+        // next prompt. Prompts parked behind a compaction come back too: Stop ends the
+        // compaction, whose end would send them.
         const recalled = this.recallParkedPrompts();
         try {
           await this.withFinalIdleReset(() => this.inner.abort());
@@ -1613,10 +1655,6 @@ export class AgentSessionWrapper {
             followUp: [...recalled.followUp, ...queuedAtStop.followUp],
             ...(recalled.images ? { images: recalled.images } : {}),
           };
-          if (queued.steering.length > 0 || queued.followUp.length > 0) {
-            await this.restoreQueuedCustomMessages(queuedCustomMessages, false);
-            return { queuedMessages: queued };
-          }
           // Nothing was queued, so Stop's target is the prompt of the run just stopped: an
           // unanswered one comes back to the composer with its branch (pi's CLI leaves it in the
           // transcript). A queued message keeps its prompt where it is, since its author meant a
@@ -1626,6 +1664,7 @@ export class AgentSessionWrapper {
             queuedCustomMessages,
             queued.steering.length === 0 && queued.followUp.length === 0,
           );
+          if (queued.steering.length === 0 && queued.followUp.length === 0 && !retractedPrompt) return null;
           return {
             queuedMessages: queued,
             ...(retractedPrompt ? { retractedPrompt } : {}),
@@ -2092,6 +2131,7 @@ export class AgentSessionWrapper {
     } finally {
       promptCounted();
       if (tracksMutation) this.activeMutatingCommands = Math.max(0, this.activeMutatingCommands - 1);
+      this.checkExtensionShutdown();
     }
   }
 
@@ -2117,7 +2157,7 @@ export class AgentSessionWrapper {
     this.disposeMcpHost();
     // Tell attached SSE listeners to drop this instance so the browser
     // EventSource errors and reconnects instead of staying OPEN on a dead wrapper.
-    this.emit({ type: "session_shutdown" });
+    if (!this.extensionShutdownRequested) this.emit({ type: "session_shutdown" });
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleDeadlineAt = null;
     if (this.inner.isBashRunning) this.inner.abortBash();
@@ -2136,6 +2176,13 @@ export class AgentSessionWrapper {
         this.onDestroyCallback?.();
         // Here rather than in the registry's onDestroy callback, which a replacement swaps out.
         recordSessionClosed(this);
+        if (this.extensionShutdownRequested) {
+          invalidateSessionPathCache(this.sessionId);
+          if (this.sessionFile) invalidateSessionManagerCache(this.sessionFile);
+          invalidateSessionListCache();
+          this.extensionShutdownComplete = true;
+          this.emit({ type: "session_ended", sessionId: this.sessionId });
+        }
         this.resolveDisposed();
       }
     };
@@ -3177,6 +3224,11 @@ export async function setRpcSessionTools(
       await pending.catch(() => undefined);
       return setRpcSessionTools(sessionId, sessionFile, requestedToolNames);
     }
+    if (!existsSync(sessionFile)) {
+      invalidateSessionPathCache(sessionId);
+      invalidateSessionListCache();
+      throw Object.assign(new Error("Session not found"), { status: 404 });
+    }
     const manager = SessionManager.open(sessionFile, undefined);
     if (readSubagentSessionResources(manager.getEntries() as unknown as SessionEntry[])) {
       throw new Error("Subagent tool selection is fixed by its profile");
@@ -3549,6 +3601,13 @@ export async function startRpcSession(
 
   let sessionManager: SessionManager;
   if (sessionFile) {
+    // A shutdown hook can delete the file while this start waits for disposal.
+    // SDK open() creates a fresh session for a missing path, so check after that wait.
+    if (!existsSync(sessionFile)) {
+      invalidateSessionPathCache(sessionId);
+      invalidateSessionListCache();
+      throw Object.assign(new Error("Session not found"), { status: 404 });
+    }
     sessionManager = SessionManager.open(sessionFile, undefined);
   } else {
     if (!cwd) throw new Error("cwd is required for a new session");
@@ -3613,7 +3672,15 @@ export async function startRpcSession(
         : projectTrustReloadOptions(sessionCwd, agentDir);
     // Code mode is on unless the settings say otherwise (ADR 0006): the session's
     // manager supplies that default where pi reads `defaultTools` at startup.
-    const settingsManager = withCodemodeDefault(SettingsManager.create(sessionCwd, agentDir));
+    // Trusted only by the folder's decision, as `syncProjectTrust()` reads it: created trusted
+    // by default, a session that resolves no trust on load (a subagent that loads no
+    // resources, Chat only) read the project settings of a folder never trusted.
+    const settingsManager = withCodemodeDefault(SettingsManager.create(sessionCwd, agentDir, {
+      projectTrusted: getProjectTrustStatus(sessionCwd, agentDir).trusted,
+    }));
+    // Here the allow-list is the point: extensions stay loaded, their tools and what
+    // the parent did not have stay out of the registry.
+    if (sideChatTools) toolsOption = resolveShellTools(selectedToolNames ?? [], settingsManager.getDefaultTools());
     // Chat-only sessions and subagents that replace Pi's prompt send an exact
     // system prompt. The prompt is resolved at prompt time through this inline
     // extension: it may read the session's context files, which exist only
@@ -3650,6 +3717,7 @@ export async function startRpcSession(
       createSubagentCompactionGuardExtension(),
       createOmitEmptyToolsExtension(),
       createStrictToolArgsExtension(),
+      llamaCppExtension,
       ...(subagentCodemode ? [subagentCodemode] : []),
       ...(subagentMcp && subagentResources
         ? [...subagentMcp.extensions, createSubagentMcpPolicyExtension(() => subagentResources)]
@@ -3664,7 +3732,7 @@ export async function startRpcSession(
         ? {
             ...subagentExtensionLoaderOptions(subagentResources),
             ...skillsBinding!.loaderOptions,
-            ...(subagentExtensionFactories.length > 0 ? { extensionFactories: subagentExtensionFactories } : {}),
+            extensionFactories: subagentExtensionFactories,
             noPromptTemplates: true,
             noThemes: true,
             noContextFiles: true,
@@ -3680,6 +3748,7 @@ export async function startRpcSession(
           ? { ...CHAT_ONLY_RESOURCE_LOADER_OPTIONS, extensionFactories: [exactSystemPromptExtension] }
         : {
             extensionFactories: [
+              llamaCppExtension,
               ...(builtins?.extensions ?? []),
               createReadOnlyMcpPolicyExtension(),
               createStrictToolArgsExtension(),

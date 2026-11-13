@@ -33,6 +33,7 @@ const settingsPath = path.join(agentDir, "settings.json");
 const projectSettingsPath = path.join(cwd, ".pi", "settings.json");
 const isWindows = process.platform === "win32";
 const URL_BASE = "http://localhost/api/tools/settings";
+const DEFAULTS = ["read", "edit", "write", "bash"];
 
 /** `?cwd=` for the project the page describes; without one, the global settings alone. */
 const forCwd = () => `?cwd=${encodeURIComponent(cwd)}`;
@@ -75,6 +76,7 @@ test("reports the Code mode settings, with nothing configured read as Always on,
     isWindows,
     powerShellEnabled: false,
     bgTasksEnabled: false,
+    builtinTools: DEFAULTS,
     codemode: {
       sandbox: { state: "not-checked" },
       builtinDisabled: false,
@@ -214,10 +216,24 @@ test("refuses a project folder it may not read, before any change", async () => 
   assert.deepEqual(JSON.parse(await readFile(settingsPath, "utf8")), { defaultModel: "m" });
 });
 
+test("saves the built-in tools, keeping the other defaultTools entries", async () => {
+  await writeFile(settingsPath, JSON.stringify({ defaultModel: "m", defaultTools: ["+codemode"] }));
+  const saved = await put({ builtinTools: ["read", "grep", "bash"] });
+  assert.equal(saved.status, 200);
+  assert.deepEqual((await saved.json()).builtinTools, ["read", "grep", "bash"]);
+  assert.deepEqual(JSON.parse(await readFile(settingsPath, "utf8")), { defaultModel: "m", defaultTools: ["+codemode", "-edit", "-write", "+grep"] });
+  assert.equal((await (await put({ builtinTools: DEFAULTS })).json()).codemode.preference, "always");
+  assert.deepEqual(JSON.parse(await readFile(settingsPath, "utf8")), { defaultModel: "m", defaultTools: ["+codemode"] });
+  for (const builtinTools of [["read", "lookup"], "read", null]) {
+    assert.equal((await put({ builtinTools })).status, 400);
+  }
+});
+
 test("rejects requests that do not name exactly one valid change, with a reason Settings › Tools translates", async () => {
   for (const body of [
     { codemode: "never" },
     { codemode: "always", enabled: true },
+    { codemode: "always", builtinTools: [] },
     { codemode: "always", codemodeInlineBudget: 1000 },
     { codemodeMode: "only", codemodeInlineBudget: 1000 },
     { codemodeMode: "off" },

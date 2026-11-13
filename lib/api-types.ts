@@ -43,6 +43,8 @@ export interface ToolSettingsResponse {
   powerShellEnabled: boolean;
   /** Whether the background bash extension is enabled for new sessions. */
   bgTasksEnabled: boolean;
+  /** The built-in tools the global defaultTools starts sessions with; "bash" is the active shell. */
+  builtinTools: string[];
   /**
    * Code mode as Settings › Tools shows it: the global choice, mode and budget,
    * and with `?cwd=` the project's own, its sandbox and the built-in switch.

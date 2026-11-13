@@ -427,7 +427,7 @@ test("delegates event stream readiness and hides an empty agent phase", () => {
 
   assert.match(source, /new AgentEventConnection\(\{/);
   assert.match(source, /shouldMaintain: wantsEventStream,/);
-  assert.match(source, /const wantsEventStream = useCallback\(\(sid: string\) => \(\s*sessionHookMountedRef\.current\s*&& sessionIdRef\.current === sid/);
+  assert.match(source, /const wantsEventStream = useCallback\(\(sid: string\) => \(\s*sessionHookMountedRef\.current\s*&&[\s\S]{0,160}?sessionIdRef\.current === sid/);
   assert.match(ensureSource, /eventConnectionRef\.current!\.ensureConnected\(sid\)/);
   assert.match(ensureSource, /eventConnectionRef\.current!\.maintain\(sid\)/);
   assert.match(chatWindowSource, /const hasStreamingContent = useStreamingSelector\(streamingStore, selectHasStreamingContent\)/);

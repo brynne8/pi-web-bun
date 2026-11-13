@@ -11,6 +11,7 @@ export interface AgentEventStreamSession {
   readonly isStreaming: boolean;
   readonly streamingMessage: unknown;
   isAlive?(): boolean;
+  isExtensionShutdownRequested?(): boolean;
   onEvent(listener: (event: AgentEventLike) => void): () => void;
 }
 
@@ -309,7 +310,7 @@ export function createAgentEventStream(
         try {
           const session = await sessionPromise;
           if (closed) return;
-          if (session.isAlive && !session.isAlive()) {
+          if (session.isAlive && !session.isAlive() && !session.isExtensionShutdownRequested?.()) {
             cleanup(true);
             return;
           }
@@ -317,6 +318,11 @@ export function createAgentEventStream(
           let bufferedEvents: AgentEventLike[] | null = [];
           let snapshotPublished = false;
           const handleEvent = (event: AgentEventLike) => {
+            if (event.type === "session_ended") {
+              encode(event);
+              cleanup(true);
+              return;
+            }
             if (event.type === "session_shutdown") {
               cleanup(true);
               return;
@@ -335,7 +341,7 @@ export function createAgentEventStream(
             stopListening();
             return;
           }
-          if (session.isAlive && !session.isAlive()) {
+          if (session.isAlive && !session.isAlive() && !session.isExtensionShutdownRequested?.()) {
             stopListening();
             cleanup(true);
             return;

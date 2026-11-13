@@ -16,25 +16,28 @@ import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security"
 import { readBgTasksEnabled, writeBgTasksEnabled } from "@/lib/bg-tasks-settings";
 import { isMcpEntryRefusal, validateMcpProject } from "@/lib/mcp-entry-request";
 import {
+  readBuiltinTools,
   readPowerShellToolEnabled,
+  writeBuiltinTools,
   writePowerShellToolEnabled,
 } from "@/lib/powershell-settings";
 import { getProjectTrustStatus } from "@/lib/project-trust";
+import { SETTINGS_BUILTIN_TOOLS } from "@/lib/tool-presets";
 
 export const dynamic = "force-dynamic";
 
 // Settings › Tools, and the only writer of the global `defaultTools` key: the
-// PowerShell switch (Windows) and the Code mode choice (ADR 0006) both edit it,
-// under the lock pi's SettingsManager takes on the same file. The global
-// `codemode.mode` and `codemode.inlineBudget` are saved here too, under the
-// same lock. `?cwd=` names the project the page describes: its `.pi/settings.json`
-// may decide Code mode for its own sessions, and that is read only when the
-// project's settings load (a trusted folder).
+// PowerShell switch (Windows), the built-in tool switches and the Code mode
+// choice (ADR 0006) both edit it, under the lock pi's SettingsManager takes on
+// the same file. The global `codemode.mode` and `codemode.inlineBudget` are
+// saved here too, under the same lock. `?cwd=` names the project the page
+// describes: its `.pi/settings.json` may decide Code mode for its own sessions,
+// and that is read only when the project's settings load (a trusted folder).
 //
 // Every refusal carries a `reason` code the panel translates, beside the
 // English `error` it shows only as the diagnostic of an `internal` failure.
 
-const CHANGES = ["enabled", "codemode", "codemodeMode", "codemodeInlineBudget", "bgTasksEnabled"] as const;
+const CHANGES = ["enabled", "builtinTools", "codemode", "codemodeMode", "codemodeInlineBudget", "bgTasksEnabled"] as const;
 
 function refusal(status: number, reason: McpRefusalReason, error: string) {
   return NextResponse.json({ error, reason } satisfies McpErrorResponse, { status });
@@ -75,8 +78,9 @@ async function readToolSettings(cwd: string | undefined): Promise<ToolSettingsRe
   // held backs off for about a second.
   const powerShellEnabled = await readPowerShellToolEnabled();
   const bgTasksEnabled = await readBgTasksEnabled();
+  const builtinTools = await readBuiltinTools();
   const codemode = await readCodemode(cwd, agentDir);
-  return { isWindows: process.platform === "win32", powerShellEnabled, bgTasksEnabled, codemode };
+  return { isWindows: process.platform === "win32", powerShellEnabled, bgTasksEnabled, builtinTools, codemode };
 }
 
 /** The `?cwd=` project, checked as Settings › MCP checks it, or a refusal to answer with. */
@@ -115,9 +119,9 @@ export async function PUT(req: Request) {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return refusal(400, "invalid-request", "Expected a JSON object");
   }
-  const changes = body as { enabled?: unknown; codemode?: unknown; codemodeMode?: unknown; codemodeInlineBudget?: unknown; bgTasksEnabled?: unknown };
+  const changes = body as { enabled?: unknown; builtinTools?: unknown; codemode?: unknown; codemodeMode?: unknown; codemodeInlineBudget?: unknown; bgTasksEnabled?: unknown };
   if (CHANGES.filter((key) => key in changes).length !== 1) {
-    return refusal(400, "invalid-request", "Send one of enabled (PowerShell), codemode, codemodeMode, codemodeInlineBudget or bgTasksEnabled");
+    return refusal(400, "invalid-request", "Send one of enabled (PowerShell), builtinTools, codemode, codemodeMode, codemodeInlineBudget or bgTasksEnabled");
   }
 
   let cwd: string | undefined;
@@ -135,6 +139,20 @@ export async function PUT(req: Request) {
     }
     try {
       await writeBgTasksEnabled(changes.bgTasksEnabled);
+      return NextResponse.json(await readToolSettings(cwd));
+    } catch (error) {
+      return errorResponse(error);
+    }
+  }
+
+  if ("builtinTools" in changes) {
+    // The built-in tools new sessions start with; every other defaultTools entry is kept.
+    const tools = changes.builtinTools;
+    if (!Array.isArray(tools) || !tools.every((name) => SETTINGS_BUILTIN_TOOLS.includes(name as never))) {
+      return refusal(400, "invalid-request", `builtinTools must list names from ${SETTINGS_BUILTIN_TOOLS.join(", ")}`);
+    }
+    try {
+      await writeBuiltinTools(tools as string[]);
       return NextResponse.json(await readToolSettings(cwd));
     } catch (error) {
       return errorResponse(error);

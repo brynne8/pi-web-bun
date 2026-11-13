@@ -10,7 +10,9 @@ import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
 import { getAssistantErrorMessage, getThinkingPreview, hasAssistantAnswer, isAssistantAborted, isAssistantTruncated, isEmptyThinkingBlock } from "@/lib/message-display";
+import { toolClockMs, type ToolClock, type ToolClocks } from "@/lib/tool-clock";
 import { diffGapLabel, parseUnifiedPatch, unifiedDiffLines, type SplitDiffCell, type SplitDiffFile, type SplitDiffGap, type UnifiedDiffLine } from "@/lib/patch";
+import { editPreviewFile } from "@/lib/edit-preview";
 import { applyPatchPreviewToFiles, applyPatchResultHasFailures, extractApplyPatchPaths, getApplyPatchInputText, parseApplyPatchInput } from "@/lib/apply-patch";
 import { isApplyPatchToolName, isEditToolName, isPowerShellToolName, isShellToolName } from "@/lib/tool-names";
 import { readSnapshotOfCall, type ReadSnapshot } from "@/lib/read-snapshot";
@@ -237,6 +239,11 @@ interface Props {
   isTurnPart?: boolean;
   /** The turn's last part: the one row of the turn's own metadata that is not in the footer. */
   isTurnTail?: boolean;
+  /** Running tool calls' clocks, for the cards still waiting for their result message. */
+  toolClocks?: ToolClocks;
+  onCompact?: () => void;
+  isCompacting?: boolean;
+  compactError?: string | null;
 }
 
 export function getModelDisplayName(
@@ -290,10 +297,10 @@ export function replaceUserMessageText(message: UserMessage, text: string): User
   return { ...message, content };
 }
 
-function haveSameRelevantToolResults(
+function haveSameRelevantToolEntries<T>(
   message: AgentMessage,
-  previous: Map<string, ToolResultMessage> | undefined,
-  next: Map<string, ToolResultMessage> | undefined,
+  previous: ReadonlyMap<string, T> | undefined,
+  next: ReadonlyMap<string, T> | undefined,
 ): boolean {
   if (previous === next || message.role !== "assistant") return true;
   for (const block of (message as AssistantMessage).content ?? []) {
@@ -304,12 +311,12 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, entryId, searchBlock, onFork, forking, onEditContent, onCancelEdit, isEditing, showTimestamp, prevTimestamp, sessionId, blockIndexOffset, isTurnPart, isTurnTail }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, toolClocks, modelNames, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, entryId, searchBlock, onFork, forking, onEditContent, onCancelEdit, isEditing, showTimestamp, prevTimestamp, sessionId, blockIndexOffset, isTurnPart, isTurnTail, onCompact, isCompacting, compactError }: Props) {
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onEditContent={onEditContent} onCancelEdit={onCancelEdit} isEditing={isEditing} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} blockIndexOffset={blockIndexOffset} isTurnPart={isTurnPart} isTurnTail={isTurnTail} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} toolClocks={toolClocks} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} blockIndexOffset={blockIndexOffset} isTurnPart={isTurnPart} isTurnTail={isTurnTail} onCompact={onCompact} isCompacting={isCompacting} compactError={compactError} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -328,7 +335,8 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
 }, (prev, next) => {
   return prev.message === next.message
     && prev.isStreaming === next.isStreaming
-    && haveSameRelevantToolResults(prev.message, prev.toolResults, next.toolResults)
+    && haveSameRelevantToolEntries(prev.message, prev.toolResults, next.toolResults)
+    && haveSameRelevantToolEntries(prev.message, prev.toolClocks, next.toolClocks)
     && prev.modelNames === next.modelNames
     && prev.cwd === next.cwd
     && prev.onOpenFile === next.onOpenFile
@@ -428,10 +436,12 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
   const canCancelEdit = !!isEditing && !!onCancelEdit;
 
   const copyContent = () => {
+    // A refused copy is silent: no "Copied", and the rejection is handled
+    // so it never surfaces as an unhandled one (lib/clipboard.ts).
     copyText(copyTarget).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    });
+    }, () => {});
   };
 
   return (
@@ -747,11 +757,11 @@ export function AssistantMessageHeader({ modelName, estimatedTokens = 0, tps = n
             <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />
             </svg>
-            {/* Both minimum widths leave a pixel for per-glyph rounding at the widest value. */}
-            <span style={{ minWidth: "calc(6ch + 1px)" }}>{estimatedTokens}</span>
+            <span>{estimatedTokens}</span>
           </span>
           {tps !== null && (
-            <span style={{ marginLeft: 6, padding: "1px 6px", minWidth: "calc(9ch + 1px)", boxSizing: "content-box", textAlign: "center", borderRadius: 4, background: bg, color: "#fff", fontSize: 11, fontWeight: 400 }}>
+            // Room for `99.9 t/s` plus a pixel of glyph rounding; a faster rate widens it.
+            <span style={{ marginLeft: 6, padding: "1px 6px", minWidth: "calc(8ch + 1px)", boxSizing: "content-box", textAlign: "center", borderRadius: 4, background: bg, color: "#fff", fontSize: 11, fontWeight: 400 }}>
               {tps.toFixed(1)} t/s
             </span>
           )}
@@ -765,6 +775,7 @@ function AssistantMessageView({
   message,
   isStreaming,
   toolResults,
+  toolClocks,
   modelNames,
   cwd,
   onOpenFile,
@@ -778,10 +789,14 @@ function AssistantMessageView({
   blockIndexOffset,
   isTurnPart,
   isTurnTail,
+  onCompact,
+  isCompacting,
+  compactError,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
   toolResults?: Map<string, ToolResultMessage>;
+  toolClocks?: ToolClocks;
   modelNames?: Record<string, string>;
   cwd?: string;
   onOpenFile?: (filePath: string, page?: number) => void;
@@ -797,6 +812,9 @@ function AssistantMessageView({
   isTurnPart?: boolean;
   /** The turn's last part, the one row of turn metadata a part may still show. */
   isTurnTail?: boolean;
+  onCompact?: () => void;
+  isCompacting?: boolean;
+  compactError?: string | null;
 }) {
   const { t } = useI18n();
   // The time is the turn's, shown by `TurnFooter` at its end. On a part it would be
@@ -887,10 +905,12 @@ function AssistantMessageView({
   if (aborted) stats.unshift({ text: t("chat.operationAborted") }, ...(stats.length > 0 ? [{ text: "·" }] : []));
 
   const copyContent = () => {
+    // A refused copy is silent: no "Copied", and the rejection is handled
+    // so it never surfaces as an unhandled one (lib/clipboard.ts).
     copyText(textContent).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    });
+    }, () => {});
   };
 
   useEffect(() => {
@@ -970,13 +990,13 @@ function AssistantMessageView({
         {/* Not keyed by the entry id: a message of this run gets one when the file is
             read again, and its blocks keep their state across that read (#1184). */}
         {blockItems.map(({ block, originalIndex }) => (
-          <BlockView key={originalIndex} block={block} searchTarget={block === searchBlock} result={block.type === "toolCall" ? toolResults?.get(block.toolCallId) : undefined} duration={block.type === "toolCall" ? toolCallDurations.get(block.toolCallId) : undefined} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
+          <BlockView key={originalIndex} block={block} searchTarget={block === searchBlock} toolResults={toolResults} toolsNotRun={aborted || providerError !== null} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} toolClocks={toolClocks} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
         ))}
       </div>
 
       {!isTurnPart && (providerError || truncated) && (
         <div style={{ marginTop: blocks.length > 0 ? 8 : 0 }}>
-          <AssistantNotice message={message} isStreaming={isStreaming} />
+          <AssistantNotice message={message} isStreaming={isStreaming} onCompact={onCompact} isCompacting={isCompacting} compactError={compactError} />
         </div>
       )}
 
@@ -1037,7 +1057,7 @@ function AssistantMessageView({
   );
 }
 
-const BlockView = memo(function BlockView({ block, searchTarget, result, duration, isStreaming, streamingDuration, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, sessionId, entryId, blockIndex }: { block: AssistantContentBlock; searchTarget?: boolean; result?: ToolResultMessage; duration?: number; isStreaming?: boolean; streamingDuration?: number; cwd?: string; onOpenFile?: (filePath: string, page?: number) => void; onOpenSubagent?: (sessionId: string, label: string) => void; onOpenReadSnapshot?: (toolCallId: string, snapshot: ReadSnapshot) => void; sessionId?: string; entryId?: string; blockIndex: number }) {
+const BlockView = memo(function BlockView({ block, searchTarget, toolResults, toolsNotRun, isStreaming, streamingDuration, toolCallDurations, toolClocks, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, sessionId, entryId, blockIndex }: { block: AssistantContentBlock; searchTarget?: boolean; toolResults?: Map<string, ToolResultMessage>; toolsNotRun?: boolean; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; toolClocks?: ToolClocks; cwd?: string; onOpenFile?: (filePath: string, page?: number) => void; onOpenSubagent?: (sessionId: string, label: string) => void; onOpenReadSnapshot?: (toolCallId: string, snapshot: ReadSnapshot) => void; sessionId?: string; entryId?: string; blockIndex: number }) {
   if (block.type === "text") {
     return <div data-message-text data-search-target={searchTarget || undefined}><TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} /></div>;
   }
@@ -1045,7 +1065,10 @@ const BlockView = memo(function BlockView({ block, searchTarget, result, duratio
     return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} />;
   }
   if (block.type === "toolCall") {
-    return <ToolCallBlock block={block as ToolCallContent} result={result} duration={duration} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} />;
+    const tc = block as ToolCallContent;
+    const result = toolResults?.get(tc.toolCallId);
+    const duration = toolCallDurations?.get(tc.toolCallId);
+    return <ToolCallBlock block={tc} result={result} notRun={toolsNotRun} duration={duration} clock={toolClocks?.get(tc.toolCallId)} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} />;
   }
   return null;
 });
@@ -1228,9 +1251,29 @@ export function formatToolDuration(ms: number): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m ${remainder}s`;
 }
 
+/**
+ * A card's time before its result message: the run so far, redrawn each second as pi's TUI
+ * redraws its `Elapsed`, then pi's measured time once the call ends. Its own state, so a tick
+ * re-renders only this span.
+ */
+function ToolClockTime({ clock }: { clock: ToolClock }) {
+  const running = "startedAt" in clock;
+  const [now, setNow] = useState(() => performance.now());
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => setNow(performance.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [running]);
+  const ms = toolClockMs(clock, now);
+  if (ms < TOOL_DURATION_MIN_MS) return null;
+  return <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{formatToolDuration(ms)}</span>;
+}
+
 // `resultFooter` is drawn under the result, so only while the card is expanded:
 // what it offers acts on the result the reader is looking at.
-function ToolCallBlock({ block, result, duration, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, resultFooter }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; cwd?: string; onOpenFile?: (filePath: string, page?: number) => void; onOpenSubagent?: (sessionId: string, label: string) => void; onOpenReadSnapshot?: (toolCallId: string, snapshot: ReadSnapshot) => void; resultFooter?: ReactNode }) {
+// `notRun`: the message ended aborted or in an error, so pi ran none of its
+// calls and no result will come (pi-agent-core's agent loop).
+function ToolCallBlock({ block, result, notRun, duration, clock, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, resultFooter }: { block: ToolCallContent; result?: ToolResultMessage; notRun?: boolean; duration?: number; clock?: ToolClock; cwd?: string; onOpenFile?: (filePath: string, page?: number) => void; onOpenSubagent?: (sessionId: string, label: string) => void; onOpenReadSnapshot?: (toolCallId: string, snapshot: ReadSnapshot) => void; resultFooter?: ReactNode }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(() => isToolCallExpanded(block.toolCallId));
   const toggleExpanded = () => {
@@ -1245,6 +1288,15 @@ function ToolCallBlock({ block, result, duration, cwd, onOpenFile, onOpenSubagen
   const resultDiffText = resultDiff?.text;
   const resultPatchPath = useMemo(() => singlePatchPath(resultDiffText), [resultDiffText]);
   const patchFiles = useMemo(() => getApplyPatchFiles(block, result), [block, result]);
+  // An edit whose arguments are complete and whose result has not arrived yet:
+  // the diff its edits make, until the result's own diff replaces it (#1625).
+  // A call that will never run (its message aborted or failed) gets none: pi's
+  // TUI gives it an error result instead of a preview.
+  const editPreviewInput = expanded && isEditTool && !isStreamingInput && !result && !notRun ? block.input : null;
+  const editPreview = useMemo(() => {
+    const file = editPreviewInput === null ? null : editPreviewFile(editPreviewInput);
+    return file ? [file] : null;
+  }, [editPreviewInput]);
   const patchLabel = useMemo(
     () => (isApplyPatchToolName(block.toolName) ? summarizeApplyPatchInput(block) : null),
     [block],
@@ -1356,7 +1408,7 @@ function ToolCallBlock({ block, result, duration, cwd, onOpenFile, onOpenSubagen
               ? t("chat.generatingToolInput")
               : shellCommand !== null
                 ? <BashCommand command={shellCommand} limit={TOOL_PREVIEW_LENGTH} />
-                : (patchLabel ?? (codemode ? codemodeScriptPreview(codemode.code) : toolInputPreview(block.input, resultPatchPath)))}
+                : (patchLabel ?? (codemode ? codemodeScriptPreview(codemode.code) : toolInputPreview(block.input, resultPatchPath, block.toolName)))}
           </span>
           {shellBackground && (
             <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>(background)</span>
@@ -1366,8 +1418,11 @@ function ToolCallBlock({ block, result, duration, cwd, onOpenFile, onOpenSubagen
               {codemodeCallCount === 1 ? t("codemode.callCountOne") : t("codemode.callCount", { count: codemodeCallCount })}
             </span>
           )}
-          {duration !== undefined && (
+          {duration !== undefined ? (
             <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{formatToolDuration(duration)}</span>
+          ) : clock && (
+            // Keyed by the start: a reconnect's replayed start gives a new one, and a stale tick would count from it.
+            <ToolClockTime key={"startedAt" in clock ? clock.startedAt : "ended"} clock={clock} />
           )}
           {readSnapshot ? (
             // The panel's own outline: this click moves the content sideways, it
@@ -1395,7 +1450,7 @@ function ToolCallBlock({ block, result, duration, cwd, onOpenFile, onOpenSubagen
       </div>
 
       {/* ── Expanded: input args (only when no richer view exists); a codemode script in place of its JSON ── */}
-      {showBody && (isStreamingInput || !isEditTool) && !patchFiles && (
+      {showBody && (isStreamingInput || !isEditTool || (!result && !notRun && !editPreview)) && !patchFiles && (
         toolFields ? (
           <div
             style={{
@@ -1439,6 +1494,13 @@ function ToolCallBlock({ block, result, duration, cwd, onOpenFile, onOpenSubagen
 
       {/* ── Result images — always visible, independent of the collapsed details ── */}
       {resultImages.length > 0 && <ResultImages images={resultImages} isError={isError} />}
+
+      {/* ── Expanded: a pending edit's diff, from its arguments ── */}
+      {editPreview && (
+        <div style={{ borderTop: "1px solid rgba(34,197,94,0.15)", background: "var(--bg)" }}>
+          <SplitFilesView files={editPreview} />
+        </div>
+      )}
 
       {/* ── Expanded: applied-patch split diff ── */}
       {showBody && patchFiles && (
@@ -2160,10 +2222,12 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
   const time = formatTime(message.timestamp);
 
   const copyContent = () => {
+    // A refused copy is silent: no "Copied", and the rejection is handled
+    // so it never surfaces as an unhandled one (lib/clipboard.ts).
     copyText(text || detailsText).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    });
+    }, () => {});
   };
 
   // One card per report: the report's own custom type picks the body, its own `details` rides

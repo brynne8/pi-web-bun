@@ -1,6 +1,8 @@
+import type { Provider } from "@earendil-works/pi-ai";
 import {
   createMcpExtension,
   getPackageDir,
+  type InlineExtension,
   type LoadedMcpConfig,
   type McpExposure,
   type McpExtensionOptions,
@@ -46,7 +48,8 @@ const MEMBERS = {
   getMcpToolExposure: { module: "mcpServers", kind: "function" },
   signInMcpServer: { module: "mcpOAuth", kind: "function" },
   McpOAuthCredentialStore: { module: "mcpOAuth", kind: "class" },
-  McpSignInCancelledError: { module: "mcpOAuth", kind: "class" },
+  // pi 1.5.1 moved it to pi-mcp/oauth; runtime.js re-exports the class oauth.js throws.
+  McpSignInCancelledError: { module: "mcpRuntime", kind: "class" },
   resolveConfigValueOrThrow: { module: "configValues", kind: "function" },
   resolveHeadersOrThrow: { module: "configValues", kind: "function" },
   getConfigValueEnvVarNames: { module: "configValues", kind: "function" },
@@ -62,8 +65,6 @@ export type McpOAuthCredentialStore = NonNullable<McpExtensionOptions["credentia
 /** One server's slice of the credential store. */
 export type McpOAuthServerStore = ReturnType<McpOAuthCredentialStore["forServer"]>;
 
-/** pi-mcp's `McpOAuthStateStore`, which sign-in reads and writes. */
-export type McpOAuthStateStore = Pick<McpOAuthServerStore, "load" | "save">;
 
 /** pi-mcp's `StdioTransportOptions`. */
 export interface StdioTransportOptions {
@@ -185,7 +186,8 @@ export interface McpSignInPrompt {
 
 export interface McpSignInOptions {
   serverUrl: string;
-  store: McpOAuthStateStore;
+  /** Sign-in refreshes stored tokens under the store's refresh lock first (pi 1.5.1). */
+  store: McpOAuthServerStore;
   settings: McpOAuthSettings;
   challenge?: McpOAuthChallenge;
   prompt: McpSignInPrompt;
@@ -335,6 +337,17 @@ function resolvedSdkPackageDir(cwd: string): string {
   if (!manifestPath) throw new Error(`cannot resolve ${SDK_PACKAGE} from ${cwd}`);
   return realpathSync(join(manifestPath, ".."));
 }
+
+// The CLI's /llama command needs its TUI. Load just its provider for the web.
+export const llamaCppExtension: InlineExtension = {
+  name: "llama.cpp",
+  builtin: true,
+  async factory(pi) {
+    const path = join(resolvedSdkPackageDir(process.cwd()), "dist/extensions/llama/provider.js");
+    const { createLlamaProvider } = await importFile(path) as { createLlamaProvider(): { provider: Provider } };
+    pi.registerProvider(createLlamaProvider().provider);
+  },
+};
 
 async function importSdkModules(packageDir: string): Promise<LoadedModules | string> {
   const paths = Object.fromEntries(

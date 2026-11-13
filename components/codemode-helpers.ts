@@ -1,7 +1,6 @@
 import type {
   CodemodeInfo,
   CodemodeInlineBudgetInfo,
-  CodemodeInlineBudgetSetting,
   CodemodeMode,
   CodemodeModeInfo,
   CodemodePreference,

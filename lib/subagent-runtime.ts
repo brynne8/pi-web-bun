@@ -38,7 +38,7 @@ import type { SessionEntry, SessionInfo } from "./types";
 import type { DebugParentNotification, DebugSubagentRun } from "./debug-types";
 import { buildSubagentPromptPlan } from "./subagent-prompt";
 import { createSubagentSkillsBinding } from "./subagent-skills";
-import { projectTrustReloadOptions } from "./project-trust";
+import { getProjectTrustStatus } from "./project-trust";
 import { createSubagentCodemodeExtension, createSubagentMcpExtensions } from "./builtin-extensions";
 import type { McpHost } from "./mcp-host";
 import { createSubagentMcpPolicyExtension } from "./mcp-read-only-policy";
@@ -144,6 +144,14 @@ declare global {
 }
 const SUBAGENT_CONTEXT_LIMIT = 50_000;
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+/**
+ * A run prompts the SDK session its wrapper held at dispatch. The wrapper is idle while the run
+ * waits in the queue, and one closed meanwhile (a project trust rebuild; the idle timer spares a
+ * session with a run in the map) has disposed it: pi then persists none of the run's messages and
+ * `lastAssistantStop()` reads no error, so a failed request read as completed with no output (#1590).
+ */
+const CLOSED_BEFORE_RUN = "Subagent session was closed before its run started. Start a new subagent instead.";
 
 const TURN_LIMIT_INSTRUCTION = "You have reached your turn limit. You no longer have access to any tools. Answer now from the context you already have: your final answer or report, in full.";
 /** Sent when the tool-less wrap-up turn produced no words at all, for one more attempt. */
@@ -623,7 +631,13 @@ export function createSubagentController(
       const turnLimit = profile.maxTurns;
 
       const agentDir = getAgentDir();
-      const settingsManager = SettingsManager.create(childCwd, agentDir);
+      // The child runs on the decision its own folder resolves, as pi's `--approve` /
+      // `--no-approve` decide a run: read once here, never written. Created trusted by
+      // default, a child that loads no resources read the project settings of a folder
+      // never trusted; an isolated run's throwaway worktree has no decision of its own,
+      // so `getProjectTrustStatus()` takes the one its repository has.
+      const projectTrusted = getProjectTrustStatus(childCwd, agentDir).trusted;
+      const settingsManager = SettingsManager.create(childCwd, agentDir, { projectTrusted });
       const inheritedParentContext = inheritContext
         ? `The following is the active conversation context from the parent session. Use it only as background for the delegated task:\n${parentContextText(parent)}`
         : undefined;
@@ -701,9 +715,6 @@ export function createSubagentController(
             : {}),
           appendSystemPrompt,
         },
-        ...((profile.loadExtensions || profile.loadSkills || codemodeEnabled || mcpEnabled)
-          ? { resourceLoaderReloadOptions: projectTrustReloadOptions(childCwd, agentDir) }
-          : {}),
       });
 
       if (codemodeEnabled && !services.resourceLoader.getExtensions().extensions.some((extension) => extension.tools.has("codemode"))) {
@@ -854,6 +865,7 @@ export function createSubagentController(
         try {
           // A profile's `mcp: on` connects this child's own mcp.json servers before
           // its first prompt (the parent's host does not cover a child).
+          if (childSession && !childSession.isAlive()) throw new Error(CLOSED_BEFORE_RUN);
           await prepareChildMcp(childSession, stored);
           // The skill catalog goes out as its own turn, ahead of the task. Left in the
           // `<skills>` system-prompt section it is skipped, and the agent then guesses a
@@ -1039,6 +1051,7 @@ export function createSubagentController(
       );
       let result: SubagentRunInfo;
       try {
+        if (!wrapper!.isAlive()) throw new Error(CLOSED_BEFORE_RUN);
         await prepareChildMcp(wrapper, stored);
         // The run that ended at its limit told the child it had no tools, and that line stays in
         // its transcript. Say the tools are back before the task, or the model reads its own

@@ -56,6 +56,23 @@ function runHandleSessionDeleted(capturedSelectedSession, active) {
   return state;
 }
 
+test("an extension's session end leaves the session and closes only its panel", () => {
+  assert.match(source, /onSessionEnded=\{handleSessionEnded\}/);
+  const start = source.indexOf("  const handleSessionEnded = useCallback");
+  const end = source.indexOf("  // One session, one chat", start);
+  const state = { deleted: [], closed: [] };
+  const context = vm.createContext({
+    useCallback: (callback) => callback,
+    handleSessionDeleted: (id) => state.deleted.push(id),
+    handleCloseFileTab: (id) => state.closed.push(id),
+  });
+  runStripped(`${source.slice(start, end)}
+    handleSessionEnded("side-session");
+  `, context);
+  assert.deepEqual(state.deleted, ["side-session"]);
+  assert.deepEqual(state.closed, ["agent:side-session"]);
+});
+
 test("a delete completing after the user navigated away keeps the new chat", () => {
   const deleting = { id: "gone-session", cwd: "/project-a", projectKey: "/project-a" };
   const navigatedTo = { id: "next-session", cwd: "/project-b", projectKey: "/project-b" };

@@ -218,6 +218,40 @@ export function replaceLinksWithMarkdown(
   return replaced ? result + text.slice(searchFrom) : null;
 }
 
+/**
+ * The composer's auto-grow step: fit the text to 200 px, then let a scrollbar
+ * appear only when the text is still taller than the box.
+ *
+ * The height comes from the value, not from scrollHeight: a wrapped
+ * placeholder counts toward scrollHeight too, so an empty box would grow to
+ * its own hint's lines. Only typed text scrolls, so a placeholder that
+ * overflows the box stays cut off instead of showing a scrollbar.
+ *
+ * The "auto" step clamps scrollTop to 0, so the scroll the browser gave the
+ * caret is captured first and restored last.
+ */
+export function autoGrowTextarea(ta: HTMLTextAreaElement): void {
+  // The "auto" step fits the whole text, which clamps scrollTop to 0; keep the
+  // scroll the browser gave the caret (typing at the end had already scrolled
+  // it into view), or the capped height hides the caret again.
+  const scrollTop = ta.scrollTop;
+  ta.style.height = "auto";
+  ta.style.height = `${ta.value ? Math.min(ta.scrollHeight, 200) : ta.clientHeight}px`;
+  ta.style.overflowY = ta.value && ta.scrollHeight > ta.clientHeight ? "auto" : "hidden";
+  ta.scrollTop = scrollTop;
+}
+
+/**
+ * A programmatic value change (history restore, draft restore, follow-up
+ * prepend, pasted markdown) moves the caret without a native edit, so nothing
+ * scrolls it into view. A textarea cannot report its caret's pixel position,
+ * so only the common case is handled: a caret at the very end scrolls an
+ * overflowing box to its bottom.
+ */
+export function scrollTextareaCaretIntoView(ta: HTMLTextAreaElement): void {
+  if (ta.selectionEnd === ta.value.length) ta.scrollTop = ta.scrollHeight;
+}
+
 function getVisibleTopBoundary(element: HTMLElement): number {
   let visibleTop = window.visualViewport?.offsetTop ?? 0;
 
@@ -277,18 +311,6 @@ const THINKING_LEVEL_DESC_KEYS: Record<typeof THINKING_LEVELS[number], string> =
   auto: "chat.thinkingUseDefault", off: "chat.thinkingOff", minimal: "chat.thinkingMinimal", low: "chat.thinkingLow",
   medium: "chat.thinkingMedium", high: "chat.thinkingHigh", xhigh: "chat.thinkingXhigh", max: "chat.thinkingMax",
 };
-
-/** The composer's auto-grow step: fit one to 200 px, then only let a scrollbar
-    appear when the text is still taller than that. */
-export function autoGrowTextarea(ta: HTMLTextAreaElement): void {
-  ta.style.height = "auto";
-  // A wrapped placeholder counts toward scrollHeight, so an empty box grows to
-  // its own hint's lines. It keeps the height CSS gives it instead.
-  ta.style.height = `${ta.value ? Math.min(ta.scrollHeight, 200) : ta.clientHeight}px`;
-  // Only typed text scrolls: a placeholder that overflows the box stays cut off,
-  // so an empty composer never shows a scrollbar.
-  ta.style.overflowY = ta.value && ta.scrollHeight > ta.clientHeight ? "auto" : "hidden";
-}
 
 function formatTokenCount(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
@@ -732,6 +754,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const [historyActiveIndex, setHistoryActiveIndex] = useState(0);
   const [builtinCommandPending, setBuiltinCommandPending] = useState(false);
   const builtinCommandPendingRef = useRef(false);
+  const builtinCommandFocusRef = useRef<HTMLTextAreaElement | null>(null);
   const [fileIndex, setFileIndex] = useState<{ cwd: string; entries: FileIndexEntry[]; truncated: boolean } | null>(null);
   const [fileIndexLoading, setFileIndexLoading] = useState(false);
   const [atServerResult, setAtServerResult] = useState<{ cwd: string; query: string; matches: FileIndexEntry[] } | null>(null);
@@ -806,6 +829,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         if (!ta) return;
         ta.focus();
         autoGrowTextarea(ta);
+        scrollTextareaCaretIntoView(ta);
       });
     },
     replaceMessage(message: UserMessage) {
@@ -828,6 +852,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         if (!ta) return;
         ta.focus();
         autoGrowTextarea(ta);
+        scrollTextareaCaretIntoView(ta);
       });
     },
     prependText(text: string) {
@@ -845,6 +870,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         ta.focus();
         ta.setSelectionRange(combined.length, combined.length);
         autoGrowTextarea(ta);
+        scrollTextareaCaretIntoView(ta);
       });
     },
     rekeyDraft(previousKey: string, nextKey: string) {
@@ -940,6 +966,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         ta.focus();
         ta.setSelectionRange(ta.value.length, ta.value.length);
         autoGrowTextarea(ta);
+        scrollTextareaCaretIntoView(ta);
       });
     },
     // The caret goes after a draft that came back, so typing continues it.
@@ -1083,9 +1110,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const resizeTextarea = useCallback(() => {
     const ta = textareaRef.current;
     if (!ta) return;
-    ta.style.height = "auto";
     if (ta.value) autoGrowTextarea(ta);
-    else ta.style.overflowY = "hidden";
+    else {
+      ta.style.height = "auto";
+      ta.style.overflowY = "hidden";
+    }
   }, []);
 
   useLayoutEffect(resizeTextarea, [value, fontSize, uiFontFamily, uiWeight, resizeTextarea]);
@@ -1129,9 +1158,28 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     };
   }, []);
 
+  useLayoutEffect(() => {
+    if (builtinCommandPending) {
+      const cancelRestore = (event: PointerEvent) => {
+        if (event.target !== builtinCommandFocusRef.current) builtinCommandFocusRef.current = null;
+      };
+      document.addEventListener("pointerdown", cancelRestore, true);
+      return () => document.removeEventListener("pointerdown", cancelRestore, true);
+    }
+    const textarea = builtinCommandFocusRef.current;
+    builtinCommandFocusRef.current = null;
+    // Disabling the fieldset blurs its editor. Wait for the enabling commit,
+    // and leave focus alone if the command or the user moved it elsewhere.
+    if (textarea?.isConnected && document.activeElement === document.body
+      && !document.querySelector('[aria-modal="true"]')) {
+      textarea.focus({ preventScroll: true });
+    }
+  }, [builtinCommandPending]);
+
   const runBuiltinCommand = useCallback(async (msg: string): Promise<boolean> => {
     if (attachedImages.length || !msg.startsWith("/") || !onBuiltinCommand) return false;
     if (builtinCommandPendingRef.current) return true;
+    builtinCommandFocusRef.current = document.activeElement === textareaRef.current ? textareaRef.current : null;
     builtinCommandPendingRef.current = true;
     setBuiltinCommandPending(true);
     try {
@@ -1341,6 +1389,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       ta.focus();
       ta.setSelectionRange(text.length, text.length);
       autoGrowTextarea(ta);
+      scrollTextareaCaretIntoView(ta);
     });
   }, []);
 
@@ -1644,6 +1693,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     requestAnimationFrame(() => {
       ta.focus();
       ta.setSelectionRange(start + markdown.length, start + markdown.length);
+      scrollTextareaCaretIntoView(ta);
     });
   }, [processImageFiles, updateAtQuery]);
 
