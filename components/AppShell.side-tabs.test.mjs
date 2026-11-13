@@ -10,7 +10,7 @@ const start = source.indexOf("  const sideTabOwner = activeSessionFamily?.root.i
 const end = source.indexOf("  // sessionStorage is empty during SSR.", start);
 assert.ok(start !== -1 && end > start);
 const effect = source.slice(start, end);
-const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
+const jiti = createJiti(import.meta.url, { tsconfigPaths: true , tryNative: false });
 const { restoreSideTabs, sideTabsKey } = await jiti.import("./side-tab-state.ts");
 const { sideChatTitle } = await jiti.import("../lib/session-family.ts");
 

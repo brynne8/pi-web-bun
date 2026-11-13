@@ -58,7 +58,7 @@ function put(body, query = "", headers = { host: "localhost", "Content-Type": "a
  * process of its own, where the symbol is always empty.
  */
 async function withoutSandboxResult(t) {
-  const key = Symbol.for("pi-web.codemodeSandbox");
+  const key = Symbol.for("pi-web.codemodeSandboxCheck");
   const previous = globalThis[key];
   delete globalThis[key];
   t.after(() => {

@@ -5,6 +5,11 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
 
+// The fetch stub a test installs must not answer another file's requests: the suite
+// shares one process, so put the real one back when this file is done.
+const realFetch = globalThis.fetch;
+test.after(() => { globalThis.fetch = realFetch; });
+
 // A `!` command typed in the composer (`executeBash()`): its `user_bash`
 // handlers may ask through a dialog, which reaches the page only through the
 // session's event stream, and a handler that throws is one notice, the runner's.

@@ -6,7 +6,7 @@ import vm from "node:vm";
 import { createJiti } from "jiti";
 
 const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
-const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
+const jiti = createJiti(import.meta.url, { tsconfigPaths: true , tryNative: false });
 const draftStore = await jiti.import("@/lib/draft-store");
 
 function callbackBody(name, nextName) {

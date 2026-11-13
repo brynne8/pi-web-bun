@@ -7,6 +7,8 @@ import { createJiti } from "jiti";
 const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
+
+  tryNative: false,
 });
 const { AnsiText } = await jiti.import("./AnsiText.tsx");
 

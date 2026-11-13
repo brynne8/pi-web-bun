@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createJiti } from "jiti";
 
-const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
+const jiti = createJiti(import.meta.url, { tsconfigPaths: true , tryNative: false });
 const state = await jiti.import("./debug-panel-state.ts");
 const { enLocale } = await jiti.import("@/lib/i18n/messages/en.ts");
 const { interpolateMessage } = await jiti.import("@/lib/i18n/format.ts");

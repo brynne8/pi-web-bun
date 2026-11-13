@@ -5,6 +5,11 @@ import { createRequire } from "node:module";
 import { realpathSync } from "node:fs";
 import { createJiti } from "jiti";
 
+// The fetch stub a test installs must not answer another file's requests: the suite
+// shares one process, so put the real one back when this file is done.
+const realFetch = globalThis.fetch;
+test.after(() => { globalThis.fetch = realFetch; });
+
 // An extension's sendMessage({ display: true }) while no run goes: the page
 // reads the branch's newest entries and appends them after its window, keeping
 // the pages the reader loaded above, instead of putting back the newest window.

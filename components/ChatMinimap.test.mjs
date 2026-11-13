@@ -25,6 +25,8 @@ if (typeof registerHooks === "function") {
 const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
+
+  tryNative: false,
 });
 const { AssistantOutline, AssistantTextPreview, countToolCalls } = await jiti.import("./ChatMinimap.tsx");
 const { loadKatexPlugin } = await jiti.import("../lib/markdown-katex.ts");

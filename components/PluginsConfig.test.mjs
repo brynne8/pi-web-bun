@@ -5,6 +5,8 @@ import { createJiti } from "jiti";
 const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
+
+  tryNative: false,
 });
 const { filteredPackagesKeptOn, packagesToSwitch } = await jiti.import("./PluginsConfig.tsx");
 

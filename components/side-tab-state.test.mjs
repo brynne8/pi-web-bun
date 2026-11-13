@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createJiti } from "jiti";
 
-const { appendSideTab, restoreSideTabs, sideTabsKey } = await createJiti(import.meta.url, { tsconfigPaths: true }).import("./side-tab-state.ts");
+const { appendSideTab, restoreSideTabs, sideTabsKey } = await createJiti(import.meta.url, { tsconfigPaths: true , tryNative: false }).import("./side-tab-state.ts");
 
 const sessions = [
   { id: "side-a", projectKey: "/same", relation: { kind: "side", parentSessionId: "main-a" } },

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createJiti } from "jiti";
 
-const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
+const jiti = createJiti(import.meta.url, { tsconfigPaths: true , tryNative: false });
 const {
   EMPTY_MCP_ADD_DRAFT,
   MCP_ADD_EXAMPLES,

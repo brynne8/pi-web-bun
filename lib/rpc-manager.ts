@@ -1659,16 +1659,14 @@ export class AgentSessionWrapper {
           // unanswered one comes back to the composer with its branch (pi's CLI leaves it in the
           // transcript). A queued message keeps its prompt where it is, since its author meant a
           // further run and that prompt was answered as far as it was going to be.
+          if (queued.steering.length > 0 || queued.followUp.length > 0) {
+            await this.restoreQueuedCustomMessages(queuedCustomMessages, false);
+            return { queuedMessages: queued };
+          }
           const retractedPrompt = await this.retractUnansweredPrompt(leafAtStop).catch(() => null);
-          await this.restoreQueuedCustomMessages(
-            queuedCustomMessages,
-            queued.steering.length === 0 && queued.followUp.length === 0,
-          );
-          if (queued.steering.length === 0 && queued.followUp.length === 0 && !retractedPrompt) return null;
-          return {
-            queuedMessages: queued,
-            ...(retractedPrompt ? { retractedPrompt } : {}),
-          };
+          await this.restoreQueuedCustomMessages(queuedCustomMessages, !retractedPrompt);
+          if (!retractedPrompt) return null;
+          return { queuedMessages: queued, retractedPrompt };
         } finally {
           this.releaseForcedShutdownOnceStopped();
         }

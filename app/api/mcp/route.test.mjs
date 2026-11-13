@@ -200,7 +200,7 @@ test("Code mode reports the global preference and a self-test nobody has run yet
   // and Bun runs every file of the suite in one process — so a session an earlier
   // file started may already have settled it. Node's runner gives each file a
   // process of its own, where the symbol is always empty.
-  const sandboxKey = Symbol.for("pi-web.codemodeSandbox");
+  const sandboxKey = Symbol.for("pi-web.codemodeSandboxCheck");
   const previousSandbox = globalThis[sandboxKey];
   delete globalThis[sandboxKey];
   t.after(() => {
