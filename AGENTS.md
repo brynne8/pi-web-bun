@@ -174,6 +174,8 @@ lib/
   new-session-context.ts    client-safe: what the project/worktree pickers show (project, worktrees, project list), lag-safe contextForCwd, the directory a group's + and Open in new tab use
   bash-highlight.ts         tokenizeBash(): shell scanner behind the tool card's command
   project-command-env.ts    the registered bash tool: project env, the timeout sanitizer, background wiring
+  bash-command-cd.ts        stripWorkingDirectoryCd(): a leading `cd <cwd> &&` off a shell command
+  bash-command-normalize.ts takes that `cd` off at message_end, so file, run, model history and card agree
   bash-bg-tasks.ts          opt-in background bash: the 120 s handoff, per-session log directories, live tasks per session
   bg-task-registry.ts       globalThis registry of live background tasks: list, promote, output clock, stop, session teardown
   bg-task-status.ts         a task's row state (running/stopping/stopped/succeeded/failed/signal) from its outcome

@@ -75,6 +75,7 @@ import { mcpPromptPreparation, type McpCommandCandidate } from "./mcp-command";
 import { createReadOnlyMcpPolicyExtension, createSubagentMcpPolicyExtension } from "./mcp-read-only-policy";
 import { createOmitEmptyToolsExtension } from "./omit-empty-tools";
 import { createStrictToolArgsExtension } from "./tool-args-strict";
+import { createBashCommandNormalizeExtension } from "./bash-command-normalize";
 import { createSubagentCompactionGuardExtension } from "./subagent-compaction-guard";
 import { createSubagentSkillsBinding } from "./subagent-skills";
 import { isNestedToolExecutionEvent } from "./agent-event-wire";
@@ -3754,6 +3755,10 @@ export async function startRpcSession(
                 cwd: sessionCwd,
                 settings: settingsManager,
                 ...(isBgTasksEnabled() ? { bgTasks: { notify: BG_TASK_NOTIFIER.notify } } : {}),
+              }),
+              createBashCommandNormalizeExtension({
+                cwd: sessionCwd,
+                caseInsensitivePaths: process.platform === "win32",
               }),
               createPendingNotificationsExtension({
                 hasLiveBackgroundWork: (sessionId) =>
