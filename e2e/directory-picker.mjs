@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, realpathSync, symlinkSync } from "node:fs";
 import { join, sep } from "node:path";
 import { showSidebarFiles } from "./sidebar.mjs";
+import { newTestContext } from "./browser.mjs";
 
 /** Two sibling folders with distinct children, outside every session's cwd. */
 export function createDirectoryPickerFixtures(agentDir) {
@@ -25,9 +26,14 @@ export function createDirectoryPickerFixtures(agentDir) {
   };
 }
 
-/** Its own context: the refused path's 404 is a console error the main pages count. */
+/**
+ * Its own context: the refused path's 404 is a console error the main pages
+ * count. `newTestContext` blocks service workers: once `/sw.js` claims the
+ * page, its requests never reach `page.route()`, so the browse a step below
+ * holds would answer anyway and Select would commit before Cancel is clicked.
+ */
 export async function checkDirectoryPicker({ browser, base, fixture }) {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: "en-US" });
+  const context = await newTestContext(browser, { viewport: { width: 1280, height: 800 }, locale: "en-US" });
   const errors = [];
   context.on("page", (page) => {
     page.on("pageerror", (error) => errors.push(error.message));
