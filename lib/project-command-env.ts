@@ -344,18 +344,24 @@ export function createProjectCommandBashExtension(options: {
       const displayDefinition = createBashToolDefinition(options.cwd);
       // One rule per line, its subject first: this description is the only place the tool says
       // how to be used, and rules written as one run-on paragraph are rules the model skips.
+      // The path sits only with `is`, never with a verb of execution: `Execute … in <path>` is the
+      // shape a model turns into `cd <path> &&`, which is what the next line forbids.
       const descriptionLines = [
-        `Execute a bash command in \`${options.cwd}\`.`,
-        "Already in that directory: `cd` only to enter a subdirectory.",
-        `Returns stdout and stderr, cut to the last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever comes first); full output goes to a temp file.`,
-        "Optionally provide a timeout in seconds.",
+        `Executes a bash command and returns its output: the last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB of stdout and stderr, with the full output in a temp file.`,
+        `The working directory is \`${options.cwd}\`.`,
+        "Never prepend `cd <cwd>` to any real command you need to run.",
       ];
       if (bg) {
         descriptionLines.push(
-          "Bound the command to see less (`git log --oneline -20`, `find . -maxdepth 2`); never `| tail`, `>` or `>>` — they end the output early and save nothing.",
-          `A long-running command: run_in_background=true. A foreground command hands off to the background after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000} seconds and reports back when it finishes.`,
+          "Bound the command to see less (`git log --oneline -20`, `find . -maxdepth 2`); never `| tail`, `>` or `>>` — they cut the output short and save nothing.",
         );
       }
+      // The parameters come last, so the rules for writing the command are read first.
+      descriptionLines.push(
+        bg
+          ? `\`timeout\` caps the run in seconds; \`run_in_background=true\` starts it detached, and a foreground command hands off to the background after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000} seconds.`
+          : "`timeout` caps the run in seconds.",
+      );
       const description = descriptionLines.join("\n");
       pi.registerTool({
         ...displayDefinition,
