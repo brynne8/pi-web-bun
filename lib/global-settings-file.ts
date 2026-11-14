@@ -17,9 +17,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function parseSettings(path: string): Record<string, unknown> {
   if (!existsSync(path)) return {};
+  // As pi's SettingsManager reads it: an empty file is no settings, and a
+  // byte-order mark (Notepad, Windows PowerShell 5.1's UTF-8) is not JSON.
+  const text = readFileSync(path, "utf8").replace(/^\uFEFF/, "");
+  if (!text) return {};
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(path, "utf8"));
+    parsed = JSON.parse(text);
   } catch (error) {
     // The file is pi's own, and pi reads it too: it stays where it is, so pi
     // keeps reporting the same failure and the user can repair it by hand.

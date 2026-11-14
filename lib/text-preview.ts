@@ -43,7 +43,9 @@ export function readTextPreviewChunk(
   const buffer = Buffer.alloc(length);
   const descriptor = fs.openSync(filePath, "r");
   let bytesRead: number;
+  const header = Buffer.alloc(2);
   try {
+    fs.readSync(descriptor, header, 0, 2, 0);
     bytesRead = fs.readSync(descriptor, buffer, 0, length, offset);
   } finally {
     fs.closeSync(descriptor);
@@ -65,7 +67,15 @@ export function readTextPreviewChunk(
   // Preview tab, since a truncated file is only partly loaded. Trust the read.
   const atEof = bytesRead < length;
   let end = Math.min(bytesRead, TEXT_PREVIEW_MAX_BYTES);
-  if (!atEof && offset + end < fileSize) {
+  const utf16 = header[0] === 0xff && header[1] === 0xfe ? "utf-16le"
+    : header[0] === 0xfe && header[1] === 0xff ? "utf-16be" : null;
+  // A short read is the end of the data (see `atEof` above), so a boundary that
+  // no more data follows needs no trimming: there is no next chunk to join.
+  if (utf16 && !atEof && offset + end < fileSize) {
+    end -= end % 2;
+    const last = utf16 === "utf-16le" ? buffer.readUInt16LE(end - 2) : buffer.readUInt16BE(end - 2);
+    if (last >= 0xd800 && last <= 0xdbff) end -= 2;
+  } else if (!utf16 && !atEof && offset + end < fileSize) {
     let sequenceStart = end;
     while (sequenceStart > end - 3 && (buffer[sequenceStart] & 0xc0) === 0x80) {
       sequenceStart--;
@@ -77,7 +87,9 @@ export function readTextPreviewChunk(
   const nextOffset = offset + end;
 
   return {
-    content: buffer.toString("utf8", 0, end),
+    content: utf16
+      ? new TextDecoder(utf16, { ignoreBOM: true }).decode(buffer.subarray(offset === 0 ? 2 : 0, end))
+      : buffer.toString("utf8", 0, end),
     nextOffset,
     truncated: !atEof && nextOffset < fileSize,
     size: atEof ? nextOffset : fileSize,

@@ -33,7 +33,7 @@
 - **Git worktree**：从侧边栏切换 checkout，同时把同一仓库不同 worktree 的会话归在一起。
 - **网页配置**：无需离开 Pi Web，即可管理 Provider 登录和 API Key、模型、模型测试、插件包及技能。
 - **Code mode 默认开着，设置单占一页**：Code mode 的选项、模式、工具列表预算和沙箱都在「设置 › 工具」里，旁边就是当前会话可用的工具名。
-- **英文、简体中文和繁体中文界面**：Pi Web 首次打开时跟随浏览器语言，也可在**设置 › 常规**里切换语言。
+- **英文、简体中文和繁体中文界面**：Pi Web 首次打开时跟随浏览器语言，也可在**设置 › 常规 › 语言**里切换语言。
 
 ## Bun 安装
 
@@ -238,8 +238,12 @@ pi-web update [--check] # 更新全局 npm 安装
 | `--hostname <主机>`、`-H <主机>` 或 `PI_WEB_HOSTNAME` | 监听主机名 | `127.0.0.1` |
 | `--no-open` 或 `PI_WEB_NO_OPEN=1` | 不自动打开浏览器 | 自动打开 |
 | `PI_WEB_APP_NAME` | PWA manifest 的 `name` 和 `short_name`；去除首尾空白，空值使用默认值 | `Pi Web` |
+| `PI_WEB_SKIP_VERSION_CHECK=1` | 关闭 Pi Web 的更新检查 | 未设置 |
 | `PI_WEB_ALLOWED_HOSTS` | 额外允许的代理或自定义主机名，多个值用逗号分隔，必须精确匹配 | 未设置 |
 | `PI_WEB_PASSWORD` | 启用浏览器密码登录；API 客户端可使用用户名为 `pi` 的 Basic Auth | 不启用认证 |
+| `PI_WEB_IDLE_TIMEOUT_MS` | 会话空闲超时，单位毫秒，最大 `2147483647`；`0` 表示不因空闲关闭会话；无效或超出范围的值使用默认值 | `600000`（10 分钟） |
+| `PI_WEB_SHUTDOWN_DEADLINE_MS` | 关闭会话时留给扩展处理 `session_shutdown` 的时间，到时仍会释放会话；单位毫秒，最大 `2147483647`；`0`、无效或超出范围的值使用默认值 | `5000`（5 秒） |
+| `PI_CODEMODE_MAX_WORKERS` | pi 同时运行 codemode 脚本的上限，由服务器里所有会话和 subagent 共用；pi 自身默认是 `2`，变量未设置或为空时 pi-web 设为 `8`。每个脚本最多可用 256 MB | `8` |
 
 在启动服务前设置 `PI_WEB_APP_NAME`，例如 `PI_WEB_APP_NAME='工作 Pi' pi-web`。修改后重启服务即可提供新的 manifest，无需重新构建。已安装 PWA 的名称更新由浏览器管理，不保证立即生效；此设置不改变页面标题或图标。
 
@@ -259,6 +263,8 @@ PI_WEB_PASSWORD='足够长的随机密码' pi-web --hostname 0.0.0.0
 ```
 
 密码认证不会加密连接。不要通过明文 HTTP 将 Pi Web 暴露到互联网；远程访问应使用可信反向代理提供 HTTPS，或通过可信 VPN。如果反向代理传递外部主机名，请把该名称精确加入 `PI_WEB_ALLOWED_HOSTS`。这个白名单不会改变 Pi Web 的监听地址。
+
+同时开着很多活跃的会话、终端或文件预览时，明文 HTTP 下浏览器最多只有六个连接，请求会开始排队；见 [Serving Pi Web over HTTP/2](./http2.md)。
 
 ### Docker
 
@@ -290,44 +296,10 @@ pi-web
 
 - **智能体数据**：Pi Web 默认读取 `~/.pi/agent` 下的 pi 数据，包括 `sessions/<编码后的工作目录>/<时间戳>_<uuid>.jsonl` 中的会话文件。可通过 `PI_CODING_AGENT_DIR` 指定其他 pi agent 目录。
 - **文件系统访问**：Pi Web 必须能读取智能体数据目录及会话记录中的工作目录。与现有 pi 会话共用数据时，请让 Pi Web 运行在与 pi 相同的文件系统环境中。
-- **共享配置**：模型面板使用 pi 的模型、设置和凭据存储，因此两种界面都能看到相关更改。
+- **共享配置**：模型面板使用 pi 的模型、设置和凭据存储，因此两种界面都能看到相关更改。已打开的会话要再次选择该模型，才会应用保存后的模型修改。
 - **文件访问边界**：文件浏览器仅能访问在 Pi Web 中选择过的工作目录，以及它已识别的项目或会话根目录；它不是通用的文件系统浏览器。
 - **Git worktree**：切换器何时显示、如何创建 worktree，以及删除会产生什么影响，见 [Pi Web 里的 Worktree](./worktrees.zh-CN.md)。
-
-### 下游的会话行右键菜单
-
-Electron 封装和其他下游集成可以不改 `SessionSidebar` 就提供会话行的右键菜单。监听可取消的 `pi-web:session-row-contextmenu` 浏览器事件，集成方要自己接管时同步调用 `preventDefault()`：
-
-```js
-window.addEventListener("pi-web:session-row-contextmenu", (event) => {
-  event.preventDefault();
-  const { id, path, cwd, name, clientX, clientY, refresh } = event.detail;
-
-  void openSessionMenu({ id, path, cwd, name, clientX, clientY }).then((changed) => {
-    if (changed) refresh();
-  });
-});
-```
-
-detail 对象里有 `id`、`path`、`cwd`、可选的 `name`、指针坐标，以及一个 `refresh()` 回调，给那些会改动会话列表的动作。没有监听者取消这个事件时，Pi Web 就在指针处打开自己内置的会话菜单（置顶、重命名、分叉、标为已读或未读、归档、在新标签页打开、删除），而不是浏览器的原生右键菜单。行上的 `⋯` 按钮永远打开内置菜单，也不派发这个事件。还没写进磁盘的会话没有内置菜单，因此它们仍然会出现原生菜单。这个钩子在浏览器一侧，和 Pi 的 agent 扩展无关。
-
-### 扩展的会话存活
-
-服务端的 Pi 扩展如果有脱离会话自己在跑的工作，可以通过带版本号的全局注册表阻止会话被自动闲置回收：
-
-```js
-const liveness = globalThis[Symbol.for("@agegr/pi-web/session-liveness/v1")];
-const release = liveness?.version === 1
-  ? liveness.register({
-      name: "my-extension",
-      sessionId,
-      sessionFile: sessionFile || undefined,
-      isActive: () => detachedJobs.size > 0,
-    })
-  : () => {};
-```
-
-每个活跃的扩展会话注册一次，并在会话关闭、被替换或重载时调用返回的那个幂等 `release`。`isActive` 必须同步、开销很小，并且只针对传给它的精确会话 id 或文件。提供商错误按保住该会话处理。这份租约只影响自动闲置回收；显式关闭和 Stop 的兜底清理仍然优先。
+- **集成接口**：嵌入 Pi Web 的应用可以替换会话行的右键菜单，服务端的 pi 扩展可以让会话不因空闲被关闭；见 [Integration Hooks](./integrations.md)。
 
 ## 开发
 

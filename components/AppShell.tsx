@@ -18,6 +18,7 @@ import type { ReadSnapshot } from "@/lib/read-snapshot";
 import type { BgTaskSummary } from "@/lib/bg-task-types";
 import { filterBgTasksBySession } from "@/lib/bg-task-filter";
 import { BgTaskOutputView } from "./BgTaskOutputView";
+import { AgentMiniStrip } from "./AgentMiniStrip";
 import { SessionChatPanel } from "./SessionChatPanel";
 // The terminal brings @xterm with it, which nothing on the first page needs:
 // its chunk loads when the first terminal tab mounts.
@@ -101,7 +102,7 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
 import { formatActiveDuration, formatCompactCount, formatCostShort } from "@/lib/session-stats-format";
 import type { FileViewerState } from "@/lib/file-viewer-state";
 import { PRESET_READ_ONLY, type ToolEntry } from "@/lib/tool-presets";
-import { countRunningSubagents, getSessionFamily, isHiddenRelation, sideChatTitle } from "@/lib/session-family";
+import { countRunningSubagents, getAgentStripMembers, getSessionFamily, isHiddenRelation, sideChatTitle } from "@/lib/session-family";
 import { getLastSettingsSection, settingsSectionRequiresProject, type SettingsSection } from "@/lib/settings-navigation";
 
 type SessionCopyField = "file" | "id" | "projectDir" | "gitBranch" | "gitWorktree";
@@ -227,6 +228,13 @@ export function AppShell() {
       return ids;
     });
   }, []);
+  // A subagent or side chat in the main chat gets the Agents strip under the toolbar (#1658):
+  // the way back to the main agent and every family member, so typing into a child never looks
+  // like talking to the parent. A chip does what the rail's Agents row does.
+  const agentStripMembers = useMemo(
+    () => getAgentStripMembers(activeSessionFamily, selectedSession?.id),
+    [activeSessionFamily, selectedSession?.id],
+  );
   // The temporary id distinguishes consecutive fresh composers in one cwd.
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
   const [newSessionDraftId, setNewSessionDraftId] = useState("initial");
@@ -2803,6 +2811,15 @@ export function AppShell() {
           )}
 
         </div>
+        {agentStripMembers && activeSessionFamily && selectedSession && (
+          <AgentMiniStrip
+            rootSession={activeSessionFamily.root}
+            members={agentStripMembers}
+            selectedSessionId={selectedSession.id}
+            runningSessionIds={runningSessionIds}
+            onSelectSession={handleSelectSession}
+          />
+        )}
         {isMobile && renderProjectTrustWarning(true)}
         </div>
 

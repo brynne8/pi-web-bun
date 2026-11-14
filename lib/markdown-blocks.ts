@@ -2,6 +2,8 @@ const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 const LIST_ITEM = /^(?:[*+-]|\d{1,9}[.)])(?:[ \t]|$)/;
 const HTML_TAG = /<[A-Za-z!/?]/;
 const INLINE_CODE = /`[^`]*`/g;
+// A link reference or footnote definition (`[guide]: https://…`, `[^1]: …`).
+const DEFINITION = /^ {0,3}\[[^\]]+\]:/;
 
 interface SplitState {
   fence: { marker: string; size: number } | null;
@@ -45,7 +47,9 @@ export interface MarkdownBlockSplit {
  * never inside a loose list or an indented continuation. Raw HTML may wrap
  * blank lines (`<details>`, an inline `<b>` left open), so nothing after the
  * first line with a tag outside inline code is split, nor is a document
- * opening with front matter. A rare miss only makes a block larger
+ * opening with front matter. A definition line outside a fence (`[guide]: …`,
+ * `[^1]: …`) keeps the whole message one block, since its references may sit
+ * in any other block. A rare miss only makes a block larger
  * or, at worst, renders one transiently apart while streaming: the finished
  * message is rendered whole.
  */
@@ -137,8 +141,16 @@ export function splitMarkdownBlocksIncremental(
       const marker = fenceMatch[1][0];
       const size = fenceMatch[1].length;
       if (!fence) fence = { marker, size };
-      else if (marker === fence.marker && size >= fence.size) fence = null;
+      else if (marker === fence.marker && size >= fence.size && /^[ \t]*\r?$/.test(line.slice(fenceMatch[0].length))) fence = null;
     } else if (!fence) {
+      // A definition line keeps the whole text one block (see above), and the
+      // checkpoint goes back to the start, so the next chunk splits it whole too.
+      if (DEFINITION.test(line)) {
+        return {
+          blocks: [markdown],
+          checkpoint: { source: markdown, lineCount: 0, sourceLines: [], blocks: [], current: [], state: initialSplitState },
+        };
+      }
       const prose = line.replace(INLINE_CODE, "");
       if (HTML_TAG.test(prose)) rawHtml = true;
       if ((prose.match(/\$\$/g)?.length ?? 0) % 2 === 1) inMath = !inMath;

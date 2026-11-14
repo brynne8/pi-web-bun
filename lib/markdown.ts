@@ -204,7 +204,7 @@ function normalizeLines(lines: string[], start: number, state: NormalizeState): 
       const marker = fenceMatch[1][0];
       const size = fenceMatch[1].length;
       if (!fence) fence = { marker, size };
-      else if (marker === fence.marker && size >= fence.size) fence = null;
+      else if (marker === fence.marker && size >= fence.size && /^[ \t]*$/.test(line.slice(fenceMatch[0].length))) fence = null;
       inlineCodeMarkerSize = 0;
       normalized.push(line);
       continue;
