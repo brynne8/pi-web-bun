@@ -336,6 +336,12 @@ export function bashToolPromptBlock(): string {
   ].join("\n");
 }
 
+/** The line budget actually armed: the model's own value, never below 100 lines. */
+function effectiveMaxOutputLines(value: number | undefined): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 1) return undefined;
+  return Math.max(Math.floor(value), 100);
+}
+
 export function createProjectCommandBashExtension(options: {
   cwd: string;
   settings: ProjectShellSettings;
@@ -377,7 +383,7 @@ export function createProjectCommandBashExtension(options: {
                 command: Type.String({ description: "Shell command to execute. Never pipe it through `| tail`; never redirect with `>` or `>>`." }),
                 timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
                 run_in_background: Type.Optional(Type.Boolean({ description: "Run this command in the background immediately; you will be notified when it completes." })),
-                max_output_lines: Type.Optional(Type.Number({ description: "Line count before the command goes to the background. Always set it unless you already know the output is short." })),
+                max_output_lines: Type.Optional(Type.Number({ description: "Line count before the command goes to the background; a lower value counts as 100. Always set it unless you already know the output is short." })),
               }),
             }
           : {}),
@@ -391,13 +397,14 @@ export function createProjectCommandBashExtension(options: {
           if (bg && input.run_in_background === true) {
             return startBackgroundCommand(options, input, context);
           }
+          const maxOutputLines = effectiveMaxOutputLines(input.max_output_lines);
           const executionDefinition = createBashToolDefinition(options.cwd, {
             commandPrefix: options.settings.getShellCommandPrefix(),
             operations: createProjectCommandBashOperations({
               shellPath: options.settings.getShellPath(),
               commandPrefix: options.settings.getShellCommandPrefix(),
               autoBackgroundMs: bg ? FOREGROUND_AUTO_BACKGROUND_MS : undefined,
-              maxOutputLines: input.max_output_lines,
+              maxOutputLines,
               bgTask: bg && context?.sessionManager
                 ? { sessionId: context.sessionManager.getSessionId(), notify: bg.notify }
                 : undefined,
@@ -409,7 +416,7 @@ export function createProjectCommandBashExtension(options: {
             if (error instanceof Error && error.message.startsWith("bg-task-backgrounded:")) {
               const [, reason, logPath] = error.message.split(":");
               const why = reason === "lines"
-                ? `after printing more than ${input.max_output_lines} lines`
+                ? `after printing more than ${maxOutputLines} lines`
                 : `after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000}s`;
               return {
                 content: [{ type: "text" as const, text: `Command auto-backgrounded ${why}.\nLog file: ${logPath}\nThe result arrives on its own when the command finishes — do not poll, sleep, check the log, or run any other command for it. Do other work that does not need it if you have any; if you have none, stop — no output, no commands — until it arrives. Stopping does not cancel the task.` }],
