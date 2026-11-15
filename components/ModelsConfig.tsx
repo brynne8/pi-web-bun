@@ -1752,7 +1752,10 @@ function ApiKeyDetail({ provider, onRefresh, enabledModels, contextSettings }: {
         <SecretTextInput
           value={apiKey}
           onChange={setApiKey}
-          onKeyDown={(e) => { if (e.key === "Enter") handleSave(); }}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+            if (e.key === "Enter") handleSave();
+          }}
           placeholder={llama ? t("models.optionalApiKey") : provider.configured ? t("models.replaceApiKey") : "sk-…"}
           style={{ flex: 1 }}
           autoComplete="off"

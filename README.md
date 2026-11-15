@@ -196,6 +196,8 @@ Useful on the first run; none of it needs configuring unless the entry says othe
 
 **An extension's colours and a command's colours are two sets.** What an extension prints is drawn in pi's own palette theme, in the terminal's light and dark values, so a coloured status, widget or custom panel reads the same on this design as under a chosen palette and stays legible in either theme. A shell command's output keeps its own colours, mixed toward the theme's ink so they sit inside the card instead of on top of it. Upstream colours those same extension calls ([the same way](https://github.com/agegr/pi-web/commit/da6d538a)) and has one set, because it prints no command output in colour. ([Note](./docs/agents/design.md#one-stylesheet-imported-last-appnew_designcss-applayouttsx))
 
+**Enter waits for an input method to finish.** Settings' API key field saves on Enter, which is also the key an input method spends confirming a candidate — the save used to land mid-composition and take the half-written key with it. The composing keystroke now goes to the input method, as it already does in the composer and the file viewer's find bar. Upstream saves on that key without checking whether a composition is open. ([Note](./docs/agents/models.md#an-input-methods-enter-in-the-api-key-field))
+
 ## Quick Start (upstream, Node.js)
 
 Pi Web requires Node.js 22.19.0 or newer. Check your version with `node --version`, then run:

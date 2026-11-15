@@ -2296,6 +2296,7 @@ function TextFileViewer({
             value={findQuery}
             onChange={(event) => setFindQuery(event.target.value)}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return;
               if (event.key === "Enter") {
                 event.preventDefault();
                 stepFind(event.shiftKey ? -1 : 1);
