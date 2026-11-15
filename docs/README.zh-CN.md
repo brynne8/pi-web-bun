@@ -341,7 +341,7 @@ e2e/             跑在 Apple WebKit 上的 Playwright 回归检查及其框架
 demo/            上游的静态演示站，为同步上游而保留；本 fork 不发布
 ```
 
-架构说明和详细文件地图见 [AGENTS.md](../AGENTS.md)。
+架构说明、API 路由和专题笔记见 [AGENTS.md](../AGENTS.md)。
 
 ## 许可证
 

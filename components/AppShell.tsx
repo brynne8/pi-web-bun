@@ -104,6 +104,9 @@ import type { FileViewerState } from "@/lib/file-viewer-state";
 import { PRESET_READ_ONLY, type ToolEntry } from "@/lib/tool-presets";
 import { countRunningSubagents, getAgentStripMembers, getSessionFamily, isHiddenRelation, sideChatTitle } from "@/lib/session-family";
 import { getLastSettingsSection, settingsSectionRequiresProject, type SettingsSection } from "@/lib/settings-navigation";
+import { sideChatHit } from "@/lib/session-search-hit";
+import { loadAgentStripLocked, saveAgentStripLocked } from "@/lib/agent-strip-lock";
+import { claimDoneChime } from "@/lib/done-chime";
 
 type SessionCopyField = "file" | "id" | "projectDir" | "gitBranch" | "gitWorktree";
 type AutoNameStatus =
@@ -184,8 +187,10 @@ export function AppShell() {
   // markers exclude ("already looking" — false while hidden). The favicon keeps
   // their badge until the tab is opened again; never persisted, never dotted.
   const [hiddenFinishedSessionIds, setHiddenFinishedSessionIds] = useState<Set<string>>(new Set());
-  const handleBackgroundTaskDone = useCallback(() => {
-    if (soundEnabledRef.current) playDoneSound();
+  // The page showing that session, or another page's sidebar, may have chimed
+  // for the same completion already (#1688).
+  const handleBackgroundTaskDone = useCallback((sessionIds: string[], since: number) => {
+    if (soundEnabledRef.current && claimDoneChime(sessionIds, since)) playDoneSound();
   }, [playDoneSound, soundEnabledRef]);
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // Latest selection readable from async callbacks whose captured state is
@@ -230,11 +235,18 @@ export function AppShell() {
   }, []);
   // A subagent or side chat in the main chat gets the Agents strip under the toolbar (#1658):
   // the way back to the main agent and every family member, so typing into a child never looks
-  // like talking to the parent. A chip does what the rail's Agents row does.
+  // like talking to the parent. A chip does what the rail's Agents row does. On the main agent
+  // only while this browser has it locked (the strip's own padlock).
+  const [agentStripLocked, setAgentStripLocked] = useState(loadAgentStripLocked);
   const agentStripMembers = useMemo(
-    () => getAgentStripMembers(activeSessionFamily, selectedSession?.id),
-    [activeSessionFamily, selectedSession?.id],
+    () => getAgentStripMembers(activeSessionFamily, selectedSession?.id, agentStripLocked),
+    [activeSessionFamily, selectedSession?.id, agentStripLocked],
   );
+  const handleToggleAgentStripLock = useCallback(() => {
+    const next = !agentStripLocked;
+    setAgentStripLocked(next);
+    saveAgentStripLocked(next);
+  }, [agentStripLocked]);
   // The temporary id distinguishes consecutive fresh composers in one cwd.
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
   const [newSessionDraftId, setNewSessionDraftId] = useState("initial");
@@ -1439,25 +1451,45 @@ export function AppShell() {
     handleOpenSubagentTab(sessionId, label, side);
   };
 
+  // A side chat's tab belongs to its parent's panel: opened here while the main
+  // chat shows that family, else saved with the parent, where the restore effect
+  // above finds it as the parent arrives. False when it waits there.
+  const openSideChatTab = useCallback((session: SessionInfo, label: string) => {
+    const parentId = session.relation?.kind === "side" ? session.relation.parentSessionId : null;
+    if (!parentId || parentId === sideTabOwnerRef.current) {
+      handleOpenSubagentTab(session.id, label, true);
+      return true;
+    }
+    try {
+      const key = sideTabsKey(parentId);
+      window.sessionStorage.setItem(key, appendSideTab(window.sessionStorage.getItem(key), session.id, label));
+    } catch { /* storage is optional */ }
+    return false;
+  }, [handleOpenSubagentTab]);
+
+  // A search hit in a side chat never picks it as the main chat (ADR 0007): its
+  // parent opens with the side chat's tab.
+  const handleSelectSideChat = useCallback((session: SessionInfo) => {
+    const target = sideChatHit(session, sessionCatalog, translate("agentSwitcher.sideChat"));
+    const parent = target ? sessionCatalog.find((item) => item.id === target.parentSessionId) : undefined;
+    // The search can read a list newer than this page's, which the running poll
+    // brings up to date: until then a parent it lacks cannot be opened.
+    if (!target || !parent) return;
+    // The side chat is listed at once: a tab restore keeps only listed sessions.
+    setSessionCatalog((prev) => (prev.some((item) => item.id === session.id) ? prev : [session, ...prev]));
+    if (!openSideChatTab(session, target.label)) handleSelectSession(parent);
+  }, [handleSelectSession, openSideChatTab, sessionCatalog, translate]);
+
   // `/btw` landed (hooks/useAgentSession): open the forked chat's tab, seed
   // its composer when the command carried a prompt, and refresh the list so
-  // the family's badge folds the new member in.
+  // the family's badge folds the new member in. A fork that landed after the
+  // main chat moved on leaves its tab with its own session.
   const handleSideSession = useCallback((session: SessionInfo, prompt: string | null) => {
     if (prompt) setSideChatPrompts((prev) => ({ ...prev, [session.id]: prompt }));
     setSessionCatalog((prev) => [session, ...prev.filter((item) => item.id !== session.id)]);
-    const label = translate("agentSwitcher.sideChat");
-    const parentId = session.relation?.kind === "side" ? session.relation.parentSessionId : null;
-    if (parentId && parentId !== sideTabOwnerRef.current) {
-      // The fork landed after the main chat moved on: the tab waits with its own session.
-      try {
-        const key = sideTabsKey(parentId);
-        window.sessionStorage.setItem(key, appendSideTab(window.sessionStorage.getItem(key), session.id, label));
-      } catch { /* storage is optional */ }
-    } else {
-      handleOpenSubagentTab(session.id, label, true);
-    }
+    openSideChatTab(session, translate("agentSwitcher.sideChat"));
     setRefreshKey((key) => key + 1);
-  }, [handleOpenSubagentTab, translate]);
+  }, [openSideChatTab, translate]);
 
   // A side chat's first prompt names it: read the name when a run in an open tab starts or ends.
   const runningSideTabs = agentTabs.filter((tab) => tab.side && runningSessionIds.has(tab.sessionId)).map((tab) => tab.sessionId).join();
@@ -1696,6 +1728,7 @@ export function AppShell() {
       <SessionSidebar
         selectedSessionId={selectedSession?.id ?? null}
         onSelectSession={handleSelectSession}
+        onSelectSideChat={handleSelectSideChat}
         onNewSession={handleNewSession}
         controlRef={sidebarControlRef}
         onNewSessionContextChange={handleSidebarNewSessionContext}
@@ -2818,6 +2851,8 @@ export function AppShell() {
             selectedSessionId={selectedSession.id}
             runningSessionIds={runningSessionIds}
             onSelectSession={handleSelectSession}
+            locked={agentStripLocked}
+            onToggleLock={handleToggleAgentStripLock}
           />
         )}
         {isMobile && renderProjectTrustWarning(true)}

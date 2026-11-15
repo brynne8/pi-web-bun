@@ -339,7 +339,7 @@ e2e/             Playwright regression checks on Apple WebKit and their harness
 demo/            Upstream's static browser demo, kept in sync; not published by this fork
 ```
 
-See [AGENTS.md](./AGENTS.md) for the architecture notes and detailed file map.
+See [AGENTS.md](./AGENTS.md) for the architecture notes, API routes and topic notes.
 
 ## License
 

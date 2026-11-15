@@ -1,8 +1,26 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import test from "node:test";
 import { createJiti } from "jiti";
 
-const jiti = createJiti(import.meta.url, { jsx: { runtime: "automatic" }, tsconfigPaths: true });
+// The padlock (LockToggle) imports a CSS module: its class names stand for themselves.
+// Node needs the hook to answer that import; Bun loads CSS modules itself and exports no
+// registerHooks, so the hook is installed only where it exists.
+const { registerHooks } = createRequire(import.meta.url)("node:module");
+if (typeof registerHooks === "function") {
+  registerHooks({
+    load(url, context, nextLoad) {
+      if (!url.endsWith(".module.css")) return nextLoad(url, context);
+      return {
+        format: "module",
+        shortCircuit: true,
+        source: "export default new Proxy({}, { get: (_, key) => String(key) });",
+      };
+    },
+  });
+}
+
+const jiti = createJiti(import.meta.url, { jsx: { runtime: "automatic" }, tsconfigPaths: true, tryNative: false });
 const React = await jiti.import("react");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
@@ -19,9 +37,9 @@ const members = [
   session("s", "2026-01-04T00:00:00.000Z", { kind: "side", parentSessionId: "main" }),
 ];
 
-function render(selectedSessionId) {
+function render(selectedSessionId, locked = false) {
   return renderToStaticMarkup(React.createElement(I18nProvider, null, React.createElement(AgentMiniStrip, {
-    rootSession: root, members, selectedSessionId, runningSessionIds: new Set(["b"]), onSelectSession() {},
+    rootSession: root, members, selectedSessionId, runningSessionIds: new Set(["b"]), onSelectSession() {}, locked, onToggleLock() {},
   })));
 }
 
@@ -34,10 +52,30 @@ test("the Main agent chip sits outside the scrolling members, and only the curre
   assert.ok(html.indexOf(">Inspect<") > scroller && html.indexOf(">Side chat 1<") > scroller);
 
   const buttons = [...html.matchAll(/<button[^>]*>/g)].map(([tag]) => tag);
-  assert.equal(buttons.length, 4);
-  assert.deepEqual(buttons.map((tag) => /tabindex="0"/.test(tag)), [false, false, true, false]);
-  assert.deepEqual(buttons.map((tag) => /aria-current="true"/.test(tag)), [false, false, true, false]);
+  assert.equal(buttons.length, 5);
+  assert.deepEqual(buttons.map((tag) => /tabindex="0"/.test(tag)), [false, false, true, false, false]);
+  assert.deepEqual(buttons.map((tag) => /aria-current="true"/.test(tag)), [false, false, true, false, false]);
+  assert.match(buttons[0], /title="Back to the main agent"/);
   // Colours are classes, so hover can change them.
   assert.ok(buttons.every((tag) => !/style="[^"]*(?:^|;)color:/.test(tag)));
   assert.match(buttons[1], /class="[^"]*text-text-muted[^"]*hover:text-text/);
+});
+
+test("the padlock sits after the scrolling members and says whether the strip is locked", () => {
+  const unlocked = [...render("b").matchAll(/<button[^>]*>/g)].map(([tag]) => tag).at(-1);
+  assert.match(unlocked, /aria-label="Lock: show this strip on the main agent too"/);
+  assert.match(unlocked, /aria-pressed="false"/);
+  assert.match(unlocked, /title="Lock: show this strip on the main agent too"/);
+
+  const locked = [...render("b", true).matchAll(/<button[^>]*>/g)].map(([tag]) => tag).at(-1);
+  assert.match(locked, /aria-pressed="true"/);
+  assert.match(locked, /title="Unlock: show this strip only in a subagent or side chat"/);
+  assert.ok(render("b").lastIndexOf("<button") > render("b").indexOf('class="tabbar-scroll"'));
+});
+
+test("locked on the main agent, the Main agent chip is the current one", () => {
+  const buttons = [...render("main", true).matchAll(/<button[^>]*>/g)].map(([tag]) => tag);
+  assert.deepEqual(buttons.map((tag) => /aria-current="true"/.test(tag)), [true, false, false, false, false]);
+  assert.deepEqual(buttons.map((tag) => /tabindex="0"/.test(tag)), [true, false, false, false, false]);
+  assert.match(buttons[0], /title="Main agent"/);
 });
