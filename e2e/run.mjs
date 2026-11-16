@@ -11,7 +11,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { launchBrowser, newTestContext, noteBrowserError } from "./browser.mjs";
 import { checkFilePanel, checkLargeHtmlStorage, filePanelFixture, largeStorageFixture } from "./file-panel.mjs";
-import { checkFileRowMenu, checkFileRowRevert } from "./file-row-menu.mjs";
+import { checkFileRowMenu, checkFileRowRevert, checkFileRowRevertDelete, checkFileRowRevertFolder } from "./file-row-menu.mjs";
 import { checkExtensionDialogSizing, checkExtensionDialogs, extensionSource } from "./extension-dialog.mjs";
 import { checkChatAppearance } from "./chat-appearance.mjs";
 import { checkComposerFocus } from "./composer-focus.mjs";
