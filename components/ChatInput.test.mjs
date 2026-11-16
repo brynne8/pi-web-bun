@@ -67,6 +67,8 @@ test("follow-up shortcuts preserve newline, IME, mobile and completion behavior"
     ["native composition blocks sending", { altKey: true, nativeEvent: { isComposing: true } }, {}, "native"],
     ["IME keyCode blocks sending", { altKey: true, nativeEvent: { keyCode: 229 } }, {}, "native"],
     ["composition grace blocks sending", { altKey: true }, { lastCompositionEndAtRef: { current: 950 } }, "prevented"],
+    // The grace is 100 ms: half a second after the composition ended, Enter sends.
+    ["a composition that ended 600 ms ago sends", { altKey: true }, { lastCompositionEndAtRef: { current: 400 } }, "followup"],
     ["mobile Alt+Enter keeps native behavior", { altKey: true }, { isMobile: true }, "native"],
     ["mobile composition grace cannot send", { altKey: true }, { isMobile: true, lastCompositionEndAtRef: { current: 950 } }, "native"],
     ["mobile Ctrl+Alt+Enter follows up", { altKey: true, ctrlKey: true }, { isMobile: true }, "followup"],
@@ -219,12 +221,21 @@ test("a plain-text paste the browser dropped is inserted from the event's own te
   // inputFollows: the browser's own insertion fired input (handleInput clears the ref).
   function paste({ text, html = "", links = [], inputFollows = false, connected = true }) {
     const timers = [];
+    const frames = [];
     const inserted = [];
+    const caret = { focused: false, range: null };
     const pendingPasteRef = { current: null };
     const nativeEvent = { defaultPrevented: false };
     handleComposerPaste({
       clipboardData: { items: [], getData: (type) => (type === "text/plain" ? text : type === "text/html" ? html : "") },
-      currentTarget: { value: "a draft", selectionStart: 2, selectionEnd: 5, isConnected: connected },
+      currentTarget: {
+        value: "a draft",
+        selectionStart: 2,
+        selectionEnd: 5,
+        isConnected: connected,
+        focus() { caret.focused = true; },
+        setSelectionRange(start, end) { caret.range = [start, end]; },
+      },
       nativeEvent,
       preventDefault() { nativeEvent.defaultPrevented = true; },
     }, {
@@ -233,8 +244,9 @@ test("a plain-text paste the browser dropped is inserted from the event's own te
       setTimeout(callback, delay) { timers.push([callback, delay]); },
       replaceTextareaRange(ta, start, end, value) { inserted.push([start, end, value]); },
       replaceLinksWithMarkdown,
-      valueRef: { current: "" }, setValue() {}, setHistoryMenuOpen() {}, updateAtQuery() {}, requestAnimationFrame() {},
-      autoGrowTextarea() {}, scrollTextareaCaretIntoView() {},
+      valueRef: { current: "" }, setValue() {}, setHistoryMenuOpen() {}, updateAtQuery() {},
+      requestAnimationFrame(callback) { frames.push(callback); },
+      scrollTextareaCaretIntoView() {},
       DOMParser: class {
         parseFromString() {
           return {
@@ -250,17 +262,25 @@ test("a plain-text paste the browser dropped is inserted from the event's own te
       assert.equal(delay, 0);
       callback();
     }
-    return { inserted, prevented: nativeEvent.defaultPrevented, pending: pendingPasteRef.current };
+    for (const callback of frames) callback();
+    return { inserted, prevented: nativeEvent.defaultPrevented, pending: pendingPasteRef.current, caret };
   }
 
   // The native paste stays in charge: never prevented, nothing inserted twice.
-  assert.deepEqual(paste({ text: "dictated", inputFollows: true }), { inserted: [], prevented: false, pending: null });
+  assert.deepEqual(paste({ text: "dictated", inputFollows: true }), { inserted: [], prevented: false, pending: null, caret: { focused: false, range: null } });
   // Dropped by the browser: the delivered text replaces the selection at paste time.
-  assert.deepEqual(paste({ text: "dictated" }), { inserted: [[2, 5, "dictated"]], prevented: false, pending: null });
+  assert.deepEqual(paste({ text: "dictated" }), { inserted: [[2, 5, "dictated"]], prevented: false, pending: null, caret: { focused: false, range: null } });
   // Rich text without links pastes natively too, and is recovered the same way.
   assert.deepEqual(paste({ text: "rich", html: "<b>rich</b>" }).inserted, [[2, 5, "rich"]]);
-  // The link path takes the paste over itself: nothing to recover.
-  assert.deepEqual(paste({ text: "rich", html: "<a>rich</a>", links: [["rich", "https://example.com"]] }), { inserted: [], prevented: true, pending: null });
+  // The link path takes the paste over itself: nothing to recover, and the caret lands
+  // right after the Markdown it wrote, in a focused editor.
+  const markdown = "[rich](https://example.com)";
+  assert.deepEqual(paste({ text: "rich", html: "<a>rich</a>", links: [["rich", "https://example.com"]] }), {
+    inserted: [],
+    prevented: true,
+    pending: null,
+    caret: { focused: true, range: [2 + markdown.length, 2 + markdown.length] },
+  });
   assert.deepEqual(paste({ text: "", html: "" }).inserted, []);
   assert.deepEqual(paste({ text: "gone", connected: false }).inserted, []);
 });
@@ -612,6 +632,8 @@ test("the live model selector can reapply its current model without changing dra
     });
     assert.deepEqual(calls, [["open", false], ["filter", ""], ...(expected ? [[expected, option.provider, option.modelId]] : [])]);
   }
+  // The selector's reselect path is what a pick of the active model reaches.
+  assert.match(readFileSync(new URL("./ChatInput.tsx", import.meta.url), "utf8"), /onReselect=\{onModelChange\}/);
 });
 
 test("filters model options by name, id, provider and provider/id", () => {

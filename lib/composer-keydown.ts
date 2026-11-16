@@ -2,7 +2,7 @@
 // them a popup menu or an IME composition takes first. Kept out of the component so a
 // test can drive it with a plain event object.
 
-export const COMPOSITION_END_ENTER_GRACE_MS = 500;
+export const COMPOSITION_END_ENTER_GRACE_MS = 100;
 
 /** The part of a keyboard event the composer's handler reads. */
 export interface ComposerKeyEvent {

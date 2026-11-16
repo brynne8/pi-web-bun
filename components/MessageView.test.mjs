@@ -266,6 +266,10 @@ test("keys an assistant message's blocks by their place, not the entry id (#1184
   // scroll went back to the top. ThinkingBlock drops what it loaded for another id.
   assert.equal(blockRenderKey(0), 0);
   assert.equal(blockRenderKey(7), 7);
+  // The component keys its blocks by that place. MessageView is read from its source here
+  // anyway, so the wiring is what says the helper is used at all.
+  const messageView = readFileSync(new URL("./MessageView.tsx", import.meta.url), "utf8");
+  assert.match(messageView, /key=\{blockRenderKey\(originalIndex\)\}/);
 });
 
 test("marks only the matched text block in the part of the turn that carries it", () => {

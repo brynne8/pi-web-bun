@@ -68,6 +68,7 @@ export async function setupAgentSession({
   const sources = [];
   const requests = [];
   const realFetch = globalThis.fetch;
+  const realEventSource = globalThis.EventSource;
   takePageGlobals();
   globalThis.EventSource = class {
     readyState = 0;
@@ -180,6 +181,8 @@ export async function setupAgentSession({
     for (const key of draftKeys) clearDraft(key);
     for (const key of ["A", "s1", ...draftKeys]) deleteSessionViewSnapshot(key);
     globalThis.fetch = realFetch;
+    if (realEventSource === undefined) delete globalThis.EventSource;
+    else globalThis.EventSource = realEventSource;
   };
   // The run a page shows: a stream connected and a run started. Kept inside the
   // harness so a test's clock and gates stay armed across it.

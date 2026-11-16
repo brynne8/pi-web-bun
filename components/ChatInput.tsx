@@ -1483,10 +1483,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     setValue,
     setHistoryMenuOpen,
     updateAtQuery,
-    autoGrowTextarea,
     scrollTextareaCaretIntoView,
-    setTimeout,
-    requestAnimationFrame,
+    setTimeout: (callback, delay) => window.setTimeout(callback, delay),
+    requestAnimationFrame: (callback) => window.requestAnimationFrame(callback),
     DOMParser,
   }), [processImageFiles, updateAtQuery]);
 

@@ -49,19 +49,19 @@ test("with older history on the server, reaching the top fetches the previous pa
 });
 
 test("a report before the next cursor renders does not fetch the landed page again", async () => {
-  const requested = nextRequestedCursor({ before: "older", landed: {}, historyCursor: "older" });
+  const requested = nextRequestedCursor({ before: "older", landed: {}, requestedCursor: "older" });
   assert.deepEqual(reachTop({ requestedCursor: requested }), { kind: "none" });
   // The next cursor renders, so the page it names may be asked for.
-  assert.deepEqual(nextRequestedCursor({ before: "oldest", landed: {}, historyCursor: "oldest" }), "oldest");
+  assert.deepEqual(nextRequestedCursor({ before: "oldest", landed: {}, requestedCursor: "oldest" }), "oldest");
   assert.deepEqual(reachTop({ historyCursor: "oldest", requestedCursor: "oldest" }), { kind: "none" });
 });
 
-test("a page that did not land, or a cursor a reload brought back, is fetched again", async () => {
+test("a page that did not land is asked for again, and a cursor set meanwhile stands", async () => {
   // Nothing landed, so the same page may be asked for again.
-  assert.equal(nextRequestedCursor({ before: "older", landed: undefined, historyCursor: "older" }), null);
+  assert.equal(nextRequestedCursor({ before: "older", landed: undefined, requestedCursor: "older" }), null);
   assert.deepEqual(reachTop({ requestedCursor: null }), { kind: "fetch", sessionId: "a", before: "older" });
-  // A reloaded history can come back to a cursor asked for before.
-  assert.equal(nextRequestedCursor({ before: "older", landed: {}, historyCursor: "newest" }), null);
+  // Another call moved the cursor on while this page was in flight: its own stands.
+  assert.equal(nextRequestedCursor({ before: "older", landed: {}, requestedCursor: "newest" }), "newest");
 });
 
 test("a page already loading is not asked for twice", async () => {
