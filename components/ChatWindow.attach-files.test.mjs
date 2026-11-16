@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { createJiti } from "jiti";
 
-import { dropMentionText, splitDroppedItems, uploadDroppedFiles } from "../lib/file-upload-client.ts";
-
+// Through jiti: `lib/file-upload-client.ts` imports its siblings by their extensionless
+// names, which only a loader that fills the extension in resolves (docs/agents/tests.md).
+const jiti = createJiti(import.meta.url, { tsconfigPaths: true, tryNative: false });
+const { dropMentionText, splitDroppedItems, uploadDroppedFiles } = await jiti.import("../lib/file-upload-client.ts");
 const chatWindow = readFileSync(new URL("./ChatWindow.tsx", import.meta.url), "utf8");
 
 const photo = new File(["x"], "photo.png", { type: "image/png" });

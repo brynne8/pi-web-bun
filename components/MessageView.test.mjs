@@ -3,8 +3,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createJiti } from "jiti";
 
-import { blockRenderKey } from "../lib/message-keys.ts";
-
 // tryNative: false — under Bun jiti would import MessageView.tsx natively, and
 // its `@/hooks/useI18n` would be a second copy of the module: the component and
 // the provider above would read two Context instances (`useI18n must be used
@@ -15,6 +13,9 @@ const jiti = createJiti(import.meta.url, {
   tryNative: false,
 });
 const React = await jiti.import("react");
+// Through this jiti: `lib/message-keys.ts` imports its sibling by its extensionless name,
+// which only a loader that fills the extension in resolves (docs/agents/tests.md).
+const { blockRenderKey } = await jiti.import("../lib/message-keys.ts");
 const { renderToStaticMarkup } = await jiti.import("react-dom/server");
 const {
   AssistantMessageHeader,
