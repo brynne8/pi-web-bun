@@ -360,12 +360,13 @@ export async function checkFileRowRevertFolder(page, dirPath, name, underFile, c
 
   // 4. The confirmed answer covers the whole folder: the tracked file back to
   // HEAD's bytes, the untracked one gone, and the toast counts what it did.
+  // HEAD's bytes are `committed` as the fixture committed them, newline included.
   await rightClickRow(page, dirRow);
   await menu.waitFor({ state: "visible", timeout: 5_000 });
   await menu.getByRole("menuitem", { name: LABEL.revert }).first().click();
   await question.waitFor({ state: "visible", timeout: 5_000 });
   await page.getByRole("button", { name: LABEL.revert, exact: true }).click();
-  assert.ok(await readUntil(underFile, `${committed}\n`), "the folder's tracked file went back to HEAD");
+  assert.ok(await readUntil(underFile, committed), "the folder's tracked file went back to HEAD");
   assert.ok(await waitUntilGone(freshFile), "the folder's untracked file was deleted");
   await page.getByText("Reverted 2 files").waitFor({ state: "visible", timeout: 10_000 });
 
