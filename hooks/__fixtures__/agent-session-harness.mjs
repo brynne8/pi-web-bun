@@ -122,10 +122,14 @@ export async function setupAgentSession({
     ...props,
   };
   let currentProps = initialProps;
-  const hook = renderHook(useAgentSession, initialProps);
+  // The hook instance the page runs now: `switchTo()` mounts another one, and the
+  // instance it replaces is unmounted there. Both the cleanup and the next rerender
+  // must reach the live one, or a switch leaves that one's effects armed (a polling
+  // interval keeps Node's process alive past the end of the file).
+  let mounted = renderHook(useAgentSession, initialProps);
   // The shim renders once per flush, but a read's state writes land in the render
   // after the one that read them: flush until the hook's answer stops moving.
-  let rendered = hook;
+  let rendered = mounted;
   const settleAll = async () => {
     await settle();
     for (let round = 0; round < 3; round++) {
@@ -139,7 +143,7 @@ export async function setupAgentSession({
   const rerender = async (patch = {}) => {
     if (patch.session) sid = patch.session.id ?? sid;
     currentProps = { ...currentProps, ...patch };
-    hook.rerender(currentProps);
+    mounted.rerender(currentProps);
     await settleAll();
   };
   const connect = async () => {
@@ -154,7 +158,7 @@ export async function setupAgentSession({
   // switch is a fresh mount with the session present, not a prop change.
   const switchTo = async (nextSession) => {
     sid = nextSession?.id ?? "s1";
-    hook.unmount();
+    mounted.unmount();
     for (const source of sources) source.close();
     sources.length = 0;
     currentProps = {
@@ -165,6 +169,7 @@ export async function setupAgentSession({
       ...(nextSession ? {} : props),
     };
     const next = renderHook(useAgentSession, currentProps);
+    mounted = next;
     env.hook = next;
     rendered = next;
     env.sid = sid;
@@ -173,7 +178,7 @@ export async function setupAgentSession({
   };
   // A page that navigated away or closed the tab: every read still out is stale.
   const unmount = () => {
-    hook.unmount();
+    mounted.unmount();
     for (const source of sources) source.close();
   };
   const teardown = () => {
@@ -191,7 +196,7 @@ export async function setupAgentSession({
     await emit({ type: "agent_start" });
     return env;
   };
-  const env = { hook, sid, log, sources, requests, connect, emit, start, unmount, rerender, switchTo, settle: settleAll, teardown, json };
+  const env = { hook: mounted, sid, log, sources, requests, connect, emit, start, unmount, rerender, switchTo, settle: settleAll, teardown, json };
   return env;
 }
 
