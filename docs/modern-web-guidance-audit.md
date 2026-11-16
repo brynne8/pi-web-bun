@@ -4,6 +4,21 @@
 
 生成方式：`modern-web-guidance list` 取全量目录（208 个）→ 按"本仓库是否有对应界面"分类 → 对 73 个有对应面的指南 `retrieve` 正文 → 逐条对照代码。
 
+## 处置状态
+
+审查之后动过手，也否掉了几个。这张表是当前的结论，细节在对应小节。
+
+| 问题 | 状态 |
+| --- | --- |
+| composer 每敲一字两次强制重排 | 已修（`afed4369`）：改成一次测量，行为不变，测试钉住读写配对次数 |
+| Google Fonts 的 `@import` | 有意保留：新设计要能整个文件搬走。改为在 head 里 preconnect 两个源（`afed4369`） |
+| 时长手拼、两套格式不一致 | 已修（`c0c4461b`）：统一到 `Intl.DurationFormat`，缺失时按原样手拼 |
+| URL 字段没有 URL 键盘、API key 没有 done 键 | 已修（`a4fc6ee2`）。原先"全应用 0 处 inputMode"的说法是错的，两个数字字段早就有了 |
+| 折叠的 turn 内容 Cmd+F 搜不到 | 已否决：折叠内容没有人会去搜索，场景不成立 |
+| composer 改 `field-sizing: content` | 已调查并否决：placeholder 在窄屏会折行，见 C9 |
+| A1 自建模态框没有焦点 containment | 按决定降级：属键盘/读屏类，暂缓。技术严重度仍是全书第一 |
+| E2 没有 forced-colors 处理 | 同上降级；且实际影响是"无边框表面掉边"，不是"层级全灭" |
+
 ## 浏览器策略：两轮判定
 
 第一轮按 `AGENTS.md` 的 *Old Safari (iOS 16.2)* 判定。本轮起改用 `last 2 versions`（browserslist 标准查询，即每个浏览器的最新两个大版本）。按 2026-11 推算，新下限约为 Chrome/Edge 153+、Firefox 156+、Safari 26+、iOS Safari 26+。
@@ -106,17 +121,13 @@
 
 ## B. 折叠内容可查找性
 
-### B1 折叠的 turn 段落不在 DOM 里，Cmd+F 搜不到（可行动，改动最大）
+### B1 折叠的 turn 段落不在 DOM 里，Cmd+F 搜不到（已否决）
 
-`MessageView.tsx` 的折叠是 `{expanded && (...)}`（思考段 1188 行、工具卡 1278 行等），折叠后整段被卸载。
+`MessageView.tsx` 的折叠是 `{expanded && (...)}`（思考段 1188 行、工具卡 1278 行等），折叠后整段被卸载，所以浏览器的页内查找找不到它。
 
-`search-hidden-content` 指南：**"Traditional methods like `display: none` or `visibility: hidden` work to hide content visually, but they also make that content completely inaccessible to screen readers and browser features like 'Find in page'"**——直接不渲染连这都不如。推荐 `<details>` 或 `hidden="until-found"` + `beforematch` 同步 UI 状态。
+**否决理由：折叠内容没有人会去搜索。** 用户先在会话里读到一段思考或工具调用，才会想去里面找字；会去 Cmd+F 的是自己打过的话和模型的回答，那些始终在 DOM 里。为一个不存在的使用场景去重做整个 fold 的头部 UI（`<details>` + `summary` 重构）不划算。
 
-兼容性：`hidden="until-found"` 按指南数据是 Chrome 102 / Edge 102 / Firefox 148，**Safari 不支持**；`<details>` 是 Baseline 2020、Safari 6 起就有。所以对本项目唯一可行的是 `<details>`，而且指南的"互斥折叠组用 `name` 属性"正好对应 turn segments"一次只展开一组"的现有语义，`details::details-content` 可以样式化内容区。
-
-附带影响：折叠内容的 URL fragment 深链同样不可达。
-
-已经做对的部分：折叠开关有 `aria-expanded`（全仓 35 处）。
+记录保留，是因为这个结论依赖"没人搜折叠内容"这个判断；哪天真有人这么用，指南给的路线（`<details>` 的 `name` 属性做互斥折叠组，Baseline 2020、Safari 6 起就有）仍然有效。
 
 ## C. 表单与校验
 
@@ -134,9 +145,14 @@
 
 `app/settings.css` 1 处，而全仓有 8 个 `type="checkbox"`。`brand-consistent-forms` 指南：**"DO use `accent-color` to easily theme form controls to match your brand"**，并提醒 Safari/Android Chrome 有对比度反转 bug，别用贴近背景的颜色。注意指南的支持表写 Safari 26.2 与事实不符（实际 15.4 起），以事实为准可用。
 
-### C4 inputmode 与 enterkeyhint 完全没用（可行动，低优先）
+### C4 inputmode 与 enterKeyHint（原断言有误，残留已修）
 
-`forms` 指南建议为数字/标识符字段设 `inputmode="numeric"`、用 `enterkeyhint` 定 Enter 键标签。`ModelsConfig` 的 contextWindow（token 数）是明显候选。
+原报告写"全应用 0 处 `inputMode`"，这是错的——那次检索用了小写 `inputmode`，漏了驼峰写法。实际情况：`ToolsConfig.tsx:406` 和 `ModelContextWindow.tsx:29` 早就给两个数字字段设了 `inputMode="numeric"`，真正缺的只有两样：
+
+- URL 字段（`ModelsConfig.tsx` 的提供商 Base URL 与自定义模型的 Base URL）没有 `inputMode="url"`，手机上拿不到带 `.`、`/`、`.com` 的键盘。已补。
+- `enterKeyHint` 全应用 0 处。API key 字段的 Enter 就是保存，已补 `enterKeyHint="done"`。
+
+提交 `a4fc6ee2`。只动了值类型明确的字段，没有全面铺开。
 
 ### C5 autocomplete="off" 用在 API key 字段（可行动，低优先）
 
@@ -156,13 +172,28 @@
 
 `:autofill` 0 处。`autofill-highlight-inputs` 指南要求给自动填充的字段一个可见状态，并提醒**不要**在该状态改布局属性（`border-width`、`padding`），也不要为它去掉焦点环。`:autofill` 按指南是 Chrome 110 / Edge 110 / Safari 15，Firefox 没有——作为纯 CSS 增强加上无害，Firefox 用户只是看不到高亮。
 
-### C9 composer 的自动增高仍是 JS（可行动，但有一个行为陷阱）
+### C9 composer 的自动增高仍是 JS（已调查并否决）
 
-`components/ChatInput.tsx:241` 的 `autoGrowTextarea()` 用 `scrollHeight` imperative 撑高输入框，上限 200px，CSS 侧（`.chat-input-textarea`）只设了字号，没有 `field-sizing`。这是 `legacy-scan` 最早报出的 4 条之一，当时以"Safari 16.2 没有 `field-sizing`"搁置。
+`components/ChatInput.tsx` 的 `autoGrowTextarea()` 用 `scrollHeight` imperative 撑高输入框，上限 200px，CSS 侧（`.chat-input-textarea`）只设了字号，没有 `field-sizing`。这是 `legacy-scan` 最早报出的 4 条之一，当时以"Safari 16.2 没有 `field-sizing`"搁置；`last 2 versions` 下 `field-sizing` 的 Baseline 是 2026-06-16、Safari 26.2 起可用，按理可以动了。
 
-`field-sizing` 的 Baseline 是 2026-06-16、Safari 26.2 起可用——`last 2 versions` 下已进下限，可以动了。指南的用法是 `field-sizing: content` 配 `width`（textarea 要显式宽度，否则长 placeholder 会在输入第一个字时横向收缩）、`min-block-size`、`max-block-size`；JS 改成指南的 fallback 形状：只在 `!CSS.supports("field-sizing", "content")` 时执行。
+**否决理由：placeholder 在窄屏会折行，迁移会改变空框高度。** 指南说 `field-sizing` 的尺寸计算**包括 placeholder**（"to fit their content (including placeholders)"），而现有 JS 是刻意把 placeholder 排除在测量之外的——`autoGrowTextarea` 的注释写了理由：否则空框会涨到提示行数。本项目的 placeholder 确实会折行：
 
-陷阱在 placeholder：指南说 `field-sizing` 的尺寸计算**包括 placeholder**，而现有 JS 的注释明确写了"placeholder 不能撑高输入框"是有意设计（否则空框会涨到提示行数）。所以直接换上 `field-sizing` 会改变这个行为——动手前要先确认 composer 的 placeholder 不会折行，或者接受空框变高。
+- `chat.messagePlaceholder`："Message… Type / for commands, @ for files" / "消息…输入 / 使用命令，输入 @ 查找文件"
+- `chat.compactingPlaceholder`："正在压缩…消息会排队，压缩结束后发送"
+
+在 360px 宽的手机上这些是两行。直接换上 `field-sizing: content`，空着的 composer 就会变成两三层高——正是现在这段 JS 花功夫避免的行为，而这个项目对移动端投入很大。
+
+已经做的是另一件事：`autoGrowTextarea` 原来每次敲键强制两次重排，已改成一次测量（`afed4369`），行为不变。
+
+将来的路线（需要真机验证后再动）：`field-sizing` 只作用于非空状态，空框保持 CSS 高度——
+
+```css
+@supports (field-sizing: content) {
+  .chat-input-textarea:not(:placeholder-shown) { field-sizing: content; }
+}
+```
+
+空框时 `:placeholder-shown` 成立，规则不生效，高度可证明不变；有字时原生撑高，JS 整个删掉。没有直接采用，是因为"`rows={1}` 与 `field-sizing: content` 如何互相作用"这一点无法在此环境用真浏览器验证，而 composer 是全应用最重要的输入框，不值得为一个nice-to-have赌它。
 
 ## D. 动效
 
@@ -188,7 +219,11 @@
 
 ### E2 没有 forced-colors 处理（可行动，影响 Windows 高对比度用户）
 
-0 处。`color` 指南的 Forced Colors Mode 段：**"Don't rely on `background-image`, `box-shadow`, or `border-image` to convey borders, separators, or state"**。本项目用 box-shadow 表达卡片与浮层层级（`app/new_design.css`、`app/globals.css` 中大量阴影取值），高对比度模式下这些层级会整体消失，只剩文字。forced-colors 在 Chrome/Edge/Firefox 都是 Widely available，**可行动**。
+0 处。`color` 指南的 Forced Colors Mode 段：**"Don't rely on `background-image`, `box-shadow`, or `border-image` to convey borders, separators, or state"**。
+
+实查之后影响比初判小：选中态和悬停态主要靠背景色表达，而背景色在高对比度下会映射成系统色、仍然可见，丢的只是渐变叠加。真正丢的是**只靠阴影定义边缘**的表面——`app/new_design.css:316-318` 那种 `border: 0` + `--nd-mat` 阴影的玻璃面，高对比度下阴影被擦掉，卡片没有任何可见边缘。
+
+forced-colors 在 Chrome/Edge/Firefox 都是 Widely available，与基线无关。按决定归入读屏/可读性类暂缓；真要动的时候，给那几处补一条 `@media (forced-colors: active)` 的真边框（用 `CanvasText` 等系统色关键字）即可。
 
 ### E3 scrollbar-width: thin 4 处（可行动，低优先）
 
@@ -249,19 +284,21 @@
 
 `privacy` 指南：**"DON'T store sensitive tokens or PII in `localStorage`"**。项目存的是 UI 偏好（侧栏固定、草稿、主题、文件页签），不含凭证。
 
-## H. 日期与时间（一半可行动）
+## H. 日期与时间（已修）
 
 `new Date()` 52 处、`toLocaleString` 30 处、`Intl.RelativeTimeFormat` 3 处；`Temporal` 0 处、`Intl.DurationFormat` 0 处。
 
-### H1 时长格式化是手拼字符串（可行动）
+### H1 时长格式化是手拼字符串（已修，`c0c4461b`）
 
-`lib/turn-duration.ts:71`：
+原有**两个**各自为政的手写格式化函数：`lib/turn-duration.ts:67-71` 出 `1h 2m 5s`，`lib/session-stats-format.ts:32-36` 出 `1h 2m`（有小时就丢秒）。同一个"会话活跃了多久"在回合页脚和统计行里给出不同精度，而且两者都硬编码英文字母，藏在全中文的界面里。
 
-```ts
-return `${Math.floor(minutes / 60)}h ${minutes % 60}m ${seconds}s`;
-```
+`calculate-event-differentials` 指南：**"DO format durations for user display using `duration.toLocaleString()` or `new Intl.DurationFormat(locale, { style })` … instead of manually interpolating `${duration.years}y ${duration.months}m...`"**。
 
-`calculate-event-differentials` 指南：**"DO format durations for user display using `duration.toLocaleString()` or `new Intl.DurationFormat(locale, { style })` … instead of manually interpolating `${duration.years}y ${duration.months}m...`"**。手拼的问题是不本地化——中文用户看到 `1h 5m`，单位译不了。`Intl.DurationFormat` 需 Safari 16.4，`last 2 versions` 下已进下限，且 `lib/i18n/format.ts` 已有 `Intl.RelativeTimeFormat` 的先例，接进去是一致的。
+现在统一到 `lib/i18n/format.ts` 的 `formatDuration(ms, locale)`，`style: "narrow"`——这个样式的英文输出与原来手拼的完全一致（`14s`/`3m 5s`/`1h 5m 3s`，零值单位自动省略），所以英文用户看不到变化，其他语言立刻本地化（中文 `3分钟5秒`）。`Intl.DurationFormat` 缺失时（Safari 16.4 之前）按原样手拼，那条路径有测试钉住。
+
+副作用：统计行的精度变了——一小时以上的活跃时间现在保留秒，与回合页脚一致。
+
+测试原先没传 locale，靠机器默认语言蒙对；已改为分别钉住英文、中文和降级路径。
 
 ### H2 Temporal 仍然阻塞
 
