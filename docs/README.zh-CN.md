@@ -126,6 +126,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **多余的 `cd` 不会再出现在卡片上。** 指向会话自身目录的 `cd` 会在命令执行前被剥掉，于是模型写 `cd ~/repo && make`，卡片上显示的是 `make`。这个前缀也一并从会话文件和模型自己的历史里消失，而它原本就是从那里被一遍遍抄下去的。进子目录的 `cd` 原样保留。原版照模型写的那样执行，也照那样显示。（[说明](./agents/tools.md#tool-selection-and-built-in-extensions)）
 
+**卡片里的路径从项目目录读起。** `edit`、`write` 或 diff 的文件头从会话所在的目录起写文件——模型写的是 `/Users/you/repo/src/x.ts`，卡片上是 `src/x.ts`——那段永远不变的前缀不再占掉卡片的宽度。只有该目录下的路径才会缩短：只是撞了同名前缀的兄弟目录、目录之外的路径，以及展开后列出的参数，都照模型写的样子显示。原版把每个路径原样显示。（[说明](./agents/sessions.md#tool-execution-events-on-the-sse-stream)）
+
 **`powershell` 卡片显示自己的颜色。** 不管有没有终端在看，PowerShell 都会给自己的输出上色，而这张卡片会把那些转义显示成字母——`SQLite[7mError:[0m no such column`——因为开启一次转义的那个字符本身什么都不画。现在是红色和绿色告诉你哪一条测试失败了，而反相视频（`bun test` 打印 `(fail)` 用的就是它）变成一块底色。移动光标或清除整行的转义什么都不显示。基本颜色跟随你选的那套主题。原版把工具的输出显示成纯文本，和终端里的 pi 一样。（[说明](./agents/sessions.md#a-powershell-card-draws-its-outputs-colours-libansi-textts-componentspowershelloutputtsx)）
 
 **在对话旁边读文件的那一段。** 点开一张已完成的 `read` 卡片，右侧面板就打开这次调用真正返回的那一段：Markdown 按 Markdown 渲染、一键就能切回它的源码，源码行号从这次读取起始的那一行接着数，CSV 和 TSV 直接成表格、用的还是文件真实行号。面板显示的是模型拿到的内容，不是文件此刻的样子——不重新请求、也不重新读盘。卡片保留自己的表头，把文字交给面板。原版把 read 的输出留在卡片里，并把那张分隔符表格用在文件预览中（[#1136](https://github.com/agegr/pi-web/pull/1136)、[#1150](https://github.com/agegr/pi-web/pull/1150)）。（[说明](./agents/sessions.md#a-read-card-opens-its-slice-in-the-right-panel-toolcallblock-componentsreadsnapshotviewertsx)）

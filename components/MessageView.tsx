@@ -26,6 +26,7 @@ import { PowerShellOutput } from "./PowerShellOutput";
 import { BashCommand } from "./BashCommand";
 import { KeyValueTable } from "./KeyValueTable";
 import { toolFieldsOfInput, toolInputPreview } from "@/lib/tool-fields";
+import { relativeToRoot } from "@/lib/display-path";
 import { parseStreamingJson } from "@earendil-works/pi-ai/utils/json-parse";
 import { mcpToolLabel, prettyMcpResultText } from "@/lib/mcp-tool-display";
 import { BgTaskNotificationView } from "./BgTaskNotificationView";
@@ -1407,7 +1408,7 @@ function ToolCallBlock({ block, result, notRun, duration, clock, cwd, onOpenFile
               ? t("chat.generatingToolInput")
               : shellCommand !== null
                 ? <BashCommand command={shellCommand} limit={TOOL_PREVIEW_LENGTH} />
-                : (patchLabel ?? (codemode ? codemodeScriptPreview(codemode.code) : toolInputPreview(block.input, resultPatchPath, block.toolName)))}
+                : (patchLabel ?? (codemode ? codemodeScriptPreview(codemode.code) : toolInputPreview(block.input, resultPatchPath, block.toolName, cwd)))}
           </span>
           {shellBackground && (
             <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0 }}>(background)</span>
@@ -1497,14 +1498,14 @@ function ToolCallBlock({ block, result, notRun, duration, clock, cwd, onOpenFile
       {/* ── Expanded: a pending edit's diff, from its arguments ── */}
       {editPreview && (
         <div style={{ borderTop: "1px solid rgba(34,197,94,0.15)", background: "var(--bg)" }}>
-          <SplitFilesView files={editPreview} />
+          <SplitFilesView files={editPreview} cwd={cwd} />
         </div>
       )}
 
       {/* ── Expanded: applied-patch split diff ── */}
       {showBody && patchFiles && (
         <div style={{ borderTop: "1px solid rgba(34,197,94,0.15)", background: "var(--bg)" }}>
-          <SplitFilesView files={patchFiles} />
+          <SplitFilesView files={patchFiles} cwd={cwd} />
         </div>
       )}
 
@@ -1520,6 +1521,7 @@ function ToolCallBlock({ block, result, notRun, duration, clock, cwd, onOpenFile
         resultDiff ? (
           <PairedDiffResult
             diff={resultDiff}
+            cwd={cwd}
           />
         ) : (!resultIsEmpty || resultImages.length === 0) && (
           // A subagent's result is its report, not a tool's raw output: it carries Markdown
@@ -1543,8 +1545,9 @@ interface ResultDiff {
   text: string;
 }
 
-function PairedDiffResult({ diff }: {
+function PairedDiffResult({ diff, cwd }: {
   diff: ResultDiff;
+  cwd?: string;
 }) {
   return (
     <div
@@ -1553,15 +1556,15 @@ function PairedDiffResult({ diff }: {
         background: "var(--bg)",
       }}
     >
-      <SplitPatchView text={diff.text} />
+      <SplitPatchView text={diff.text} cwd={cwd} />
     </div>
   );
 }
 
-function SplitPatchView({ text }: { text: string }) {
+function SplitPatchView({ text, cwd }: { text: string; cwd?: string }) {
   const files = useMemo(() => parseUnifiedPatch(text), [text]);
   if (!files) return <PatchTextView text={text} />;
-  return <SplitFilesView files={files} />;
+  return <SplitFilesView files={files} cwd={cwd} />;
 }
 
 /** Two code columns side by side, or one column of patch lines. */
@@ -1573,18 +1576,22 @@ export type PatchDiffLayout = "split" | "stacked";
  * — a removed line above the line that replaces it, each with its own number —
  * the way the file viewer's diff has always been drawn. See `unifiedDiffLines()`.
  */
-function SplitFilesView({ files }: { files: SplitDiffFile[] }) {
+function SplitFilesView({ files, cwd }: { files: SplitDiffFile[]; cwd?: string }) {
   const layout: PatchDiffLayout = useIsMobile() ? "stacked" : "split";
-  return <PatchDiffFiles files={files} layout={layout} />;
+  return <PatchDiffFiles files={files} layout={layout} cwd={cwd} />;
 }
 
-export function PatchDiffFiles({ files, layout }: { files: SplitDiffFile[]; layout: PatchDiffLayout }) {
+export function PatchDiffFiles({ files, layout, cwd }: { files: SplitDiffFile[]; layout: PatchDiffLayout; cwd?: string }) {
   const { t } = useI18n();
   const showFileHeaders = files.length > 1;
+  /** A file header names the file from where the session runs, when it is under it. */
+  const shown = (path: string) => relativeToRoot(path, cwd) ?? path;
 
   return (
     <div style={{ maxHeight: 560, overflowY: "auto", overflowX: "hidden", background: "var(--bg)" }}>
-      {files.map((file, fileIndex) => (
+      {files.map((file, fileIndex) => {
+        const stackedPath = stackedFilePath(file);
+        return (
         <div
           key={fileIndex}
           style={{
@@ -1608,14 +1615,14 @@ export function PatchDiffFiles({ files, layout }: { files: SplitDiffFile[]; layo
                 borderBottom: "1px solid var(--border)",
               }}
             >
-               <SplitDiffHeader title={file.oldPath || t("i18n.before")} side="left" />
-               <SplitDiffHeader title={file.newPath || t("i18n.after")} side="right" />
+               <SplitDiffHeader title={shown(file.oldPath || "") || t("i18n.before")} side="left" />
+               <SplitDiffHeader title={shown(file.newPath || "") || t("i18n.after")} side="right" />
             </div>
           )}
 
-          {showFileHeaders && layout === "stacked" && stackedFilePath(file) && (
+          {showFileHeaders && layout === "stacked" && stackedPath && (
             <div
-              title={stackedFilePath(file)}
+              title={shown(stackedPath)}
               style={{
                 position: "sticky",
                 top: 0,
@@ -1629,7 +1636,7 @@ export function PatchDiffFiles({ files, layout }: { files: SplitDiffFile[]; layo
                 whiteSpace: "nowrap",
               }}
             >
-              {stackedFilePath(file)}
+              {shown(stackedPath)}
             </div>
           )}
 
@@ -1659,7 +1666,8 @@ export function PatchDiffFiles({ files, layout }: { files: SplitDiffFile[]; layo
               : <StackedDiffLineView key={lineIndex} line={line} />
           ))}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

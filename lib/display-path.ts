@@ -9,6 +9,16 @@ export function shortenPath(path: string): string {
 }
 
 /**
+ * A path inside `root` as it is written from there (`src/x.ts`), else `null`.
+ * A literal prefix match, `/` only: a path that does not match is left to the caller.
+ */
+export function relativeToRoot(path: string, root: string | undefined): string | null {
+  const base = root?.replace(/\/+$/, "");
+  if (!base || !path.startsWith(`${base}/`)) return null;
+  return path.slice(base.length + 1);
+}
+
+/**
  * A path inside `root` as `./relative`, anything else as `shortenPath()`.
  * Only a whole leading folder counts, so `/repo-other/x` is not inside `/repo`.
  */

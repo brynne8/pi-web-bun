@@ -10,6 +10,8 @@
  * quietly drops a subtree is an argument the user never sees.
  */
 
+import { relativeToRoot } from "./display-path";
+
 export interface ToolField {
   key: string;
   value: string;
@@ -79,12 +81,17 @@ function nestedText(value: unknown): string | null {
 
 /**
  * The one line a collapsed tool card shows after the tool's name: the path,
- * command or query when the call has one, else its first argument that reads
- * as itself (a string, number, boolean or list of those), else the text inside
- * its first object argument (an `ask_user_question` call's `questions[]`)
- * instead of `[object Object]`.
+ * command or query when the call has one, else its first argument that reads as
+ * itself (a string, number, boolean or list of those), else the text inside its first
+ * object argument (`ask_user_question`'s `questions[]`) instead of `[object Object]`.
+ * A path inside `cwd` shows from there, as the header of a diff does.
  */
-export function toolInputPreview(input: unknown, resultPatchPath: string | null = null, toolName?: string): string {
+export function toolInputPreview(
+  input: unknown,
+  resultPatchPath: string | null = null,
+  toolName?: string,
+  cwd?: string,
+): string {
   if (!input || typeof input !== "object" || Array.isArray(input)) return "";
   const record = input as Record<string, unknown>;
   const clip = (text: string) => {
@@ -100,9 +107,11 @@ export function toolInputPreview(input: unknown, resultPatchPath: string | null 
   for (const key of ["command", "path", "file_path"]) {
     // An argv-style command reads as the command line it is.
     const text = firstRankText(record[key], key === "command" ? " " : ", ");
-    if (text !== null) return clip(text);
+    if (text === null) continue;
+    const short = key === "command" ? null : relativeToRoot(text, cwd);
+    return clip(short ?? text);
   }
-  if (resultPatchPath) return clip(resultPatchPath);
+  if (resultPatchPath) return clip(relativeToRoot(resultPatchPath, cwd) ?? resultPatchPath);
   for (const key of ["pattern", "query"]) {
     const text = firstRankText(record[key]);
     if (text !== null) return clip(text);
