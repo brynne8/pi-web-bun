@@ -79,7 +79,7 @@ import {
 } from "@/lib/session-ui-state-shared";
 import { countFaviconUnread, syncFaviconBadge } from "@/lib/favicon-badge";
 import { focusIfLost, type FocusDocument } from "@/lib/stacked-dialog";
-import { GIT_REVERT_REFUSAL_KEYS, isGitPathRevertible } from "@/lib/git-revert-rule";
+import { GIT_REVERT_REFUSAL_KEYS, gitRevertAction } from "@/lib/git-revert-rule";
 import { revertGitFileChanges } from "@/lib/git-revert-request";
 import { encodeFilePathForApi } from "@/lib/file-paths";
 import { noteRunningPoll } from "@/lib/page-debug";
@@ -151,6 +151,16 @@ const FILE_MANAGER_ERROR_KEYS: Record<string, string> = {
   remote: "sidebar.openInExplorerRemoteOnly",
   "unsupported-platform": "sidebar.openInExplorerUnsupported",
 };
+
+/**
+ * Whether a row's Revert deletes its file rather than putting it back: HEAD never
+ * held it (untracked, or staged for the first time — lib/git-revert-rule.ts). A
+ * folder's files each carry their own action, so its item keeps the plain label
+ * and its question counts the deletes.
+ */
+function rowDeletesFile(target: FileRowTarget): boolean {
+  return !target.isDir && target.gitStatus !== null && gitRevertAction(target.gitStatus) === "delete";
+}
 
 declare global {
   interface Window {
@@ -1013,11 +1023,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
   }, []);
 
   /**
-   * A changed file's own action: its working change goes back to the last commit, staged
-   * or not, the server refusing what has no commit to go back to (lib/git-revert-rule.ts).
-   * Nothing is kept of what it discards, so the row's menu asks first (`fileRevertBody`),
-   * and this runs only from the question's own button. The explorer and any open tab's
-   * diff refresh as the refresh button refreshes them, so the row loses its badge at once.
+   * A changed row's own action: its change goes back to the last commit, staged or
+   * not, or a file HEAD never held is deleted (lib/git-revert-rule.ts); a folder's
+   * covers every changed file under it. Nothing is kept of what it discards, so the
+   * menu asks first (`fileRevertBody`) and this runs only from the question's button.
    */
   const revertRowChanges = useCallback(async (target: FileRowTarget) => {
     const cwd = selectedCwd ?? selectedCwdProp;
@@ -1027,7 +1036,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
     if (outcome.reverted) {
       if (onExplorerRefresh) onExplorerRefresh();
       else setExplorerKey((key) => key + 1);
-      showToast(t("files.revertDone", { name: target.name }));
+      // A folder's action covers as many files as it found; a file's is its own.
+      if (target.isDir) showToast(t("files.revertDoneCount", { count: outcome.count ?? target.revertibleCount }));
+      else showToast(t(rowDeletesFile(target) ? "files.revertDeleted" : "files.revertDone", { name: target.name }));
       return;
     }
     showToast(t(GIT_REVERT_REFUSAL_KEYS[outcome.code ?? "failed"], { error: outcome.error ?? "" }));
@@ -2799,15 +2810,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
       icon: <DownloadIcon />,
       onSelect: () => { downloadFile(target.path); },
     }]),
-    // Only a file whose change Git can undo brings this item: what HEAD never
-    // held (an untracked or newly added file, a rename's new name, a conflict)
-    // has nothing to go back to, and the row says nothing rather than delete.
-    // The item never reverts by itself: it turns the menu into its question.
-    ...(!target.isDir && target.gitStatus && isGitPathRevertible(target.gitStatus) ? [{
+    // Only a row with something to undo brings this item: a file whose change an
+    // action covers, or a folder with such files under it (the counts the explorer
+    // read off its own listing). A change no action covers — a rename's new name,
+    // a conflict — says nothing rather than refuse.
+    // The item never acts by itself: it turns the menu into its question.
+    ...(target.revertibleCount > 0 ? [{
       type: "item" as const,
       id: "revert",
-      label: t("files.revertChanges"),
-      title: t("files.revertChangesHint"),
+      label: t(rowDeletesFile(target) ? "files.revertDelete" : "files.revertChanges"),
+      title: t(rowDeletesFile(target)
+        ? "files.revertDeleteHint"
+        : target.isDir ? "files.revertFolderHint" : "files.revertChangesHint"),
       icon: <RevertIcon />,
       danger: true,
       onSelect: ({ shiftKey, keepOpen }: SidebarMenuSelectEvent) => {
@@ -2833,37 +2847,46 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
     },
   ];
 
-  // The question behind a row's Revert changes. What it discards is not recoverable
-  // — no stash, no copy Pi Web keeps — so the item that does it is answered here,
-  // with Cancel holding the focus: the answer that changes nothing is the one a
-  // stray Enter must never give.
-  const fileRevertBody = (target: FileRowTarget): ReactNode => (
-    <div className="sidebar-menu-question">
-      <div className="sidebar-menu-header" title={target.path}>
-        {t("files.revertHeading", { name: target.name })}
-      </div>
-      <p className="sidebar-menu-question-text">{t("files.revertQuestion")}</p>
-      <div className="sidebar-menu-question-buttons">
-        <button
-          type="button"
-          className="sidebar-menu-question-confirm"
-          onClick={() => { void revertRowChanges(target); }}
-        >
-          {t("files.revertChanges")}
-        </button>
-        {!isMobile && (
+  // The question behind a row's Revert. What it discards is not recoverable — no
+  // stash, no copy Pi Web keeps — so the item that does it is answered here, with
+  // Cancel holding the focus. A folder's question counts the files it covers and the
+  // ones it deletes; a file's says which of the two it is.
+  const fileRevertBody = (target: FileRowTarget): ReactNode => {
+    const deletes = rowDeletesFile(target);
+    return (
+      <div className="sidebar-menu-question">
+        <div className="sidebar-menu-header" title={target.path}>
+          {t(target.isDir
+            ? "files.revertFolderHeading"
+            : deletes ? "files.revertDeleteHeading" : "files.revertHeading", { name: target.name })}
+        </div>
+        <p className="sidebar-menu-question-text">
+          {target.isDir
+            ? t("files.revertFolderQuestion", { count: target.revertibleCount, deleted: target.deleteCount })
+            : t(deletes ? "files.revertDeleteQuestion" : "files.revertQuestion")}
+        </p>
+        <div className="sidebar-menu-question-buttons">
           <button
             type="button"
-            className="sidebar-menu-question-cancel"
-            data-sidebar-menu-autofocus=""
-            onClick={() => askFileRevert(false)}
+            className="sidebar-menu-question-confirm"
+            onClick={() => { void revertRowChanges(target); }}
           >
-            {t("sidebar.cancel")}
+            {t(deletes ? "files.revertDelete" : "files.revertChanges")}
           </button>
-        )}
+          {!isMobile && (
+            <button
+              type="button"
+              className="sidebar-menu-question-cancel"
+              data-sidebar-menu-autofocus=""
+              onClick={() => askFileRevert(false)}
+            >
+              {t("sidebar.cancel")}
+            </button>
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
   const archiveGroupMenuItems = (project: SidebarProject): SidebarMenuItem[] => {
     const ids = archiveDeleteIds({ projectKey: project.key });
     return [

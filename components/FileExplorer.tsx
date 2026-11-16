@@ -13,6 +13,7 @@ import {
   normalizeFilePathSlashes,
 } from "@/lib/file-paths";
 import type { GitFileStatus, GitFileStatusKind, GitStatusResponse } from "@/lib/git-types";
+import { gitRevertAction } from "@/lib/git-revert-rule";
 import type { FileIndexEntry } from "@/lib/file-fuzzy";
 import { uploadFiles, type DroppedItem, type UploadConflictStrategy, type UploadError, type UploadResponse } from "@/lib/file-upload-client";
 import { buildSearchTree, type SearchTreeNode } from "@/lib/search-tree";
@@ -65,6 +66,17 @@ export interface FileRowTarget {
    * makes sense (lib/git-revert-rule.ts); a directory row never carries one.
    */
   gitStatus: GitFileStatus | null;
+  /**
+   * How many changed files a revert would act on: a file row's own one, a folder
+   * row's recursive count of the ones an action covers, 0 when there is nothing
+   * to undo. The row's menu shows its item only above zero.
+   */
+  revertibleCount: number;
+  /**
+   * How many of those a revert deletes rather than puts back — the files HEAD
+   * never held (lib/git-revert-rule.ts). What the folder's question counts.
+   */
+  deleteCount: number;
 }
 
 interface Props {
@@ -180,6 +192,22 @@ async function fetchGitStatus(cwd: string, signal: AbortSignal): Promise<GitStat
   const res = await fetch(`/api/git/status?${params.toString()}`, { signal });
   if (!res.ok) throw new Error(`Failed to load Git status (HTTP ${res.status})`);
   return res.json() as Promise<GitStatusResponse>;
+}
+
+/**
+ * The changed files strictly under a folder, by the paths the listing gave them:
+ * what a folder row's revert would act on, each with its own action.
+ */
+function changedFilesUnder(
+  gitStatusByPath: Map<string, GitFileStatus>,
+  directoryPath: string,
+): GitFileStatus[] {
+  const prefix = `${normalizeFilePathSlashes(directoryPath)}/`;
+  const under: GitFileStatus[] = [];
+  for (const [key, status] of gitStatusByPath) {
+    if (key.startsWith(prefix)) under.push(status);
+  }
+  return under;
 }
 
 const GIT_STATUS_KEYS: Record<GitFileStatusKind, string> = {
@@ -1536,15 +1564,23 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     // to act on; this row has its own actions instead.
     event.preventDefault();
     const isDir = row.getAttribute("data-file-row-is-dir") === "true";
+    // A directory's own row may stand for a submodule, whose revert is not a
+    // file checkout, so only a file row brings its status along.
+    const gitStatus = isDir ? null : gitStatusByPath.get(normalizeFilePathSlashes(path)) ?? null;
+    // A folder's revert acts on every changed file under it, each with its own
+    // action (lib/git-revert-rule.ts): the counts the row's menu asks with.
+    const under = isDir ? changedFilesUnder(gitStatusByPath, path) : [];
+    const actions = under.map((status) => gitRevertAction(status));
+    const ownAction = gitStatus ? gitRevertAction(gitStatus) : null;
     onRowMenu(
       {
         path,
         relativePath: getRelativeFilePath(path, cwd),
         name: getFileName(path),
         isDir,
-        // A directory's own row may stand for a submodule, whose revert is not a
-        // file checkout, so only a file row brings its status along.
-        gitStatus: isDir ? null : gitStatusByPath.get(normalizeFilePathSlashes(path)) ?? null,
+        gitStatus,
+        revertibleCount: isDir ? actions.filter((action) => action !== null).length : ownAction ? 1 : 0,
+        deleteCount: isDir ? actions.filter((action) => action === "delete").length : ownAction === "delete" ? 1 : 0,
       },
       { x: event.clientX, y: event.clientY },
     );

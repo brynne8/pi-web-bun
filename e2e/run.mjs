@@ -71,6 +71,24 @@ fixtureGit("add", "--", "tracked.txt");
 fixtureGit("commit", "-qm", "seed");
 const editedText = "edited in the working tree, never committed\n";
 writeFileSync(trackedFile, editedText);
+// A folder of its own for the folder row's undo: one tracked file left modified and
+// one untracked file, so the folder's question has both kinds to count. And a file
+// Git never held, for the row's delete: one untracked, one staged for the first time.
+const bundleDir = join(gitProject, "bundle");
+const bundleFile = join(bundleDir, "kept.txt");
+const bundleFresh = join(bundleDir, "fresh.txt");
+const bundleCommitted = "committed under the fixture folder\n";
+const scratchFile = join(gitProject, "scratch.txt");
+const stagedNewFile = join(gitProject, "staged-new.txt");
+mkdirSync(bundleDir, { recursive: true });
+writeFileSync(bundleFile, bundleCommitted);
+fixtureGit("add", "--", "bundle/kept.txt");
+fixtureGit("commit", "-qm", "folder");
+writeFileSync(bundleFile, `${bundleCommitted}edited under the folder\n`);
+writeFileSync(bundleFresh, "never committed\n");
+writeFileSync(scratchFile, "not tracked by Git\n");
+writeFileSync(stagedNewFile, "staged but never committed\n");
+fixtureGit("add", "--", "staged-new.txt");
 const largeStorageFile = join(project, "large-storage.html");
 writeFileSync(largeStorageFile, largeStorageFixture);
 mkdirSync(sessionDir, { recursive: true });
@@ -580,6 +598,11 @@ try {
       // The undo, on the repository fixture: it asks first, and Shift is the way past the question.
       await page.goto(`${base}/?session=${REVERT}`, { waitUntil: "domcontentloaded" });
       await checkFileRowRevert(page, trackedFile, "tracked.txt", committedText, editedText);
+      // The delete half of the same item: a file Git never held goes away, asked first.
+      await checkFileRowRevertDelete(page, scratchFile, "scratch.txt");
+      await checkFileRowRevertDelete(page, stagedNewFile, "staged-new.txt");
+      // A folder row's undo covers every changed file under it, each with its own action.
+      await checkFileRowRevertFolder(page, bundleDir, "bundle", bundleFile, bundleCommitted, bundleFresh);
       await page.goto(`${base}/?session=${RICH}`, { waitUntil: "domcontentloaded" });
       await page.locator(".markdown-code-block pre").waitFor();
       await checkChatAppearance(page);

@@ -11,7 +11,7 @@
 //
 // What the menu holds and what each item does: docs/agents/files-and-access.md → "A row's own actions".
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { showSidebarFiles } from "./sidebar.mjs";
@@ -20,6 +20,7 @@ const LABEL = {
   mention: "Insert path into chat",
   download: "Download file",
   revert: "Revert changes",
+  delete: "Delete file",
   cancel: "Cancel",
 };
 
@@ -46,20 +47,29 @@ async function readUntil(filePath, expected) {
   return false;
 }
 
+/** Waits until the file is gone, because a delete is a request too. */
+async function waitUntilGone(filePath) {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    if (!existsSync(filePath)) return true;
+    await delay(250);
+  }
+  return false;
+}
+
 /**
- * Opens the row's menu and waits until it holds the undo.
+ * Opens the row's menu and waits until it holds `label`.
  *
  * `refreshButton` is clicked only when the caller changed the file behind the app's back,
  * and sparingly: every click runs `git status` for the project on the same server that is
  * answering the app's own requests, and a starved `GET /api/agent/[id]` is a browser error
  * the suite then blames on whatever runs next.
  */
-async function openMenuWithRevert(page, fileRow, menu, refreshButton) {
+async function openMenuWithRevert(page, fileRow, menu, refreshButton, label = LABEL.revert) {
   for (let attempt = 0; attempt < 8; attempt++) {
     if (attempt > 0 && refreshButton) await refreshButton.click().catch(() => {});
     await rightClickRow(page, fileRow);
     if (await menu.isVisible().catch(() => false)) {
-      if ((await itemNames(menu)).includes(LABEL.revert)) return;
+      if ((await itemNames(menu)).includes(label)) return;
       await page.keyboard.press("Escape");
       await menu.waitFor({ state: "detached", timeout: 5_000 });
     }
@@ -250,4 +260,114 @@ export async function checkFileRowRevert(page, filePath, name, committedText, ed
     await delay(750);
   }
   assert.fail("the reverted row never fell quiet: its menu kept offering an undo");
+}
+
+/**
+ * The same row when the file is one Git never held: untracked, or staged for the
+ * first time. There are no bytes to put back, so the item deletes the file — and
+ * it asks first exactly like the restore does, because what it discards is kept
+ * nowhere at all.
+ *
+ * @param {object} page     a page on a session whose cwd is the fixture repository
+ * @param {string} filePath the file's absolute path, as the row shows it
+ * @param {string} name     the file's name
+ */
+export async function checkFileRowRevertDelete(page, filePath, name) {
+  const showSidebar = page.getByRole("button", { name: "Show sidebar", exact: true });
+  if (await showSidebar.isVisible()) await showSidebar.click();
+  await showSidebarFiles(page);
+  const body = page.locator("#session-sidebar-panel-files .sidebar-files-body");
+  await body.waitFor({ state: "visible" });
+  const fileRow = body.locator("[data-file-row-is-dir='false']").filter({ hasText: name }).first();
+  await fileRow.waitFor({ state: "visible", timeout: 30_000 });
+  const menu = page.getByRole("menu", { name: `Actions for ${name}` });
+  const question = page.getByText(`Delete ${name}?`);
+
+  // 1. The item is there under its own name: a delete, not a restore.
+  await openMenuWithRevert(page, fileRow, menu, null, LABEL.delete);
+  assert.ok((await itemNames(menu)).includes(LABEL.delete), "a row Git never held offers the delete");
+
+  // 2. It asks first, and the answer that changes nothing holds the focus.
+  await menu.getByRole("menuitem", { name: LABEL.delete }).first().click();
+  await question.waitFor({ state: "visible", timeout: 5_000 });
+  const focused = await page.evaluate(() => document.activeElement?.textContent?.trim() ?? "");
+  assert.equal(focused, LABEL.cancel, `the question focuses Cancel: ${JSON.stringify(focused)}`);
+
+  // 3. Cancel leaves the file where it is.
+  await page.getByRole("button", { name: LABEL.cancel, exact: true }).click();
+  await menu.getByRole("menuitem", { name: LABEL.mention }).first().waitFor({ state: "visible", timeout: 5_000 });
+  assert.equal(existsSync(filePath), true, "Cancel discarded nothing");
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "detached", timeout: 5_000 });
+
+  // 4. The question's own button deletes the file, and the row goes with it.
+  await rightClickRow(page, fileRow);
+  await menu.waitFor({ state: "visible", timeout: 5_000 });
+  await menu.getByRole("menuitem", { name: LABEL.delete }).first().click();
+  await question.waitFor({ state: "visible", timeout: 5_000 });
+  await page.getByRole("button", { name: LABEL.delete, exact: true }).click();
+  assert.ok(await waitUntilGone(filePath), "the confirmed delete removed the file");
+  await page.getByText(`Deleted ${name}`).waitFor({ state: "visible", timeout: 10_000 });
+
+  console.log(`PASS: file row delete asks first at ${page.viewportSize().width}px (${name})`);
+}
+
+/**
+ * A folder row's undo: every changed file under it, each with its own action —
+ * the tracked ones back to HEAD's bytes, the ones Git never held deleted. The
+ * question counts both, and Cancel still holds the focus.
+ *
+ * @param {object} page      a page on a session whose cwd is the fixture repository
+ * @param {string} dirPath   the folder's absolute path
+ * @param {string} name      the folder's name
+ * @param {string} underFile a tracked file under the folder, whose bytes go back to HEAD
+ * @param {string} committed its bytes in HEAD
+ * @param {string} freshFile an untracked file under the folder, which is deleted
+ */
+export async function checkFileRowRevertFolder(page, dirPath, name, underFile, committed, freshFile) {
+  const showSidebar = page.getByRole("button", { name: "Show sidebar", exact: true });
+  if (await showSidebar.isVisible()) await showSidebar.click();
+  await showSidebarFiles(page);
+  const body = page.locator("#session-sidebar-panel-files .sidebar-files-body");
+  await body.waitFor({ state: "visible" });
+  const dirRow = body.locator("[data-file-row-is-dir='true']").filter({ hasText: name }).first();
+  await dirRow.waitFor({ state: "visible", timeout: 30_000 });
+  const menu = page.getByRole("menu", { name: `Actions for ${name}` });
+  const question = page.getByText("Revert this folder?");
+
+  // 1. A folder with changed files under it offers the undo.
+  await rightClickRow(page, dirRow);
+  await menu.waitFor({ state: "visible", timeout: 5_000 });
+  assert.ok((await itemNames(menu)).includes(LABEL.revert), "a folder with changes under it offers the undo");
+
+  // 2. The question counts the files it covers and the ones it deletes, and Cancel
+  // holds the focus: the answer that changes nothing is the one a stray Enter gives.
+  await menu.getByRole("menuitem", { name: LABEL.revert }).first().click();
+  await question.waitFor({ state: "visible", timeout: 5_000 });
+  const asked = await page.locator(".sidebar-menu-question-text").innerText();
+  assert.ok(asked.includes("Reverts the 2 changed files"), `the question counts the files: ${asked}`);
+  assert.ok(asked.includes("deleting the 1 Git never committed"), `the question counts the deletes: ${asked}`);
+  const focused = await page.evaluate(() => document.activeElement?.textContent?.trim() ?? "");
+  assert.equal(focused, LABEL.cancel, `the question focuses Cancel: ${JSON.stringify(focused)}`);
+
+  // 3. Cancel leaves every file under it as it was.
+  await page.getByRole("button", { name: LABEL.cancel, exact: true }).click();
+  await menu.getByRole("menuitem", { name: LABEL.mention }).first().waitFor({ state: "visible", timeout: 5_000 });
+  assert.equal(readFileSync(underFile, "utf8"), `${committed}edited under the folder\n`, "Cancel discarded nothing");
+  assert.equal(existsSync(freshFile), true, "Cancel deleted nothing");
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "detached", timeout: 5_000 });
+
+  // 4. The confirmed answer covers the whole folder: the tracked file back to
+  // HEAD's bytes, the untracked one gone, and the toast counts what it did.
+  await rightClickRow(page, dirRow);
+  await menu.waitFor({ state: "visible", timeout: 5_000 });
+  await menu.getByRole("menuitem", { name: LABEL.revert }).first().click();
+  await question.waitFor({ state: "visible", timeout: 5_000 });
+  await page.getByRole("button", { name: LABEL.revert, exact: true }).click();
+  assert.ok(await readUntil(underFile, `${committed}\n`), "the folder's tracked file went back to HEAD");
+  assert.ok(await waitUntilGone(freshFile), "the folder's untracked file was deleted");
+  await page.getByText("Reverted 2 files").waitFor({ state: "visible", timeout: 10_000 });
+
+  console.log(`PASS: folder row undo covers its files at ${page.viewportSize().width}px (${name})`);
 }

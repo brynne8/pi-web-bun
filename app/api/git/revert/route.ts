@@ -6,7 +6,8 @@ import { revertGitPath, type GitRevertResult } from "@/lib/git-revert";
 
 /**
  * POST { cwd, path } — puts one changed file back to HEAD, in the index and in
- * the working tree. What the file row's Revert changes item runs.
+ * the working tree, or takes away every changed file under a folder. What the
+ * file row's Revert changes item runs.
  *
  * A refusal carries the `code` the item's message is chosen from (lib/git-revert-rule.ts).
  */
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
     }
 
     const result: GitRevertResult = await revertGitPath(cwd, filePath);
-    if (result.reverted) return NextResponse.json({ reverted: true, filePath: result.filePath });
+    if (result.reverted) return NextResponse.json({ reverted: true, filePath: result.filePath, count: result.count });
 
     const status = result.code === "outside_repository" ? 403
       : result.code === "failed" ? 500

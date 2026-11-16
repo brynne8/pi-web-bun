@@ -103,7 +103,7 @@ app/api/
   file-index/route.ts              GET file list for @-mentions
   git/status/route.ts              GET changed files for a cwd
   git/diff/route.ts                GET diff of one changed file
-  git/revert/route.ts              POST { cwd, path } revert one changed file (index + working tree)
+  git/revert/route.ts              POST { cwd, path } revert one changed file, or every changed file under a folder (index + working tree)
   worktrees/route.ts               GET/POST/DELETE git worktrees
   terminal/route.ts                POST create a terminal session
   terminal/[id]/route.ts           GET { id, cwd } (404 once closed; stream at [id]/events) | POST input/resize | DELETE kill
@@ -242,7 +242,7 @@ lib/
   worktree.ts               project/worktree resolution and git worktree operations
   git-changes.ts            the working tree's listing: the status, the line counts, and the untracked files' lines
   git-revert.ts             one changed file back to HEAD (the file row's Revert), with its refusals
-  git-revert-rule.ts        client-safe: which changed file the Revert offers, read by the menu and the server
+  git-revert-rule.ts        client-safe: the action each changed file's Revert runs (restore, or delete a file HEAD never held), read by the menu and the server
   git-revert-request.ts     the row's revert request and how its answer becomes a toast
   git-path-access.ts        authorizes a working-tree path a git route acts on (diff, revert), absent files included
   draft-store.ts            local draft persistence
