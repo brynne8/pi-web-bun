@@ -29,6 +29,7 @@ import { isExternalMarkdownHref, jumpToMarkdownFragment, markdownAppUrlTransform
 import { CodeBlock, MermaidBlock } from "./MermaidBlock";
 import { DelimitedTable } from "./DelimitedTable";
 import { isDelimitedTablePath } from "@/lib/delimited-table";
+import { decideFileDisplay } from "@/lib/file-viewer-display";
 import { FrontmatterCard } from "./FrontmatterCard";
 import { diffGapLabel, parseUnifiedPatch, unifiedDiffLines, type SplitDiffGap, type UnifiedDiffLine } from "@/lib/patch";
 import type { GitFileDiffResponse } from "@/lib/git-types";
@@ -591,7 +592,7 @@ const DiffLineCode = memo(function DiffLineCode({
   );
 });
 
-function DiffView({
+export function DiffView({
   patch,
   wrapLines,
   language = "text",
@@ -1812,30 +1813,20 @@ function TextFileViewer({
     [data],
   );
 
-  const viewerContent = data?.content ?? "";
-  const sourceLines = useMemo(() => viewerContent.split("\n"), [viewerContent]);
-  const language = data?.language ?? "text";
+  const display = useMemo(() => decideFileDisplay({
+    filePath, data, displayMode, hasGitDiff, isDeletedDiff, isDelimitedTablePath,
+  }), [filePath, data, displayMode, hasGitDiff, isDeletedDiff]);
+  const {
+    viewerContent, sourceLines, language, isHtml, isMarkdown, hasPreview,
+    effectiveDisplayMode, showingSource, showLoadMore,
+  } = display;
   // Plain text needs no Prism languages; any other file loads them once.
   const prismReady = usePrismLanguages(Boolean(data) && language !== "text");
-  const isHtml = !isBinary && language === "html";
-  const isMarkdown = !isBinary && language === "markdown";
-  // A table shows a loaded prefix too, without its cut last record; an HTML
-  // preview fetches the whole file up to HTML_PREVIEW_MAX_BYTES.
-  const hasPreview = isDelimitedTable || (isHtml
-    ? !!data && (!data.truncated || data.size <= HTML_PREVIEW_MAX_BYTES)
-    : isMarkdown && !data?.truncated);
-  const effectiveDisplayMode = isDeletedDiff ? "diff" : displayMode;
   const rawHtml = data?.truncated ? htmlFull?.text : viewerContent;
   const htmlPreview = useMemo(
     () => isHtml && effectiveDisplayMode === "preview" ? injectSandboxedHtmlPolyfill(rawHtml ?? "") : "",
     [isHtml, effectiveDisplayMode, rawHtml],
   );
-  // A partly loaded HTML file previews whole, so Load more belongs to its source view.
-  const showLoadMore = !!data?.truncated && !(isHtml && effectiveDisplayMode === "preview");
-  // Everything that is drawn as source lines: not a rendered preview (markdown,
-  // HTML, CSV table) and not the diff. Only then does the line list window.
-  const showingSource = !(effectiveDisplayMode === "diff" && hasGitDiff)
-    && !(effectiveDisplayMode === "preview" && hasPreview);
   const sourceVirtual = useVirtualLines({
     totalLines: sourceLines.length,
     scrollRef: contentRef,

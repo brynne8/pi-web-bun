@@ -1,183 +1,204 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import test from "node:test";
-import { Script } from "node:vm";
-import ts from "typescript";
-import { createJiti } from "jiti";
+import test, { mock } from "node:test";
+import { SESSION, json, withAgentSession } from "./__fixtures__/agent-session-harness.mjs";
 
-const jiti = createJiti(import.meta.url, { interopDefault: true, moduleCache: false });
-const { missingCwdFromBody } = await jiti.import("../lib/missing-cwd.ts");
+// A models read that fails stays visible through bounded retries (2 s, 5 s, 10 s) and
+// clears when one succeeds; a folder that no longer exists is reported as that.
 
-const source = ts.createSourceFile(
-  "useAgentSession.ts",
-  await readFile(new URL("./useAgentSession.ts", import.meta.url), "utf8"),
-  ts.ScriptTarget.Latest,
-  true,
-);
-const nodes = [];
-function visit(node) {
-  nodes.push(node);
-  ts.forEachChild(node, visit);
+const CATALOG = {
+  models: { "custom:test": "Test", "custom:fast": "Fast" },
+  modelList: [{ provider: "custom", id: "test", name: "Test" }, { provider: "custom", id: "fast", name: "Fast" }],
+  defaultModel: { provider: "custom", modelId: "test" },
+  thinkingLevelPins: { "custom/test": "high", "custom/fast": "low" },
+};
+
+/** The models route, answered by `reply(attempt)`; every other request takes the defaults. */
+function modelsRoute(reply) {
+  let attempts = 0;
+  const route = (entry) => (entry.url.startsWith("/api/models") ? reply(++attempts) : undefined);
+  route.attempts = () => attempts;
+  return route;
 }
-visit(source);
-const loader = nodes.find((node) => ts.isVariableDeclaration(node) && node.name.getText(source) === "loadModels");
-const schedule = nodes.find((node) => ts.isVariableDeclaration(node) && node.name.getText(source) === "MODELS_RETRY_DELAYS_MS");
-const effect = nodes.find((node) => ts.isCallExpression(node)
-  && node.expression.getText(source) === "useEffect"
-  && node.arguments[1]?.getText(source) === "[loadModels, modelsRefreshKey]");
-const retry = effect.arguments[0].body.statements.find(ts.isExpressionStatement).expression;
-function script(text) {
-  return new Script(ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText);
-}
-const loadScript = script(`(${loader.initializer.arguments[0].getText(source)})`);
-const retryScript = script(retry.getText(source));
 
-function setup(fetchImpl) {
-  const writes = [];
-  const delays = [];
-  const context = {
-    Error, DOMException,
-    controller: new AbortController(),
-    newSessionCwd: "/project", session: null, isNew: true,
-    sessionIdRef: { current: null }, thinkingLevelOverrideRef: { current: null }, newSessionModelOverrideRef: { current: null },
-    thinkingLevelPinsRef: { current: {} }, defaultThinkingLevelRef: { current: null }, allModelsLoadRef: { current: null },
-    asConcreteThinkingLevel: (value) => (!value || value === "auto" ? null : value),
-    fetch: fetchImpl,
-    missingCwdFromBody,
-    MODELS_RETRY_DELAYS_MS: script(schedule.initializer.getText(source)).runInNewContext(),
-    delay: async (ms) => { delays.push(ms); },
-  };
-  for (const name of ["ModelError", "ModelsMissingCwd", "ModelNames", "ModelScopeWarnings", "IsModelScopeActive", "AllModelList", "ModelThinkingLevels", "ModelThinkingLevelMaps", "ModelList", "NewSessionDefaultModel", "NewSessionDefaultThinkingLevel", "SavedDefaultThinkingLevel", "NewSessionModel"]) {
-    context[`set${name}`] = (value) => writes.push([name, value]);
-  }
-  context.loadModels = loadScript.runInNewContext(context);
-  return { context, writes, delays, run: () => retryScript.runInNewContext(context) };
+/** With mock timers on, a retry runs only when the test moves the clock. */
+async function pass(env, ms) {
+  mock.timers.tick(ms);
+  await env.settle();
 }
 
 test("model-load failures stay visible through bounded retries and clear on recovery", async () => {
-  for (const [fetchImpl, expected] of [
-    [async () => { throw new TypeError("Failed to fetch"); }, "Failed to fetch"],
-    [async () => Response.json({ error: "Access denied" }, { status: 403 }), "Access denied"],
-    [async () => new Response("Unavailable", { status: 503 }), "Failed to load models (HTTP 503)"],
-    [async () => ({ ok: true, json: async () => { throw new SyntaxError("Invalid JSON"); } }), "Invalid JSON"],
-  ]) {
-    const state = setup(fetchImpl);
-    await state.run();
-    assert.deepEqual(state.delays, [2_000, 5_000, 10_000]);
-    assert.deepEqual(state.writes.filter(([name]) => name === "ModelError"), Array.from({ length: 4 }, () => ["ModelError", expected]));
-    assert.deepEqual(state.writes.filter(([name]) => name === "ModelsMissingCwd"), Array.from({ length: 4 }, () => ["ModelsMissingCwd", null]));
+  const failures = [
+    [() => { throw new TypeError("Failed to fetch"); }, "Failed to fetch"],
+    [() => json({ error: "Access denied" }, 403), "Access denied"],
+    [() => new Response("Unavailable", { status: 503 }), "Failed to load models (HTTP 503)"],
+    [() => ({ ok: true, json: async () => { throw new SyntaxError("Invalid JSON"); } }), "Invalid JSON"],
+  ];
+  for (const [reply, expected] of failures) {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      const route = modelsRoute(() => reply());
+      await withAgentSession({ handle: route }, async (env) => {
+        assert.equal(route.attempts(), 1);
+        await pass(env, 1_999);
+        assert.equal(route.attempts(), 1, "the first retry waits 2 s");
+        await pass(env, 1);
+        assert.equal(route.attempts(), 2);
+        await pass(env, 5_000);
+        assert.equal(route.attempts(), 3);
+        await pass(env, 10_000);
+        assert.equal(route.attempts(), 4);
+        await pass(env, 60_000);
+        assert.equal(route.attempts(), 4, "the retries stop");
+        assert.equal(env.hook.result.modelError, expected);
+        assert.equal(env.hook.result.missingCwd, null);
+      });
+    } finally {
+      mock.timers.reset();
+    }
   }
+});
 
-  let attempts = 0;
-  const recovered = setup(async () => {
-    if (++attempts === 1) throw new TypeError("Failed to fetch");
-    return Response.json({
-      models: { "custom:test": "Test" },
-      modelList: [{ provider: "custom", id: "test", name: "Test" }],
-      defaultModel: { provider: "custom", modelId: "test" },
-      thinkingLevelPins: { "custom/test": "high" },
+test("a load recovered on its first retry clears the error and shows the catalog", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const route = modelsRoute((attempt) => {
+      if (attempt === 1) throw new TypeError("Failed to fetch");
+      return json(CATALOG);
     });
-  });
-  await recovered.run();
-  assert.equal(attempts, 2);
-  assert.deepEqual(recovered.delays, [2_000]);
-  assert.deepEqual(recovered.writes.filter(([name]) => name === "ModelError"), [["ModelError", "Failed to fetch"], ["ModelError", null]]);
-  assert.ok(recovered.writes.some(([name, value]) => name === "ModelList" && value[0].id === "test"));
-  assert.ok(recovered.writes.some(([name, value]) => name === "NewSessionDefaultModel" && value.modelId === "test"));
-  assert.ok(recovered.writes.some(([name, value]) => name === "NewSessionDefaultThinkingLevel" && value === "high"));
+    await withAgentSession({ session: null, newSessionCwd: "/project", handle: route }, async (env) => {
+      await pass(env, 2_000);
+      assert.equal(route.attempts(), 2);
+      assert.equal(env.hook.result.modelError, null);
+      assert.deepEqual(env.hook.result.modelList.map(({ id }) => id), ["test", "fast"]);
+      assert.deepEqual(env.hook.result.displayModel, { provider: "custom", modelId: "test" });
+      assert.equal(env.hook.result.thinkingLevel, "high");
+    });
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("a folder that no longer exists is reported as such, not as a model error (#1422)", async () => {
-  let attempts = 0;
-  const state = setup(async () => {
-    if (++attempts <= 2) {
-      return Response.json({ error: "Directory does not exist: /old/app", reason: "cwd-missing", cwd: "/old/app" }, { status: 400 });
-    }
-    return Response.json({ models: {}, modelList: [] });
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const route = modelsRoute((attempt) => (attempt <= 2
+      ? json({ error: "Directory does not exist: /old/app", reason: "cwd-missing", cwd: "/old/app" }, 400)
+      : json({ models: {}, modelList: [] })));
+    await withAgentSession({ session: null, newSessionCwd: "/project", handle: route }, async (env) => {
+      await pass(env, 2_000);
+      assert.equal(route.attempts(), 2);
+      assert.equal(env.hook.result.missingCwd, "/old/app");
+      assert.equal(env.hook.result.modelError, null);
+      await pass(env, 5_000);
+      assert.equal(route.attempts(), 3);
+      assert.equal(env.hook.result.missingCwd, null, "the folder the next answer lists is back");
+      assert.equal(env.hook.result.modelError, null);
+    });
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("a models read from a removed worktree's main repo never clears a refused prompt's folder", async () => {
+  await withAgentSession({
+    session: SESSION,
+    handle: (entry) => (entry.body?.type === "prompt"
+      ? json({ error: "Directory does not exist: /old/app", reason: "cwd-missing", cwd: "/old/app", code: "prompt_rejected", accepted: false }, 500)
+      : undefined),
+  }, async (env) => {
+    await env.connect();
+    await env.hook.result.handleSend("hi");
+    await env.settle();
+    assert.equal(env.hook.result.missingCwd, "/old/app");
+    // A models load that succeeds reads from the removed worktree's main repo.
+    await env.rerender({ modelsRefreshKey: 1 });
+    assert.equal(env.hook.result.missingCwd, "/old/app");
   });
-  await state.run();
-  assert.equal(attempts, 3);
-  assert.deepEqual(state.writes.filter(([name]) => name === "ModelsMissingCwd" || name === "ModelError"), [
-    ["ModelsMissingCwd", "/old/app"], ["ModelError", null],
-    ["ModelsMissingCwd", "/old/app"], ["ModelError", null],
-    ["ModelsMissingCwd", null], ["ModelError", null],
-  ]);
-  // A load answered from a removed worktree's main repo succeeds while the folder
-  // is still gone: it never clears what a refused prompt reported.
-  assert.equal(loader.getText(source).includes("setPromptMissingCwd"), false);
 });
 
 test("cancelling model loads prevents state writes and further retries", async () => {
   for (const status of [200, 403]) {
-    const reading = Promise.withResolvers();
-    const state = setup(async (_url, { signal }) => ({
-      ok: status === 200, status,
-      json: () => new Promise((_resolve, reject) => {
-        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-        reading.resolve();
-      }),
-    }));
-    const completed = state.run();
-    await reading.promise;
-    state.context.controller.abort();
-    await completed;
-    assert.deepEqual(state.writes, []);
-    assert.deepEqual(state.delays, []);
+    const answers = [Promise.withResolvers(), Promise.withResolvers()];
+    const route = modelsRoute((attempt) => answers[attempt - 1].promise);
+    await withAgentSession({ handle: route }, async (env) => {
+      // A refresh aborts the load under way and starts its own.
+      await env.rerender({ modelsRefreshKey: 1 });
+      assert.equal(route.attempts(), 2);
+      answers[0].resolve(status === 200 ? json(CATALOG) : json({ error: "Access denied" }, status));
+      await env.settle();
+      assert.deepEqual(env.hook.result.modelList, [], "an aborted load writes nothing");
+      assert.equal(env.hook.result.modelError, null);
+      answers[1].resolve(json({ models: {}, modelList: [] }));
+      await env.settle();
+    });
   }
 
-  const late = setup(async (_url, { signal }) => ({
-    ok: true,
-    json: async () => {
-      late.context.controller.abort();
-      assert.equal(signal.aborted, true);
-      return { models: {}, modelList: [] };
-    },
-  }));
-  await late.run();
-  assert.deepEqual(late.writes, []);
+  // The reply that arrives after the abort, from a body already being read.
+  const answers = [Promise.withResolvers(), Promise.withResolvers()];
+  const late = modelsRoute((attempt) => answers[attempt - 1].promise);
+  await withAgentSession({ handle: late }, async (env) => {
+    await env.rerender({ modelsRefreshKey: 1 });
+    answers[0].resolve({ ok: true, json: async () => CATALOG });
+    await env.settle();
+    assert.deepEqual(env.hook.result.modelList, []);
+    answers[1].resolve(json({ models: {}, modelList: [] }));
+    await env.settle();
+  });
 
-  let attempts = 0;
-  const waiting = setup(async () => { attempts++; throw new TypeError("Failed to fetch"); });
-  waiting.context.delay = async () => waiting.context.controller.abort();
-  await waiting.run();
-  assert.equal(attempts, 1);
+  // A load cancelled while it waits to retry does not retry.
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const retrying = modelsRoute(() => json({ error: "Unavailable" }, 503));
+    await withAgentSession({ handle: retrying }, async (env) => {
+      assert.equal(retrying.attempts(), 1);
+      await env.rerender({ modelsRefreshKey: 1 });
+      await pass(env, 2_000);
+      await pass(env, 5_000);
+      await pass(env, 10_000);
+      await pass(env, 60_000);
+      assert.equal(retrying.attempts(), 5, "only the second load's own four attempts ran");
+    });
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("a picked model the folder offers keeps its pinned reasoning level; one it does not list goes back to automatic", async () => {
-  const catalog = {
-    models: { "custom:test": "Test", "custom:fast": "Fast" },
-    modelList: [{ provider: "custom", id: "test", name: "Test" }, { provider: "custom", id: "fast", name: "Fast" }],
-    defaultModel: { provider: "custom", modelId: "test" },
-    thinkingLevelPins: { "custom/test": "high", "custom/fast": "low" },
-  };
+  const pick = (model) => ({ initialNewSessionChoices: { model, thinkingLevel: null } });
+
   // Carried over from the composer this one replaced, and offered here.
-  const offered = setup(async () => Response.json(catalog));
-  const fast = { provider: "custom", modelId: "fast" };
-  offered.context.newSessionModelOverrideRef.current = fast;
-  await offered.run();
-  assert.equal(offered.context.newSessionModelOverrideRef.current, fast);
-  assert.ok(!offered.writes.some(([name]) => name === "NewSessionModel"));
-  assert.ok(offered.writes.some(([name, value]) => name === "NewSessionDefaultThinkingLevel" && value === "low"));
+  await withAgentSession({ session: null, newSessionCwd: "/project", props: pick({ provider: "custom", modelId: "fast" }), handle: modelsRoute(() => json(CATALOG)) }, async (env) => {
+    assert.deepEqual(env.hook.result.newSessionModel, { provider: "custom", modelId: "fast" });
+    assert.equal(env.hook.result.thinkingLevel, "low");
+  });
 
   // A model another project scoped in that this one does not list.
-  const missing = setup(async () => Response.json(catalog));
-  missing.context.newSessionModelOverrideRef.current = { provider: "other", modelId: "gone" };
-  await missing.run();
-  assert.equal(missing.context.newSessionModelOverrideRef.current, null);
-  assert.ok(missing.writes.some(([name, value]) => name === "NewSessionModel" && value === null));
-  assert.ok(missing.writes.some(([name, value]) => name === "NewSessionDefaultThinkingLevel" && value === "high"));
+  await withAgentSession({ session: null, newSessionCwd: "/project", props: pick({ provider: "other", modelId: "gone" }), handle: modelsRoute(() => json(CATALOG)) }, async (env) => {
+    assert.equal(env.hook.result.newSessionModel, null);
+    assert.equal(env.hook.result.isAutoThinkingSelection, true);
+    assert.equal(env.hook.result.thinkingLevel, "high");
+  });
 
   // A failed load answers 200 with no models (withSafeModelLoadFailure): nothing to compare with, the pick stays.
-  const failed = setup(async () => Response.json({ models: {}, modelList: [], defaultModel: null, modelError: "Models could not be loaded" }));
-  failed.context.newSessionModelOverrideRef.current = fast;
-  await failed.run();
-  assert.equal(failed.context.newSessionModelOverrideRef.current, fast);
-  assert.ok(!failed.writes.some(([name]) => name === "NewSessionModel"));
+  await withAgentSession({ session: null, newSessionCwd: "/project", props: pick({ provider: "custom", modelId: "fast" }), handle: modelsRoute(() => json({ models: {}, modelList: [], defaultModel: null, modelError: "Models could not be loaded" })) }, async (env) => {
+    assert.deepEqual(env.hook.result.newSessionModel, { provider: "custom", modelId: "fast" });
+  });
 
   // Once the session exists it keeps whatever it was started with.
-  const started = setup(async () => Response.json(catalog));
-  started.context.sessionIdRef.current = "live";
-  started.context.newSessionModelOverrideRef.current = { provider: "other", modelId: "gone" };
-  await started.run();
-  assert.deepEqual(started.context.newSessionModelOverrideRef.current, { provider: "other", modelId: "gone" });
+  const catalogs = [CATALOG, { models: {}, modelList: [{ provider: "custom", id: "test", name: "Test" }], defaultModel: { provider: "custom", modelId: "test" } }];
+  let load = 0;
+  await withAgentSession({
+    session: null,
+    newSessionCwd: "/project",
+    props: pick({ provider: "custom", modelId: "fast" }),
+    handle: modelsRoute(() => json(catalogs[Math.min(load++, 1)])),
+  }, async (env) => {
+    const sending = env.hook.result.handleSend("start it");
+    await env.settle();
+    await env.connect();
+    await sending;
+    await env.rerender({ modelsRefreshKey: 1 });
+    assert.equal(load, 2, "the reload answered a catalog without the pick");
+    assert.deepEqual(env.hook.result.newSessionModel, { provider: "custom", modelId: "fast" });
+  });
 });

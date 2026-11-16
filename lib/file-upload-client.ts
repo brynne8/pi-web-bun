@@ -96,3 +96,48 @@ export function dropMentionText(files: File[], present: string[]): string {
     .map((file) => buildAtMentionText(file.name, false))
     .join("");
 }
+
+/**
+ * Files dropped or picked into the chat: images attach to the prompt, everything else
+ * uploads into the working directory — never replacing a file already there — and comes
+ * back as @mentions. The composer's attach button takes this same path, for phones that
+ * cannot drop files.
+ */
+export interface DroppedFilesDeps {
+  /** The working directory the files land in, when the page has one. */
+  cwd: string | null;
+  uploadFiles: (targetDirectory: string, files: File[], strategy: UploadConflictStrategy) => Promise<UploadResponse & { status: number; data: UploadResponse }>;
+  dropMentionText: (files: File[], present: string[]) => string | null;
+  addNotice: (notice: { type: "error" | "warning" | "success" | "info"; message: string }) => void;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+  insertText?: (text: string) => void;
+  onFilesUploaded?: () => void;
+}
+
+export async function uploadDroppedFiles(files: File[], deps: DroppedFilesDeps): Promise<void> {
+  if (!deps.cwd) {
+    deps.addNotice({ type: "warning", message: deps.t("chat.dropNeedsCwd") });
+    return;
+  }
+  try {
+    const { status, data } = await deps.uploadFiles(deps.cwd, files, "skip");
+    const body = data ?? {};
+    if (status !== 200 && status !== 207) throw new Error(body.error ?? `HTTP ${status}`);
+    const uploaded = body.uploaded ?? [];
+    const skipped = body.skipped ?? [];
+    const mentions = deps.dropMentionText(files, [...uploaded, ...skipped]);
+    if (mentions) deps.insertText?.(mentions);
+    if (uploaded.length > 0) {
+      deps.addNotice({ type: "success", message: deps.t("chat.dropUploaded", { count: uploaded.length }) });
+      deps.onFilesUploaded?.();
+    }
+    if (skipped.length > 0) {
+      deps.addNotice({ type: "warning", message: deps.t("chat.dropAlreadyExists", { names: skipped.join(", ") }) });
+    }
+    for (const failure of body.errors ?? []) {
+      deps.addNotice({ type: "error", message: deps.t("chat.dropFailed", { message: `${failure.name}: ${failure.error}` }) });
+    }
+  } catch (uploadError) {
+    deps.addNotice({ type: "error", message: deps.t("chat.dropFailed", { message: uploadError instanceof Error ? uploadError.message : String(uploadError) }) });
+  }
+}

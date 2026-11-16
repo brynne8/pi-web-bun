@@ -1,118 +1,69 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
-import ts from "typescript";
+import { json, withAgentSession } from "./__fixtures__/agent-session-harness.mjs";
 
 // `/compact` must not hold the composer hostage. runBuiltinCommand keeps the
 // composer's <fieldset> disabled until the builtin command resolves, and a
 // manual compaction is a blocking POST for the whole compaction, so awaiting it
 // in the command handler left the input box dead until a remount. The command
-// completes at once and runs the compaction detached (the Compact button's
-// handleCompact), which reports itself: Compacting status, Stop compaction,
-// result banner, error.
+// completes at once and runs the compaction detached, which reports itself:
+// Compacting status, Stop compaction, result banner, error.
 
-const read = async (path) => (await readFile(new URL(path, import.meta.url), "utf8")).replace(/\r\n/g, "\n");
-const hookSource = await read("./useAgentSession.ts");
-const hookFile = ts.createSourceFile("useAgentSession.ts", hookSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-
-/** The function a `const <name> = useCallback(fn, deps)` declaration wraps, as JavaScript. */
-function callbackSource(name) {
-  let found;
-  const visit = (node) => {
-    if (found) return;
-    if (
-      ts.isVariableDeclaration(node)
-      && node.name.getText(hookFile) === name
-      && node.initializer
-      && ts.isCallExpression(node.initializer)
-      && node.initializer.expression.getText(hookFile) === "useCallback"
-    ) {
-      found = node.initializer.arguments[0];
-      return;
-    }
-    ts.forEachChild(node, visit);
+/** The compact POST blocks for the whole compaction, as the real one does. */
+function compaction() {
+  const gate = Promise.withResolvers();
+  return {
+    gate,
+    handle: (entry) => (entry.body?.type === "compact" ? gate.promise : undefined),
   };
-  visit(hookFile);
-  assert.ok(found, `useCallback ${name} not found`);
-  return ts.transpileModule(`(${found.getText(hookFile)})`, {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
-  }).outputText.trim().replace(/;$/, "");
 }
 
-const CALLBACKS = ["handleCompact", "handleBuiltinSlashCommand"];
-const compiled = Object.fromEntries(CALLBACKS.map((name) => [
-  name,
-  // The callbacks read hook state as free variables; `with` resolves them from the scope.
-  new Function("scope", `with (scope) { return ${callbackSource(name)}; }`),
-]));
+/** The composer's handle, with every method it may reach for. */
+const composer = (restored) => ({ current: new Proxy({ prependText: (text) => restored.push(text) }, {
+  get: (target, key) => target[key] ?? (() => {}),
+}) });
 
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
-  return { promise, resolve, reject };
-}
-
-function hook() {
-  const calls = { notices: [], compacting: [], compactErrors: [], compactResults: [], requests: [], reloads: [], promoted: 0, restored: [] };
-  const compact = deferred();
-  const scope = {
-    sessionIdRef: { current: "session-1" },
-    ensureNewSession: async () => "session-1",
-    addNotice: (notice) => calls.notices.push(notice),
-    isCompacting: false,
-    setIsCompacting: (value) => calls.compacting.push(value),
-    setCompactError: (error) => calls.compactErrors.push(error),
-    setCompactResult: (result) => calls.compactResults.push(result),
-    readCompactResult: (result) => result,
-    // The compact POST blocks for the whole compaction, as the real one does.
-    sendAgentCommand: (sid, command) => {
-      calls.requests.push(command);
-      return compact.promise;
-    },
-    loadSession: async (...args) => { calls.reloads.push(args); return true; },
-    promoteNewSession: () => { calls.promoted += 1; },
-    opts: { chatInputRef: { current: { prependText: (text) => calls.restored.push(text) } } },
-  };
-  for (const name of CALLBACKS) scope[name] = compiled[name](scope);
-  return { run: scope.handleBuiltinSlashCommand, calls, finishCompaction: compact.resolve, failCompaction: compact.reject };
-}
+const compactRequests = (requests) => requests.filter((entry) => entry.body?.type === "compact").map((entry) => entry.body);
 
 test("/compact completes at once and runs the compaction detached", async () => {
-  const { run, calls, finishCompaction } = hook();
-  // The compact POST never resolves within this await: the command must still return.
-  assert.deepEqual(await run("/compact"), { handled: true, action: "compact" });
-  // No completion notice: the compaction's own UI is the answer.
-  assert.deepEqual(calls.notices, []);
-  // The detached compaction started and holds the Compacting state meanwhile.
-  assert.deepEqual(calls.compacting, [true]);
-  assert.deepEqual(calls.requests.map((command) => command.type), ["compact"]);
+  const { gate, handle } = compaction();
+  await withAgentSession({ handle }, async (env) => {
+    // The compact POST never resolves within this await: the command must still return.
+    assert.deepEqual(await env.hook.result.handleBuiltinSlashCommand("/compact"), { handled: true, action: "compact" });
+    await env.settle();
+    // No completion notice: the compaction's own UI is the answer.
+    assert.deepEqual(env.hook.result.notices, []);
+    // The detached compaction started and holds the Compacting state meanwhile.
+    assert.equal(env.hook.result.isCompacting, true);
+    assert.equal(env.hook.result.compactResult, null);
+    assert.deepEqual(compactRequests(env.requests).map(({ type }) => type), ["compact"]);
 
-  finishCompaction({ tokensBefore: 10 });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(calls.compacting, [true, false]);
-  // The reset at the start, then the compaction's own result banner.
-  assert.deepEqual(calls.compactResults, [null, { tokensBefore: 10 }]);
-  assert.equal(calls.promoted, 1);
-  assert.equal(calls.reloads.length, 1);
-  assert.equal(calls.reloads[0][0], "session-1");
-  assert.equal(calls.reloads[0][1] ?? false, false,
-    "refreshing the compacted history must not unmount the focused composer with a loading screen");
+    gate.resolve(json({ success: true, data: { tokensBefore: 10, estimatedTokensAfter: 5 } }));
+    await env.settle();
+    assert.equal(env.hook.result.isCompacting, false);
+    assert.deepEqual(env.hook.result.compactResult, { reason: "manual", tokensBefore: 10, estimatedTokensAfter: 5 });
+    assert.equal(env.hook.result.loading, false, "refreshing the compacted history must not unmount the focused composer with a loading screen");
+  });
 });
 
 test("/compact passes its instructions to the detached compaction", async () => {
-  const { run, calls, finishCompaction } = hook();
-  assert.deepEqual(await run("/compact keep the tests"), { handled: true, action: "compact" });
-  assert.equal(calls.requests[0].customInstructions, "keep the tests");
-  finishCompaction({});
-  await new Promise((resolve) => setImmediate(resolve));
+  const { gate, handle } = compaction();
+  await withAgentSession({ handle }, async (env) => {
+    assert.deepEqual(await env.hook.result.handleBuiltinSlashCommand("/compact keep the tests"), { handled: true, action: "compact" });
+    assert.equal(compactRequests(env.requests)[0].customInstructions, "keep the tests");
+    gate.resolve(json({ success: true, data: {} }));
+    await env.settle();
+  });
 });
 
 test("/compact gives its instructions back when the compaction fails", async () => {
-  const { run, calls, failCompaction } = hook();
-  await run("/compact keep the tests");
-  failCompaction(new Error("Nothing to compact (session too small)"));
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(calls.compactErrors.at(-1), "Nothing to compact (session too small)");
-  assert.deepEqual(calls.restored, ["/compact keep the tests"]);
+  const { gate, handle } = compaction();
+  const restored = [];
+  await withAgentSession({ handle, props: { chatInputRef: composer(restored) } }, async (env) => {
+    await env.hook.result.handleBuiltinSlashCommand("/compact keep the tests");
+    gate.resolve(json({ error: "Nothing to compact (session too small)" }, 500));
+    await env.settle();
+    assert.equal(env.hook.result.compactError, "Nothing to compact (session too small)");
+    assert.deepEqual(restored, ["/compact keep the tests"]);
+  });
 });

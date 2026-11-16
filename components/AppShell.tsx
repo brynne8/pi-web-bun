@@ -6,8 +6,10 @@ import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar, type SelectSessionOptions, type SessionSidebarControl } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { NewSessionContextBar, type NewSessionContextControl } from "./NewSessionContextBar";
+import { TopBarRightGroup } from "./TopBarRightGroup";
 import type { ChatScrollPosition } from "@/lib/chat-scroll-position";
 import { TabBar, type Tab } from "./TabBar";
+import { sidebarOpenForBreakpoint, toggleSidebar } from "@/lib/sidebar-breakpoint";
 import { movePanelTab, orderPanelTabs } from "@/lib/panel-tab-order";
 import { openFileTab, saveFileViewerState, saveParkedFileViewerState, switchFileWorkspace, type ParkedFileWorkspace } from "./file-tab-state";
 import type { ProjectTrustFailure } from "./ProjectTrustDialog";
@@ -139,6 +141,7 @@ function lastBgOutputTabId(tabs: readonly { taskId: string }[]): string | null {
   const last = tabs.at(-1);
   return last ? `bg:${last.taskId}` : null;
 }
+
 
 export function AppShell() {
   const router = useRouter();
@@ -378,7 +381,7 @@ export function AppShell() {
   // is visible on load. Runs once the breakpoint resolves after hydration.
   // Mobile drawer actions must not change the remembered desktop preference.
   useEffect(() => {
-    setSidebarOpen(isMobile ? false : desktopSidebarOpenRef.current);
+    setSidebarOpen(sidebarOpenForBreakpoint(isMobile, desktopSidebarOpenRef.current));
   }, [isMobile]);
   useEffect(() => {
     setMobileSidebarReady(true);
@@ -545,9 +548,11 @@ export function AppShell() {
       setMobileToolbarMoreOpen(false);
     }
     setSidebarOpen((open) => {
-      const next = !open;
-      if (!isMobile) desktopSidebarOpenRef.current = next;
-      return next;
+      const next = toggleSidebar({
+        isMobile, sidebarOpen: open, desktopSidebarOpen: desktopSidebarOpenRef.current,
+      });
+      desktopSidebarOpenRef.current = next.desktopSidebarOpen;
+      return next.sidebarOpen;
     });
   }, [isMobile]);
 
@@ -2600,10 +2605,10 @@ export function AppShell() {
           {!isMobile && renderProjectTrustWarning(false)}
           {!isMobile && renderChatToolbarActions(false)}
           {!isMobile && (
-            <div data-top-bar-group="right" style={{ marginLeft: "auto", display: "flex", alignItems: "center", height: "100%", minWidth: 0 }}>
+            <TopBarRightGroup>
               {renderSessionStatsButton(false)}
               {renderMainFileToggle(false)}
-            </div>
+            </TopBarRightGroup>
           )}
           {isMobile && sessionHasBranches && (
             <BranchNavigator

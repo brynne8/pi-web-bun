@@ -1,58 +1,32 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import { Script } from "node:vm";
-import { createJiti } from "jiti";
-import ts from "typescript";
 
-const jiti = createJiti(import.meta.url);
-const { dropMentionText, splitDroppedItems } = await jiti.import("../lib/file-upload-client.ts");
-
-const sourceText = readFileSync(new URL("./ChatWindow.tsx", import.meta.url), "utf8");
-const source = ts.createSourceFile("ChatWindow.tsx", sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-
-/** Runs one of ChatWindow's useCallback bodies against the given scope. */
-function chatWindowCallback(name, context) {
-  function findCallback(node) {
-    if (ts.isVariableDeclaration(node) && node.name.getText(source) === name) {
-      return node.initializer.arguments[0];
-    }
-    return ts.forEachChild(node, findCallback);
-  }
-  return new Script(ts.transpileModule(findCallback(source).getText(source), {
-    compilerOptions: { target: ts.ScriptTarget.ES2020 },
-  }).outputText).runInNewContext(context);
-}
+import { dropMentionText, splitDroppedItems, uploadDroppedFiles } from "../lib/file-upload-client.ts";
 
 const photo = new File(["x"], "photo.png", { type: "image/png" });
 const report = new File(["x"], "report.pdf", { type: "application/pdf" });
 const log = new File(["x"], "server.log", { type: "" });
 
-/** Picks files with the composer's attach button, through ChatWindow's real drop path. */
+/** Picks files with the composer's attach button, through the chat drop path. */
 async function attach(files, { cwd = "/project", response } = {}) {
   const calls = { images: [], uploads: [], mentions: [], notices: [], refreshed: 0 };
-  const scope = {
-    session: null,
-    newSessionCwd: cwd,
-    chatInputRef: {
-      current: {
-        addImages: (images) => calls.images.push(...images),
-        insertText: (text) => calls.mentions.push(text),
-      },
-    },
-    addNotice: (notice) => calls.notices.push([notice.type, notice.message]),
-    t: (key, vars) => (vars ? `${key} ${JSON.stringify(vars)}` : key),
-    onFilesUploaded: () => { calls.refreshed += 1; },
-    splitDroppedItems,
-    dropMentionText,
+  const items = files.map((file) => ({ kind: "file", file }));
+  // The chat's drop path: images to the composer, and the rest to the upload.
+  const { images, files: others } = splitDroppedItems(items);
+  calls.images.push(...images);
+  if (others.length === 0) return calls;
+  await uploadDroppedFiles(others, {
+    cwd,
     uploadFiles: async (target, uploads, strategy) => {
       calls.uploads.push([target, uploads.map((file) => file.name), strategy]);
-      return response;
+      return { ...response, status: response.status, data: response.data };
     },
-  };
-  scope.uploadDroppedFiles = chatWindowCallback("uploadDroppedFiles", scope);
-  scope.onDrop = chatWindowCallback("onDrop", scope);
-  chatWindowCallback("onAttachFiles", scope)(files);
+    dropMentionText,
+    addNotice: (notice) => calls.notices.push([notice.type, notice.message]),
+    t: (key, vars) => (vars ? `${key} ${JSON.stringify(vars)}` : key),
+    insertText: (text) => calls.mentions.push(text),
+    onFilesUploaded: () => { calls.refreshed += 1; },
+  });
   await new Promise((resolve) => setImmediate(resolve));
   return calls;
 }

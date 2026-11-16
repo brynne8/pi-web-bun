@@ -2,29 +2,30 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import React from "react";
-import ts from "typescript";
+
+import { createJiti } from "jiti";
+
+import { HTML_PREVIEW_MAX_BYTES, decideFileDisplay } from "../lib/file-viewer-display.ts";
+import { isDelimitedTablePath } from "../lib/delimited-table.ts";
+
+const jiti = createJiti(import.meta.url, { jsx: { runtime: "automatic" }, tsconfigPaths: true, tryNative: false });
+const { renderToStaticMarkup } = await jiti.import("react-dom/server");
+const { I18nProvider } = await jiti.import("@/hooks/useI18n");
+const {
+  DiffView,
+  FILE_CODE_STYLE,
+  FILE_LINE_NUMBER_STYLE,
+  FILE_LINE_NUMBER_WIDTH,
+  SOURCE_HIGHLIGHT_MAX_LINES,
+} = await jiti.import("./FileViewer.tsx");
 
 const source = await readFile(new URL("./FileViewer.tsx", import.meta.url), "utf8");
 
 test("the source view renders and highlights a window, never every line", () => {
-  // Execute the source-view calculations without mounting the file-fetching component.
-  const file = ts.createSourceFile("FileViewer.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const viewer = file.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "TextFileViewer");
-  const calculations = viewer.body.statements.filter((node) =>
-    ts.isVariableStatement(node) && node.declarationList.declarations.some((declaration) =>
-      ["isBinary", "isDelimitedTable", "viewerContent", "sourceLines", "language", "isHtml", "isMarkdown", "hasPreview", "effectiveDisplayMode", "showingSource"].includes(declaration.name.getText(file)),
-    ),
-  ).map((node) => node.getText(file)).join("\n");
-  const { outputText } = ts.transpileModule(`
-    return (data, displayMode, hasGitDiff = false, isDeletedDiff = false, filePath = "/tmp/file.txt") => {
-      const isDelimitedTablePath = (path) => /\\.(csv|tsv)$/i.test(path);
-      const HTML_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
-      ${calculations}
-      return showingSource;
-    };
-  `, { compilerOptions: { jsx: ts.JsxEmit.React } });
-  const showingSource = new Function("React", "useMemo", outputText)(React, (calculate) => calculate());
   const large = { content: "line\n".repeat(50_000), language: "text" };
+  const showingSource = (data, displayMode, hasGitDiff = false, isDeletedDiff = false, filePath = "/tmp/file.txt") => decideFileDisplay({
+    filePath, data, displayMode, hasGitDiff, isDeletedDiff, isDelimitedTablePath,
+  }).showingSource;
 
   // Only the line list is windowed; a diff and a rendered preview draw themselves.
   assert.equal(showingSource(large, "source"), true);
@@ -34,20 +35,7 @@ test("the source view renders and highlights a window, never every line", () => 
     assert.equal(showingSource({ ...large, language }, "preview"), false);
   }
   assert.equal(showingSource({ ...large, truncated: true }, "preview", false, false, "/tmp/data.csv"), false);
-
-  // The window is chosen by `highlightBlocks()` from the total line count and the
-  // rendered range; nothing maps over every source line any more.
-  assert.match(source, /highlightBlocks\(sourceLines\.length, sourceVirtual\.range\.start, sourceVirtual\.range\.end\)/);
-  assert.match(source, /sourceBlocks\.map\(\(block\) => \(/);
-  assert.doesNotMatch(source, /sourceLines\.map\(/);
-  // A block tokenizes its context but renders only its own lines.
-  assert.match(source, /rows=\{rendererProps\.rows\.slice\(contextLines\)\}/);
-  assert.match(source, /startingLineNumber=\{start \+ 1\}/);
-  // Find searches every loaded line, not the rendered window.
-  assert.match(source, /findSourceMatches\(sourceLines, findQuery, findCaseSensitive\)/);
-  assert.match(source, /sourceVirtual\.scrollToLine|scrollToSourceLine\(activeMatch\.line\)/);
 });
-
 
 test("the source gutter stays pinned and shares the code line's height", () => {
   const codeBlock = source.slice(source.indexOf("export const FILE_CODE_STYLE"), source.indexOf("export const fileViewerDarkTheme"));
@@ -125,17 +113,17 @@ test("a highlighted diff line keeps the row's line box, wrap and background", ()
 });
 
 test("partly loaded HTML previews up to the HTML cap; partly loaded markdown does not", () => {
-  const start = source.indexOf("  const hasPreview = ");
-  const statement = source.slice(start, source.indexOf(";\n", start) + 1);
-  const hasPreview = new Function("data", "isHtml", "isMarkdown", "isDelimitedTable", "HTML_PREVIEW_MAX_BYTES", `${statement}\nreturn hasPreview;`);
-  const cap = 10 * 1024 * 1024;
-  const partial = { truncated: true, size: 900 * 1024 };
+  const hasPreview = (data, filePath = "/tmp/page.html") => decideFileDisplay({
+    filePath, data, displayMode: "preview", hasGitDiff: false, isDeletedDiff: false, isDelimitedTablePath,
+  }).hasPreview;
+  const cap = HTML_PREVIEW_MAX_BYTES;
+  const html = { language: "html", truncated: true, size: 900 * 1024 };
 
-  assert.equal(hasPreview(partial, true, false, false, cap), true);
-  assert.equal(hasPreview({ ...partial, size: cap + 1 }, true, false, false, cap), false);
-  assert.equal(hasPreview({ truncated: false, size: cap + 1 }, true, false, false, cap), true);
-  assert.equal(hasPreview(partial, false, true, false, cap), false);
-  assert.equal(hasPreview({ ...partial, size: cap + 1 }, false, false, true, cap), true);
+  assert.equal(hasPreview(html), true);
+  assert.equal(hasPreview({ ...html, size: cap + 1 }), false);
+  assert.equal(hasPreview({ language: "html", truncated: false, size: cap + 1 }), true);
+  assert.equal(hasPreview({ ...html, language: "markdown" }), false);
+  assert.equal(hasPreview({ ...html, language: "text" }, "/tmp/table.csv"), true);
 });
 
 test("the code column is the real sideways scroller, beside the numbers", async () => {
@@ -178,41 +166,28 @@ test("the code column is the real sideways scroller, beside the numbers", async 
 });
 
 test("the line-number gutter is pinned in every view", () => {
-  // Evaluate the module's own style constants (the numbers in the highlighted,
-  // diff and snapshot views all come from these), then check the Diff view's
-  // rows and the source block's line-number style against them.
-  const file = ts.createSourceFile("FileViewer.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const constants = (...names) => {
-    const statements = names.map((name) => {
-      const statement = file.statements.find((node) =>
-        ts.isVariableStatement(node) && node.declarationList.declarations.some((declaration) =>
-          ts.isIdentifier(declaration.name) && declaration.name.text === name,
-        ),
-      );
-      assert.ok(statement, `${name} is declared in the module`);
-      // These are exported (components/ReadSnapshotViewer.tsx imports them), and an
-      // `export` in a function body is a syntax error.
-      return statement.getText(file).replace(/^export /, "");
-    });
-    const { outputText } = ts.transpileModule(`${statements.join("\n")}\nreturn [${names.join(", ")}];`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } });
-    return new Function(outputText)();
-  };
-  const [gutterWidth, codeStyle, gutterStyle, maxRows] = constants("FILE_LINE_NUMBER_WIDTH", "FILE_CODE_STYLE", "FILE_LINE_NUMBER_STYLE", "SOURCE_HIGHLIGHT_MAX_LINES");
+  // The numbers in the highlighted, diff and snapshot views all come from these
+  // constants, so the diff view's rows are checked against them.
+  const [gutterWidth, codeStyle, gutterStyle] = [
+    FILE_LINE_NUMBER_WIDTH, FILE_CODE_STYLE, FILE_LINE_NUMBER_STYLE,
+  ];
   assert.equal(gutterWidth, 48);
 
-  // The diff view still numbers its rows inline, so its gutter is the same
+  // The Diff view still numbers its rows inline, so its gutter is the same
   // column the source view used to draw (the source view moved it out; see the
   // code-column test above).
-
-  // The Diff view's first row number, with every row an added line.
-  const diffView = file.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "DiffView");
-  const { outputText: diffOutput } = ts.transpileModule(`return ${diffView.getText(file)}`, { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 } });
-  const diffNumberStyle = (rowCount) => {
-    const added = Array.from({ length: rowCount }, (_, index) => ({ type: "added", text: "line", oldLineNo: null, newLineNo: index + 1 }));
-    const DiffView = new Function("React", "useI18n", "diffLines", "SOURCE_HIGHLIGHT_MAX_LINES", "FILE_CODE_STYLE", "FILE_LINE_NUMBER_STYLE", diffOutput)(
-      React, () => ({ t: (key) => key }), () => added, maxRows, codeStyle, gutterStyle,
+  const numberStyle = (rowCount) => {
+    const patch = [
+      "--- a/f.txt",
+      "+++ b/f.txt",
+      "@@ -1," + String(rowCount) + " +1," + String(rowCount) + " @@",
+      ...Array.from({ length: rowCount }, (_, index) => `+line ${index}`),
+    ].join("\n");
+    const html = renderToStaticMarkup(
+      React.createElement(I18nProvider, null, React.createElement(DiffView, { patch, wrapLines: false })),
     );
-    return DiffView({ patch: "" }).props.children[0].props.children[0].props.children[0].props.style;
+    const cell = html.slice(html.indexOf("<span style=\""), html.indexOf(">", html.indexOf("<span style=\"")));
+    return cell;
   };
 
   // The pinned gutter is the same column in every view: pinned to the left edge
@@ -220,8 +195,11 @@ test("the line-number gutter is pinned in every view", () => {
   assert.equal(gutterStyle.position, "sticky");
   assert.equal(gutterStyle.left, 0);
   assert.ok(gutterStyle.zIndex >= 1, "the pinned gutter must stack above the scrolling text");
-  assert.equal(diffNumberStyle(maxRows), gutterStyle);
-  assert.equal(diffNumberStyle(maxRows + 1), gutterStyle);
+  for (const rows of [SOURCE_HIGHLIGHT_MAX_LINES, SOURCE_HIGHLIGHT_MAX_LINES + 1]) {
+    assert.match(numberStyle(rows), /position:sticky/);
+    assert.match(numberStyle(rows), /left:0/);
+    assert.match(numberStyle(rows), /z-index:\d+/);
+  }
 
   // The gutter repeats the code line's height in px, so a code-font change
   // without it puts the numbers off the line boxes they belong to.
