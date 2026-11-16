@@ -1178,6 +1178,45 @@ test("grows the composer to its text and hides the scrollbar until the text is t
   assert.equal(tall.style.overflowY, "auto", "capped text scrolls");
 });
 
+test("measures the composer once, so a keystroke costs one layout and not two", () => {
+  // Reading a size after a style write forces the browser to lay out again, and
+  // the grow runs in a layout effect on every keystroke: each such pair is a
+  // reflow before the frame can paint.
+  const counting = (value, scrollHeight, clientHeight) => {
+    const log = [];
+    const written = {};
+    const box = {
+      log,
+      value,
+      style: {
+        set height(v) { log.push("w:height"); written.height = v; },
+        get height() { return written.height; },
+        set overflowY(v) { log.push("w:overflowY"); written.overflowY = v; },
+        get overflowY() { return written.overflowY; },
+      },
+      set scrollTop(v) { log.push("w:scrollTop"); written.scrollTop = v; },
+      get scrollTop() { return written.scrollTop; },
+      get scrollHeight() { log.push("r:scrollHeight"); return scrollHeight; },
+      get clientHeight() { log.push("r:clientHeight"); return clientHeight; },
+    };
+    return box;
+  };
+
+  for (const [label, box] of [["text", counting("hi", 320, 24)], ["empty", counting("", 48, 24)]]) {
+    autoGrowTextarea(box);
+    let forced = 0;
+    let wrote = false;
+    for (const op of box.log) {
+      if (op.startsWith("w:")) wrote = true;
+      else if (wrote) {
+        forced++;
+        wrote = false;
+      }
+    }
+    assert.equal(forced, 1, `${label}: one forced layout per grow, got ${forced} — ${box.log.join(" ")}`);
+  }
+});
+
 test("a capped composer keeps its scroll while it regrows, so a caret at the end stays visible", () => {
   // As a browser does: an "auto" height fits the whole text, which clamps
   // scrollTop to 0.

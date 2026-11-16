@@ -237,9 +237,16 @@ export function autoGrowTextarea(ta: HTMLTextAreaElement): void {
   // scroll the browser gave the caret (typing at the end had already scrolled
   // it into view), or the capped height hides the caret again.
   const scrollTop = ta.scrollTop;
+  // One measurement, taken once: reading a size after a style write makes the
+  // browser lay out again, and this runs in a layout effect on every keystroke,
+  // so a second read between two writes is a second reflow before the frame
+  // paints. Whether the text outgrows the cap is arithmetic on that one
+  // measurement, not another read.
   ta.style.height = "auto";
-  ta.style.height = `${ta.value ? Math.min(ta.scrollHeight, 200) : ta.clientHeight}px`;
-  ta.style.overflowY = ta.value && ta.scrollHeight > ta.clientHeight ? "auto" : "hidden";
+  const full = ta.value ? ta.scrollHeight : ta.clientHeight;
+  const capped = Math.min(full, 200);
+  ta.style.height = `${capped}px`;
+  ta.style.overflowY = full > capped ? "auto" : "hidden";
   ta.scrollTop = scrollTop;
 }
 

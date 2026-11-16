@@ -64,6 +64,13 @@ export default function RootLayout({
   return (
     <html lang="en" translate="no" className={`${notoSansMono.variable} notranslate`} suppressHydrationWarning>
       <head>
+        {/* The new design keeps its fonts in its own stylesheet's @import so the whole
+           design travels as one file; the browser only learns that URL once that sheet
+           parses, so both origins are warmed here instead. gstatic needs the CORS
+           annotation: font files are fetched anonymously and the preconnect is not
+           reused without it. */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link rel="manifest" href="/manifest.webmanifest" crossOrigin="use-credentials" />
         <meta name="google" content="notranslate" />
         <script
