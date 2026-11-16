@@ -43,6 +43,7 @@ import { createSubagentCodemodeExtension, createSubagentMcpExtensions } from "./
 import type { McpHost } from "./mcp-host";
 import { createSubagentMcpPolicyExtension } from "./mcp-read-only-policy";
 import { createOmitEmptyToolsExtension } from "./omit-empty-tools";
+import { createBashCommandNormalizeExtension } from "./bash-command-normalize";
 import { createSubagentCompactionGuardExtension } from "./subagent-compaction-guard";
 import { resolveShellTools } from "./powershell-settings";
 import { isBuiltInSubagentsEnabled, readSubagentSettings } from "./subagent-settings";
@@ -694,6 +695,15 @@ export function createSubagentController(
       const extensionFactories = [
         createSubagentCompactionGuardExtension(),
         createOmitEmptyToolsExtension(),
+        // The child runs in its own directory — an isolated run in a throwaway worktree —
+        // and pi's own bash executes there, so the `cd` rule stands on the child's cwd.
+        // A chat-only profile has no shell tool and loads nothing.
+        ...(chatOnly
+          ? []
+          : [createBashCommandNormalizeExtension({
+              cwd: childCwd,
+              caseInsensitivePaths: process.platform === "win32",
+            })]),
         ...(codemodeExtension ? [codemodeExtension] : []),
         ...(mcp ? [...mcp.extensions, createSubagentMcpPolicyExtension(() => mcpScope)] : []),
         ...(skillsBinding.loaderOptions.extensionFactories ?? []),

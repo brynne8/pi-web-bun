@@ -3843,6 +3843,15 @@ export async function startRpcSession(
       createOmitEmptyToolsExtension(),
       createStrictToolArgsExtension(),
       llamaCppExtension,
+      // A subagent session's own cwd is the child's — an isolated run's worktree — and the
+      // `cd` rule stands on it, so a reopened child strips what the live run stripped.
+      // A chat-only subagent has no shell tool and loads nothing.
+      ...(chatOnly
+        ? []
+        : [createBashCommandNormalizeExtension({
+            cwd: sessionCwd,
+            caseInsensitivePaths: process.platform === "win32",
+          })]),
       ...(subagentCodemode ? [subagentCodemode] : []),
       ...(subagentMcp && subagentResources
         ? [...subagentMcp.extensions, createSubagentMcpPolicyExtension(() => subagentResources)]
