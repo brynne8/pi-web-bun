@@ -10,10 +10,11 @@ export interface WorkingDirectoryCdOptions {
   caseInsensitivePaths?: boolean;
 }
 
-// `cd <path>` followed by a separator. A bare `cd` is left alone: an empty command is
-// worse than a redundant one. The unquoted path is lazy so `cd /p&&make` ends it at the
-// separator instead of swallowing the whole line as one path.
-const CD_LEADING = /^[ \t\r\n]*cd[ \t]+(?:"([^"]*)"|'([^']*)'|([^\s]+?))[ \t]*(?:&&|;)[ \t\r\n]*/;
+// `cd <path>` followed by a separator: `&&`, `;`, or a newline, which the shell reads as
+// `;`. A bare `cd` is left alone: an empty command is worse than a redundant one. The
+// unquoted path is lazy so `cd /p&&make` ends it at the separator instead of swallowing
+// the whole line as one path.
+const CD_LEADING = /^[ \t\r\n]*cd[ \t]+(?:"([^"]*)"|'([^']*)'|([^\s]+?))[ \t]*(?:&&|;|\r?\n)[ \t\r\n]*/;
 
 function comparablePath(path: string, caseInsensitive: boolean): string {
   let text = path;
@@ -24,9 +25,9 @@ function comparablePath(path: string, caseInsensitive: boolean): string {
 }
 
 /**
- * Takes every leading `cd <cwd> &&` (or `cd <cwd>;`) off `command`, as long as a command
- * follows it. Only the directory the session runs in comes off: a `cd` to a subdirectory
- * is the call's own work and stays.
+ * Takes every leading `cd <cwd>` off `command` — followed by `&&`, `;` or a newline — as
+ * long as a command follows it. Only the directory the session runs in comes off: a `cd`
+ * to a subdirectory is the call's own work and stays.
  */
 export function stripWorkingDirectoryCd(
   command: string,
