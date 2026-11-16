@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { countRunningSubagents, sideChatTitle } from "@/lib/session-family";
 import type { SessionUsageSummary } from "@/lib/session-stats";
+import type { Locale } from "@/lib/i18n/types";
 import { formatActiveDuration, formatCompactCount, formatCostShort } from "@/lib/session-stats-format";
 import type { SessionInfo, SubagentSessionStatus } from "@/lib/types";
 
@@ -70,10 +71,10 @@ function useAgentUsage(ids: readonly string[], runningKey: string): Record<strin
   return usage;
 }
 
-function usageTooltip(usage: SessionUsageSummary, t: (key: string) => string, locale: string): string {
+function usageTooltip(usage: SessionUsageSummary, t: (key: string) => string, locale: Locale): string {
   const { tokens } = usage;
   return [
-    `${t("session.totalActive")}: ${formatActiveDuration(usage.totalActiveMs)}`,
+    `${t("session.totalActive")}: ${formatActiveDuration(usage.totalActiveMs, locale)}`,
     `${t("session.input")}: ${tokens.input.toLocaleString(locale)}`,
     `${t("session.output")}: ${tokens.output.toLocaleString(locale)}`,
     ...(tokens.cacheRead > 0 ? [`${t("session.cacheRead")}: ${tokens.cacheRead.toLocaleString(locale)}`] : []),
@@ -97,7 +98,7 @@ function UsageLine({ usage, style }: { usage: SessionUsageSummary; style?: React
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
           </svg>
-          {formatActiveDuration(usage.totalActiveMs)}
+          {formatActiveDuration(usage.totalActiveMs, locale)}
         </span>
       )}
       {usage.tokens.total > 0 && (

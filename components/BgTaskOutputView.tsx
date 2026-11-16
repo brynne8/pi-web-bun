@@ -37,7 +37,7 @@ function KindGlyph({ kind, size = 12 }: { kind: "terminal" | "ok" | "error" | "s
  * follows a reader who is already at the bottom and otherwise offers the chat's own scroll arrow.
  */
 export function BgTaskOutputView({ task, sessionTitles }: Props) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [output, setOutput] = useState("");
   const [outputLoaded, setOutputLoaded] = useState(false);
   const [outputState, setOutputState] = useState<"loading" | "live" | "retrying" | "unavailable">("loading");
@@ -126,11 +126,11 @@ export function BgTaskOutputView({ task, sessionTitles }: Props) {
 
   const sessionTitle = sessionTitles.get(task.sessionId);
   const statusText = state === "running" || state === "stopping"
-    ? `${state === "stopping" ? t("bgTasks.stopping") : t("bgTasks.running")} ${formatActiveDuration(now - task.startedAtMs)}`
+    ? `${state === "stopping" ? t("bgTasks.stopping") : t("bgTasks.running")} ${formatActiveDuration(now - task.startedAtMs, locale)}`
     : state === "stopped"
       ? t("bgTasks.stopped")
       : state === "succeeded"
-        ? `${t("bgTasks.succeeded")} ${formatActiveDuration((task.finishedAtMs ?? now) - task.startedAtMs)}`
+        ? `${t("bgTasks.succeeded")} ${formatActiveDuration((task.finishedAtMs ?? now) - task.startedAtMs, locale)}`
         : state === "signal"
           ? t("bgTasks.signal")
           : `${t("bgTasks.failed")}${task.exitCode !== null ? ` · ${t("bgTasks.exitCode", { code: task.exitCode })}` : ""}`;

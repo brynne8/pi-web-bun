@@ -30,12 +30,12 @@ export function TurnFooter({ usage, timestamp, durationMs, text, writtenFiles = 
   aborted?: boolean;
   onOpenFile?: (filePath: string, page?: number) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [copied, setCopied] = useState(false);
   const [hovered, setHovered] = useState(false);
   const usageParts: StatPart[] = usage ? formatUsage(usage) : [];
   const stopText = aborted ? t("chat.operationAborted") : "";
-  const durationText = durationMs !== undefined ? t("chat.turnDuration", { time: formatTurnDuration(durationMs) }) : "";
+  const durationText = durationMs !== undefined ? t("chat.turnDuration", { time: formatTurnDuration(durationMs, locale) }) : "";
   const timeText = formatTime(timestamp);
   // A time on its own is no footer: a turn with nothing else about it shows nothing.
   if (usageParts.length === 0 && !stopText && !durationText && !text && writtenFiles.length === 0) return null;

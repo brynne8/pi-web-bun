@@ -25,6 +25,7 @@ import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { AnsiText } from "./AnsiText";
 import { useI18n } from "@/hooks/useI18n";
+import type { Locale } from "@/lib/i18n/types";
 import { phaseLabel } from "@/lib/chat-phase-label";
 import { useAgentSession, type AgentEndInfo, type NewSessionChoices, type NoticeItem } from "@/hooks/useAgentSession";
 import { selectHasStreamingContent, selectIsStreaming, selectStreamingMessage, useStreamingSelector } from "@/hooks/useStreamingSelector";
@@ -208,7 +209,7 @@ function getUserInputText(message: AgentMessage): string | null {
   return text.length > 0 ? text : null;
 }
 
-function ProcessDetailsGroup({ messageCount, toolCallCount, durationMs, cacheMisses, reveal = false, children, t }: { messageCount: number; toolCallCount: number; durationMs?: number; cacheMisses?: CacheMissSummary; reveal?: boolean; children: ReactNode; t: (key: string, params?: Record<string, string | number>) => string }) {
+function ProcessDetailsGroup({ messageCount, toolCallCount, durationMs, cacheMisses, reveal = false, children, t, locale }: { messageCount: number; toolCallCount: number; durationMs?: number; cacheMisses?: CacheMissSummary; reveal?: boolean; children: ReactNode; t: (key: string, params?: Record<string, string | number>) => string; locale: Locale }) {
   // Always collapsed: what is inside a group is how the turn got there, and what it
   // wrote and how it failed both render outside it. A group the user opened by hand
   // keeps its state across the turn's updates, since nothing re-keys it.
@@ -219,7 +220,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, durationMs, cacheMis
   // The chevron already says this folds; the words stay in the accessible name.
   const parts = [`${messageCount} ${t(messageCount === 1 ? "chat.message" : "chat.messages")}`];
   if (toolCallCount > 0) parts.push(`${toolCallCount} ${t(toolCallCount === 1 ? "chat.toolCall" : "chat.toolCalls")}`);
-  if (durationMs !== undefined) parts.push(t("chat.turnDuration", { time: formatTurnDuration(durationMs) }));
+  if (durationMs !== undefined) parts.push(t("chat.turnDuration", { time: formatTurnDuration(durationMs, locale) }));
   // Folded, the cache misses inside are added up here (#1265); open, each shows under its step.
   const cacheMissText = cacheMisses && !(expanded || reveal) ? cacheMissSummaryText(t, cacheMisses) : undefined;
 
@@ -265,7 +266,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, durationMs, cacheMis
 }
 
 export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, newSessionContextBar, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd, onSessionEnded, onToolEnd, onAttentionNeeded, onSessionCreated, onSessionForked, panel = false, onSideSession, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onDebugSnapshotReaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onOpenSettings, onContextUsageChange, onOpenFile, onFilesUploaded, onOpenSubagent, onOpenReadSnapshot, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, holdAudio }: Props) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const isMobile = useIsMobile();
   const completionNotificationsEnabled = !isHiddenRelation(session?.relation);
 
@@ -1127,6 +1128,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                     cacheMisses={summarizeCacheMisses(segmentMessages)}
                     reveal={revealSegment}
                     t={t}
+                    locale={locale}
                   >
                     {views.map((entry) => entry.node)}
                   </ProcessDetailsGroup>
@@ -1231,6 +1233,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 cacheMisses={summarizeCacheMisses(segmentMessages)}
                 reveal={revealSegment}
                 t={t}
+                locale={locale}
               >
                 {views.map((entry) => entry.node)}
               </ProcessDetailsGroup>
@@ -1321,7 +1324,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     messageCwd, modelNames, visibleCount, hasEarlierMessages, pendingSearchScroll, searchBlock,
     forkingEntryId, editEntryId, sessionBusy, isStreaming, bashRunning, isNew, turnAnchors,
     isCompacting, compactError, forkFromMessage, handleEditContent, cancelEdit, handleCompact,
-    onOpenFile, onOpenSubagent, onOpenReadSnapshot, t, messageRefs, lastUserMsgRef,
+    onOpenFile, onOpenSubagent, onOpenReadSnapshot, t, locale, messageRefs, lastUserMsgRef,
   ]);
 
   const availableThinkingLevels = displayModelValue

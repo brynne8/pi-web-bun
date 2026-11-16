@@ -60,6 +60,32 @@ export function formatRelativeTime(date: Date | string, locale: Locale, now = ne
 }
 
 /**
+ * 一段时长的紧凑显示：14s · 3m 5s · 1h 5m 3s。
+ * @param ms 毫秒数
+ * @param locale 当前语言
+ * @returns 本地化的时长文本
+ */
+export function formatDuration(ms: number, locale: Locale): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const parts = {
+    hours: Math.floor(total / 3600),
+    minutes: Math.floor((total % 3600) / 60),
+    seconds: total % 60,
+  };
+  // Baseline 2025-03-04, Safari 16.4. Where it is missing the same compact
+  // shape is built by hand, which is what these rows showed before it.
+  if (typeof Intl.DurationFormat !== "function") {
+    if (parts.hours > 0) return `${parts.hours}h ${parts.minutes}m ${parts.seconds}s`;
+    if (parts.minutes > 0) return `${parts.minutes}m ${parts.seconds}s`;
+    return `${parts.seconds}s`;
+  }
+  // `narrow` is what the hand-built shape already looked like, so English keeps
+  // its letters and every other language gets its own units. Zero-valued units
+  // are left out, so an all-zero duration formats to nothing.
+  return new Intl.DurationFormat(locale, { style: "narrow" }).format(parts) || "0s";
+}
+
+/**
  * 今天只显示时刻；更早的时间和会话列表一样用相对时间。
  * @param timestamp 毫秒时间戳
  * @param locale 当前语言

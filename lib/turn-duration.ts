@@ -1,4 +1,6 @@
 import type { AgentMessage } from "./types";
+import { formatDuration } from "./i18n/format";
+import type { Locale } from "./i18n/types";
 
 function recordedMs(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
@@ -61,12 +63,7 @@ export function getTurnDurationMs(messages: AgentMessage[], anchorIdx: number, e
   return Math.max(0, end - start - idle);
 }
 
-/** A turn's length as the chat shows it, in whole seconds: 14s, then 3m 5s, then 1h 2m 5s. */
-export function formatTurnDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  if (totalSeconds < 60) return `${totalSeconds}s`;
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes < 60) return `${minutes}m ${seconds}s`;
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m ${seconds}s`;
+/** A turn's length as the chat shows it: 14s, then 3m 5s, then 1h 5m 3s. */
+export function formatTurnDuration(ms: number, locale: Locale): string {
+  return formatDuration(ms, locale);
 }

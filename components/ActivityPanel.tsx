@@ -75,7 +75,7 @@ export function ActivityPanel({
   sessions,
   agents,
 }: Props) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [now, setNow] = useState(() => Date.now());
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -187,13 +187,13 @@ export function ActivityPanel({
                   task.command,
                   sessionTitle ? `${t("bgTasks.sessionLabel")}: ${sessionTitle}` : task.sessionId,
                   state === "running"
-                    ? `${t("bgTasks.running")} ${formatActiveDuration(elapsedMs)} · ${t("bgTasks.idle", { duration: formatActiveDuration(idleMs) })}`
+                    ? `${t("bgTasks.running")} ${formatActiveDuration(elapsedMs, locale)} · ${t("bgTasks.idle", { duration: formatActiveDuration(idleMs, locale) })}`
                     : state === "stopping"
                       ? t("bgTasks.stopping")
                       : state === "stopped"
                         ? t("bgTasks.stopped")
                         : state === "succeeded"
-                          ? `${t("bgTasks.succeeded")} ${formatActiveDuration(elapsedMs)}`
+                          ? `${t("bgTasks.succeeded")} ${formatActiveDuration(elapsedMs, locale)}`
                           : state === "signal"
                             ? t("bgTasks.signal")
                             : `${t("bgTasks.failed")}${task.exitCode !== null ? ` · ${t("bgTasks.exitCode", { code: task.exitCode })}` : ""}`,
@@ -219,11 +219,11 @@ export function ActivityPanel({
                     </button>
                     <span className={`bg-task-badge is-${state}${stale ? " is-stale" : ""}`}>
                       {state === "running" || state === "stopping"
-                        ? formatActiveDuration(elapsedMs)
+                        ? formatActiveDuration(elapsedMs, locale)
                         : state === "stopped"
                           ? t("bgTasks.stopped")
                           : state === "succeeded"
-                            ? formatActiveDuration(elapsedMs)
+                            ? formatActiveDuration(elapsedMs, locale)
                             : state === "signal"
                               ? t("bgTasks.signal")
                               : t("bgTasks.exitCode", { code: task.exitCode ?? "?" })}
