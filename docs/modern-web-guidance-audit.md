@@ -33,7 +33,7 @@
 | `focusIfLost` / `focusAfterChange` | 焦点 containment 兜底 |
 | `SettingsPanel` 的 pointerdown/click 配对 | `closedby="any"` 灯箱关闭 |
 
-缺的两样：**没有 Tab 焦点陷阱**（全仓搜 `"Tab"` 只有菜单内导航，没有任何 containment），焦点可以 Tab 出"模态框"落到背后的聊天界面；**背后页面没有 inert**，点击和按键能穿过去——`AGENTS.md` 自己记着"composer 里的 `/mcp` 打开 Settings 后 Escape 会 reach the chat composer"，他们是用 `defaultPrevented` 把这个症状绕掉的，根因就在这里。
+缺的两样：**没有 Tab 焦点陷阱**（全仓搜 `"Tab"` 只有菜单内导航，没有任何 containment），焦点可以 Tab 出"模态框"落到背后的应用里——`SettingsPanel` 是内联渲染在 `AppShell.tsx:3161`、没有 portal 到 body 末尾，所以背后界面就在同一个 Tab 序列里；**背后页面没有 inert**，键盘事件能送到背后的控件上（`AGENTS.md` 自己记着"composer 里的 `/mcp` 打开 Settings 后 Escape 会 reach the chat composer"，他们是用 `defaultPrevented` 把这个症状绕掉的，根因就在这里）。指针点击另说：`.settings-dialog-backdrop` 是 `position: fixed; inset: 0` 的全屏遮罩，点在主界面上实际落在遮罩上并触发关闭，所以这条的伤害集中在键盘与屏幕阅读器用户。
 
 指南原文（`dialog` Rule 1）：原生 modal 提供 "inert page, focus containment, top layer, `::backdrop`, `Esc` and back-gesture dismissal, and focus return to the invoker"，并且 **"DON'T add `role="dialog"`, `aria-modal`, a focus trap, `inert` toggling or an `Esc` handler"**。`accessibility` 指南同结论："browsers set outside content as inert which is sufficient"。
 
@@ -42,24 +42,23 @@
 - `closedby`（灯箱关闭）Safari 至今没有，提基线也无用。`SettingsPanel` 现有的 pointerdown + click 配对写法与指南给的 fallback 片段一致，保留即可。
 - IME 判定要留下：`lib/stacked-dialog.ts` 的 `cancelsComposition()` 是对的，原生 dialog 的 Esc 不管 IME，需要 `cancel` 事件里自己挡。
 
-### A2 原生 dialog 上又锁了 body overflow（可行动，改动最小）
+### A2 原生 dialog 上的 body overflow 锁是无操作（不构成缺陷，记录备查）
 
-`MermaidBlock.tsx:217-222` 和 `ImagePreview.tsx:29-35` 用了原生 `<dialog>` + `showModal()`（这点是对的），但紧接着又 `document.body.style.overflow = "hidden"`。
+`MermaidBlock.tsx:217-222` 和 `ImagePreview.tsx:29-35` 用了原生 `<dialog>` + `showModal()`，紧接着又 `document.body.style.overflow = "hidden"`，关闭时恢复原值。
 
-指南原文（`prevent-page-scroll-under-modal-dialog`）：**"DO NOT apply `overflow: hidden` or `position: fixed` to `<html>` or `<body>` to lock background scrolling… Mutating root overflow removes the page scrollbar (causing horizontal layout shift), can reset or jump the page scroll position, and can break `position: sticky`"**。而且 `showModal()` 已经把页面设为 inert，这个 hack 纯属多余。
+指南（`prevent-page-scroll-under-modal-dialog`）禁止这么做：**"DO NOT apply `overflow: hidden` or `position: fixed` to `<html>` or `<body>` to lock background scrolling… Mutating root overflow removes the page scrollbar (causing horizontal layout shift), can reset or jump the page scroll position, and can break `position: sticky`"**。
 
-替换成指南要求的两条 CSS：
+但在本仓库它不产生任何效果：`app/globals.css:349-356` 已经声明 `html, body { height: 100dvh; overflow: hidden }`，文档本身不滚动，没有根滚动条可移除，内联赋值只是写了一个与样式表相同的值，恢复时又写回空串。真正该做的是删掉这四行死代码——不是因为它有 bug，而是因为它让人误以为这里需要锁滚动。
 
-```css
-dialog:modal { overscroll-behavior: contain; }
-dialog::backdrop { overflow: hidden; overscroll-behavior: contain; }
-```
+指南要求的替换 CSS（`dialog:modal { overscroll-behavior: contain }` 加 `dialog::backdrop { overflow: hidden; overscroll-behavior: contain }`）在本应用同样没有必要，理由同 A3。
 
-指南注明 `overscroll-behavior` 对"不可滚动容器"的生效 Safari 缺失，但那是渐进增强，不影响正确性。
+### A3 自建 modal 没有滚动 containment（当前不构成缺陷，记录备查）
 
-### A3 自建 modal 没有滚动 containment（可行动，随 A2 一起改）
+`app/settings.css:1453` 的 `.settings-dialog-backdrop` 没有 `overscroll-behavior`。指南要求在 `dialog:modal` 与 `dialog::backdrop` 上设 `overscroll-behavior: contain`，否则对话框内滚到边界会把滚动手势链给背后页面。
 
-`app/settings.css:1453` 的 `.settings-dialog-backdrop` 只有 `position: fixed; inset: 0; z-index: 1000`，没有 `overscroll-behavior`。在设置面板里滚到边界会链到背后页面。`app/globals.css` 里已有 6 处 `overscroll-behavior: contain`，说明写法在本仓库是有先例的。
+本应用没有可链的目标：`html, body` 是 `overflow: hidden` 的固定视口，`.settings-dialog-backdrop` 是 `position: fixed; inset: 0`，其祖先链上没有任何可滚动容器。所以这条现在不产生用户可见问题。
+
+保留记录是因为前提会变：哪天文档变成可滚动的（长会话、打印样式、内嵌模式），或者设置面板自己变成可滚动且背后出现滚动容器，这条就会立刻变成真问题。`app/globals.css` 里已有 6 处 `overscroll-behavior: contain`，写法在本仓库有先例。
 
 ### A4 焦点指示被关掉且无替代（可行动，需逐个确认）
 
@@ -77,11 +76,11 @@ dialog::backdrop { overflow: hidden; overscroll-behavior: contain; }
 
 `html` 指南：**"DO use `<search>` to enclose search and filtering mechanisms (eliminates the need for `role="search"`)"**。`<search>` 无兼容性问题。
 
-### A6 全屏 dialog 用 100vw（可行动，两行）
+### A6 全屏 dialog 用 100vw（冗余，当前无害）
 
 `app/globals.css:1766`（`.image-preview-dialog`）和 `1839`（`.mermaid-zoom-dialog`）：`width: 100vw`。
 
-`css-layout` 指南：**"Don't use `100vw` for full-width layout — it ignores scrollbar width and causes horizontal overflow. Use `100%`, `100dvw`, or `100svw` instead."** 这两个是 `position: fixed; inset: 0` 的对话框，改 `100%` 即可。其余 5 处 `calc(100vw - 16px)` 是 max-width 用法，不在此列。
+`css-layout` 指南：**"Don't use `100vw` for full-width layout — it ignores scrollbar width and causes horizontal overflow. Use `100%`, `100dvw`, or `100svw` instead."** 这两个元素已经是 `position: fixed; inset: 0`，`width: 100vw` 是冗余的；而由于文档不滚动（`html, body { overflow: hidden }`），没有滚动条宽度可撞，所以现在不会溢出。改 `100%` 是与 `inset: 0` 一致的正确写法，属清理而非修 bug。其余 5 处 `calc(100vw - 16px)` 是 max-width 用法，不在此列。
 
 ### A7 可滚动代码块缺 tabindex 与 role="region"（可行动，低优先）
 
@@ -310,7 +309,7 @@ return `${Math.floor(minutes / 60)}h ${minutes % 60}m ${seconds}s`;
 
 | 结论 | 指南 |
 | --- | --- |
-| 有发现、可行动 | dialog、light-dismiss-a-dialog、prevent-page-scroll-under-modal-dialog、accessibility、accessible-generated-content、html、search-hidden-content、forms、required-field-feedback、accessible-error-announcement、validate-input-after-interaction、style-parent-with-has、brand-consistent-forms、checkbox、switch、autofill-highlight-inputs、motion、animate-element-entry-exit、animate-to-from-top-layer、color、dark-mode、component-specific-light-dark-theme、adapt-scrollbar-to-contrast-preferences、browser-ui-theming、customize-scrollbar-color-and-thickness、performance、security、privacy、typography、improve-text-layout-and-legibility、form-factor-adaptation、progress、custom-button-actions、declarative-dialog-popover-control、visually-stable-font-fallbacks、visually-stable-mixed-fonts、calculate-event-differentials（仅时长格式化）、form-fields-automatically-fit-contents |
+| 有发现、可行动 | dialog、light-dismiss-a-dialog、accessibility、accessible-generated-content、html、search-hidden-content、forms、required-field-feedback、accessible-error-announcement、validate-input-after-interaction、style-parent-with-has、brand-consistent-forms、checkbox、switch、autofill-highlight-inputs、motion、animate-element-entry-exit、animate-to-from-top-layer、color、dark-mode、component-specific-light-dark-theme、adapt-scrollbar-to-contrast-preferences、browser-ui-theming、customize-scrollbar-color-and-thickness、performance、security、privacy、typography、improve-text-layout-and-legibility、form-factor-adaptation、progress、custom-button-actions、declarative-dialog-popover-control、visually-stable-font-fallbacks、visually-stable-mixed-fonts、calculate-event-differentials（仅时长格式化）、form-fields-automatically-fit-contents |
 | 已核实符合 | ime-safe-enter-submit、autofill-sign-in-form、child-state-based-styling、content-based-styling、css、css-layout、fluid-scaling、size-aware-styling、responsive-design、single-line-overflow、overflow-clipping-control、sanitize-untrusted-html、dynamic-sort、drag-and-drop、scroll-target-on-load、scroll-position-aware-elements、scroll-completion-effects、defer-rendering-heavy-content、respect-os-text-scale、natural-interactions、content-first-noise-reduction、dark-mode-toggle |
 | 已解锁但无对应场景 | contrast-color、selector-atrule-combinations、design-token-reactivity、usage-aware-component-variations |
 | 仍然阻塞 | `Temporal`（Safari 无）、`hidden="until-found"`（Safari 无）、`closedby`（Safari 无）、`overlay` 属性（Firefox/Safari 无）、focusgroup（Firefox/Safari 无）、Interest invokers（Firefox/Safari 无）、`scheduler.yield`（Firefox/Safari 无）、`@function`（Firefox/Safari 无）、`text-wrap: pretty`（Firefox 无）、`interpolate-size`/`calc-size()`（Firefox/Safari 无）、`at-rule()`（Safari 无）、`moveBefore()`（Safari 无）、Sanitizer API（Safari 无）、`scroll-initial-target`（Firefox/Safari 无）、容器滚动状态查询（Firefox/Safari 无）、滚动方法 promise（Firefox/Safari 无） |
