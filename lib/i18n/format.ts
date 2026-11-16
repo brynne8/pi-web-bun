@@ -83,11 +83,15 @@ export function formatDuration(ms: number, locale: Locale): string {
   };
   const DurationFormat = (Intl as unknown as { DurationFormat?: DurationFormatConstructor }).DurationFormat;
   // Baseline 2025-03-04, Safari 16.4. Where it is missing the same compact
-  // shape is built by hand, which is what these rows showed before it.
+  // shape is built by hand, which is what these rows showed before it —
+  // including leaving a zero-valued unit out, as DurationFormat leaves it out.
   if (typeof DurationFormat !== "function") {
-    if (parts.hours > 0) return `${parts.hours}h ${parts.minutes}m ${parts.seconds}s`;
-    if (parts.minutes > 0) return `${parts.minutes}m ${parts.seconds}s`;
-    return `${parts.seconds}s`;
+    const shown = [
+      parts.hours > 0 ? `${parts.hours}h` : null,
+      parts.minutes > 0 ? `${parts.minutes}m` : null,
+      parts.seconds > 0 ? `${parts.seconds}s` : null,
+    ].filter((unit): unit is string => unit !== null);
+    return shown.length > 0 ? shown.join(" ") : "0s";
   }
   // `narrow` is what the hand-built shape already looked like, so English keeps
   // its letters and every other language gets its own units. Zero-valued units
