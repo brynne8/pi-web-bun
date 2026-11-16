@@ -1,223 +1,223 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
-import ts from "typescript";
-import { bareMcpOpensSettings } from "../lib/mcp-command.ts";
+import { json, withAgentSession } from "./__fixtures__/agent-session-harness.mjs";
 
 // A bare /mcp opens Settings › MCP when pi's built-in MCP extension owns it, or
-// when the session has no /mcp at all (ADR 0006, lib/mcp-command.ts). These tests
-// run the hook's own callbacks, taken from its source, against stubbed state.
-
-const read = async (path) => (await readFile(new URL(path, import.meta.url), "utf8")).replace(/\r\n/g, "\n");
-const hookSource = await read("./useAgentSession.ts");
-const hookFile = ts.createSourceFile("useAgentSession.ts", hookSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-
-/** The function a `const <name> = useCallback(fn, deps)` declaration wraps, as JavaScript. */
-function callbackSource(name) {
-  let found;
-  const visit = (node) => {
-    if (found) return;
-    if (
-      ts.isVariableDeclaration(node)
-      && node.name.getText(hookFile) === name
-      && node.initializer
-      && ts.isCallExpression(node.initializer)
-      && node.initializer.expression.getText(hookFile) === "useCallback"
-    ) {
-      found = node.initializer.arguments[0];
-      return;
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(hookFile);
-  assert.ok(found, `useCallback ${name} not found`);
-  return ts.transpileModule(`(${found.getText(hookFile)})`, {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
-  }).outputText.trim().replace(/;$/, "");
-}
-
-const CALLBACKS = ["replaceSlashCommands", "clearSlashCommands", "requestSlashCommands", "slashCommandsForMcp", "handleBuiltinSlashCommand"];
-const compiled = Object.fromEntries(CALLBACKS.map((name) => [
-  name,
-  // The callbacks read hook state as free variables; `with` resolves them from the scope.
-  new Function("scope", `with (scope) { return ${callbackSource(name)}; }`),
-]));
+// when the session has no /mcp at all (ADR 0006, lib/mcp-command.ts).
 
 const builtinMcp = { name: "mcp", source: "extension", sourceInfo: { path: "builtin:mcp", source: "builtin", scope: "temporary", origin: "top-level" } };
 const otherMcp = { name: "mcp", source: "extension", sourceInfo: { path: "/home/me/.pi/agent/extensions/mcp-adapter.ts", source: "local", scope: "user", origin: "top-level" } };
 const deploy = { name: "deploy", source: "extension", sourceInfo: { path: "/project/.pi/extensions/deploy.ts", source: "local", scope: "project", origin: "top-level" } };
 
-function deferred() {
-  let resolve;
-  const promise = new Promise((done) => { resolve = done; });
-  return { promise, resolve };
-}
+const commandsReply = (commands) => (entry) => (entry.body?.type === "get_commands" ? json({ success: true, data: { commands } }) : undefined);
+const askedForCommands = (requests) => requests.filter((entry) => entry.body?.type === "get_commands");
 
-function hook({ commands = [], pending = null, getCommands = async () => ({ commands: [] }), openSettings = true } = {}) {
-  const calls = { notices: [], opened: [], requests: [], lists: [], errors: [], loading: [] };
-  const scope = {
-    sessionIdRef: { current: "session-1" },
-    ensureNewSession: async () => "session-1",
-    addNotice: (notice) => calls.notices.push(notice),
-    onOpenSettings: openSettings ? (section) => calls.opened.push(section) : undefined,
-    bareMcpOpensSettings,
-    slashCommandsRef: { current: commands },
-    slashCommandsLoadRef: { current: pending },
-    slashCommandsGenerationRef: { current: 0 },
-    setSlashCommands: (list) => calls.lists.push(list),
-    setSlashCommandsLoading: (loading) => calls.loading.push(loading),
-    sendAgentCommand: async (sid, command) => {
-      calls.requests.push(command.type);
-      return getCommands();
-    },
-    setIsCompacting: () => {},
-    // The stream a fresh composer holds meanwhile is session-start-dialog.test.mjs's.
-    withSessionStartStream: (_sid, request) => request(),
-    console: { error: (...args) => calls.errors.push(args) },
-  };
-  for (const name of CALLBACKS) scope[name] = compiled[name](scope);
-  return { run: scope.handleBuiltinSlashCommand, scope, calls };
+/** A page with Settings › MCP reachable, and the sections it was opened on. */
+function page(handle) {
+  const opened = [];
+  return { opened, options: { props: { onOpenSettings: (section) => opened.push(section) }, handle } };
 }
 
 test("a bare /mcp the built-in owns opens Settings › MCP with no notice and no request", async () => {
-  const { run, calls } = hook({ commands: [deploy, builtinMcp] });
-  assert.deepEqual(await run("/mcp"), { handled: true, action: "openSettings" });
-  assert.deepEqual(calls.opened, ["mcp"]);
-  // complete() says nothing for a command that opens a panel.
-  assert.deepEqual(calls.notices, []);
-  assert.deepEqual(calls.requests, []);
+  const { opened, options } = page(commandsReply([deploy, builtinMcp]));
+  await withAgentSession(options, async (env) => {
+    await env.hook.result.loadSlashCommands();
+    await env.settle();
+    const before = askedForCommands(env.requests).length;
+    assert.deepEqual(await env.hook.result.handleBuiltinSlashCommand("/mcp"), { handled: true, action: "openSettings" });
+    assert.deepEqual(opened, ["mcp"]);
+    // complete() says nothing for a command that opens a panel.
+    assert.deepEqual(env.hook.result.notices, []);
+    assert.equal(askedForCommands(env.requests).length, before, "a list already loaded is not asked for again");
+    assert.deepEqual(env.requests.filter((entry) => entry.body?.type === "prompt"), []);
+  });
 });
 
 test("another extension's /mcp is sent as before", async () => {
-  const { run, calls } = hook({ commands: [deploy, otherMcp] });
-  assert.deepEqual(await run("/mcp"), { handled: false });
-  assert.deepEqual(calls.opened, []);
-  assert.deepEqual(calls.notices, []);
+  const { opened, options } = page(commandsReply([deploy, otherMcp]));
+  await withAgentSession(options, async (env) => {
+    await env.hook.result.loadSlashCommands();
+    await env.settle();
+    assert.deepEqual(await env.hook.result.handleBuiltinSlashCommand("/mcp"), { handled: false });
+    assert.deepEqual(opened, []);
+    assert.deepEqual(env.hook.result.notices, []);
+  });
 });
 
 test("with several extensions' mcp:1 / mcp:2, a bare /mcp opens Settings and /mcp:1 is sent", async () => {
   // pi runs neither for a bare /mcp (it looks commands up by exact name), so sending it would
   // hand the model the text "/mcp"; Settings › MCP says which extensions took the name.
   const commands = [{ ...otherMcp, name: "mcp:1" }, { ...otherMcp, name: "mcp:2" }];
-  const bare = hook({ commands });
-  assert.deepEqual(await bare.run("/mcp"), { handled: true, action: "openSettings" });
-  assert.deepEqual(bare.calls.opened, ["mcp"]);
-  const numbered = hook({ commands });
-  assert.deepEqual(await numbered.run("/mcp:1"), { handled: false });
-  assert.deepEqual(numbered.calls.opened, []);
+  const bare = page(commandsReply(commands));
+  await withAgentSession(bare.options, async (env) => {
+    await env.hook.result.loadSlashCommands();
+    await env.settle();
+    assert.deepEqual(await env.hook.result.handleBuiltinSlashCommand("/mcp"), { handled: true, action: "openSettings" });
+    assert.deepEqual(bare.opened, ["mcp"]);
+  });
+  const numbered = page(commandsReply(commands));
+  await withAgentSession(numbered.options, async (env) => {
+    await env.hook.result.loadSlashCommands();
+    await env.settle();
+    assert.deepEqual(await env.hook.result.handleBuiltinSlashCommand("/mcp:1"), { handled: false });
+    assert.deepEqual(numbered.opened, []);
+  });
 });
 
 test("every /mcp subcommand is sent, without asking whose /mcp it is", async () => {
   for (const message of ["/mcp login docs", "/mcp logout", "/mcp reconnect", "/mcp   login"]) {
-    const { run, calls } = hook({ commands: [] });
-    assert.deepEqual(await run(message), { handled: false }, message);
-    assert.deepEqual(calls.opened, []);
-    assert.deepEqual(calls.requests, []);
+    const { opened, options } = page(commandsReply([]));
+    await withAgentSession(options, async (env) => {
+      assert.deepEqual(await env.hook.result.handleBuiltinSlashCommand(message), { handled: false }, message);
+      assert.deepEqual(opened, []);
+      assert.deepEqual(askedForCommands(env.requests), []);
+    });
   }
 });
 
 test("a command list still loading is awaited, not guessed", async () => {
   // The palette asks for the list as "/mcp" is typed; Enter often comes first.
-  const load = deferred();
-  const { run, calls } = hook({ commands: [], pending: load.promise });
-  let settled = false;
-  const result = run("/mcp").then((value) => { settled = true; return value; });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(settled, false);
-  assert.deepEqual(calls.opened, []);
-  load.resolve([builtinMcp]);
-  assert.deepEqual(await result, { handled: true, action: "openSettings" });
-  assert.deepEqual(calls.opened, ["mcp"]);
-  assert.deepEqual(calls.requests, [], "the request under way is reused");
+  const load = Promise.withResolvers();
+  const { opened, options } = page((entry) => (entry.body?.type === "get_commands" ? load.promise : undefined));
+  await withAgentSession(options, async (env) => {
+    const loading = env.hook.result.loadSlashCommands();
+    await env.settle();
+    let settled = false;
+    const result = env.hook.result.handleBuiltinSlashCommand("/mcp").then((value) => { settled = true; return value; });
+    await env.settle();
+    assert.equal(settled, false);
+    assert.deepEqual(opened, []);
+    load.resolve(json({ success: true, data: { commands: [builtinMcp] } }));
+    assert.deepEqual(await result, { handled: true, action: "openSettings" });
+    assert.deepEqual(opened, ["mcp"]);
+    assert.equal(askedForCommands(env.requests).length, 1, "the request under way is reused");
+    await loading;
+  });
 
-  const other = deferred();
-  const second = hook({ commands: [], pending: other.promise });
-  const sent = second.run("/mcp");
-  other.resolve([otherMcp]);
-  assert.deepEqual(await sent, { handled: false });
+  const other = Promise.withResolvers();
+  const second = page((entry) => (entry.body?.type === "get_commands" ? other.promise : undefined));
+  await withAgentSession(second.options, async (env) => {
+    const sent = env.hook.result.handleBuiltinSlashCommand("/mcp");
+    other.resolve(json({ success: true, data: { commands: [otherMcp] } }));
+    assert.deepEqual(await sent, { handled: false });
+  });
 
   // A request under way wins over an older list, which a reload may have outdated.
-  const fresh = deferred();
-  const third = hook({ commands: [otherMcp], pending: fresh.promise });
-  const opened = third.run("/mcp");
-  fresh.resolve([builtinMcp]);
-  assert.deepEqual(await opened, { handled: true, action: "openSettings" });
+  const fresh = Promise.withResolvers();
+  let loads = 0;
+  const third = page((entry) => {
+    if (entry.body?.type !== "get_commands") return undefined;
+    loads += 1;
+    return loads === 1 ? json({ success: true, data: { commands: [otherMcp] } }) : fresh.promise;
+  });
+  await withAgentSession(third.options, async (env) => {
+    await env.hook.result.loadSlashCommands();
+    await env.settle();
+    const reloading = env.hook.result.loadSlashCommands();
+    const opened3 = env.hook.result.handleBuiltinSlashCommand("/mcp");
+    fresh.resolve(json({ success: true, data: { commands: [builtinMcp] } }));
+    assert.deepEqual(await opened3, { handled: true, action: "openSettings" });
+    await reloading;
+  });
 });
 
 test("with no list yet, /mcp asks for one and keeps it", async () => {
-  const { run, scope, calls } = hook({ getCommands: async () => ({ commands: [builtinMcp] }) });
-  assert.deepEqual(await run("/mcp"), { handled: true, action: "openSettings" });
-  assert.deepEqual(calls.requests, ["get_commands"]);
-  // The ref mirrors the state the palette renders.
-  assert.deepEqual(scope.slashCommandsRef.current, [builtinMcp]);
-  assert.deepEqual(calls.lists, [[builtinMcp]]);
-  assert.equal(scope.slashCommandsLoadRef.current, null);
+  const { options } = page(commandsReply([builtinMcp]));
+  await withAgentSession(options, async (env) => {
+    assert.deepEqual(await env.hook.result.handleBuiltinSlashCommand("/mcp"), { handled: true, action: "openSettings" });
+    await env.settle();
+    assert.equal(askedForCommands(env.requests).length, 1);
+    // The list the palette renders is the one the answer left.
+    assert.deepEqual(env.hook.result.slashCommands, [builtinMcp]);
+    assert.equal(env.hook.result.slashCommandsLoading, false);
+  });
 
   // A Chat-only session (or MCP turned off) lists no /mcp at all.
-  const chatOnly = hook({ getCommands: async () => ({ commands: [] }) });
-  assert.deepEqual(await chatOnly.run("/mcp"), { handled: true, action: "openSettings" });
-  assert.deepEqual(chatOnly.calls.requests, ["get_commands"]);
+  const chatOnly = page(commandsReply([]));
+  await withAgentSession(chatOnly.options, async (env) => {
+    assert.deepEqual(await env.hook.result.handleBuiltinSlashCommand("/mcp"), { handled: true, action: "openSettings" });
+    assert.deepEqual(chatOnly.opened, ["mcp"]);
+    assert.equal(askedForCommands(env.requests).length, 1);
+  });
 });
 
 test("a list that cannot be read sends /mcp as before", async () => {
-  const failing = hook({ getCommands: async () => { throw new Error("HTTP 500"); } });
-  assert.deepEqual(await failing.run("/mcp"), { handled: false });
-  assert.deepEqual(failing.calls.opened, []);
-  assert.deepEqual(failing.calls.notices, []);
-  assert.equal(failing.calls.errors.length, 1);
+  const { opened, options } = page((entry) => (entry.body?.type === "get_commands" ? json({ error: "HTTP 500" }, 500) : undefined));
+  await withAgentSession(options, async (env) => {
+    assert.deepEqual(await env.hook.result.handleBuiltinSlashCommand("/mcp"), { handled: false });
+    assert.deepEqual(opened, []);
+    assert.deepEqual(env.hook.result.notices, []);
+  });
 
   // A failed refresh falls back to the list already loaded.
-  const refresh = deferred();
-  const known = hook({ commands: [builtinMcp], pending: refresh.promise });
-  const result = known.run("/mcp");
-  refresh.resolve(null);
-  assert.deepEqual(await result, { handled: true, action: "openSettings" });
+  const refresh = Promise.withResolvers();
+  let loads = 0;
+  const known = page((entry) => {
+    if (entry.body?.type !== "get_commands") return undefined;
+    loads += 1;
+    return loads === 1 ? json({ success: true, data: { commands: [builtinMcp] } }) : refresh.promise;
+  });
+  await withAgentSession(known.options, async (env) => {
+    await env.hook.result.loadSlashCommands();
+    await env.settle();
+    const reloading = env.hook.result.loadSlashCommands();
+    const result = env.hook.result.handleBuiltinSlashCommand("/mcp");
+    refresh.resolve(null);
+    assert.deepEqual(await result, { handled: true, action: "openSettings" });
+    await reloading;
+  });
 });
 
 test("a list cleared by set_tools is not written back by a request it outdated", async () => {
   // Another extension's /mcp, then a switch to Chat only while the palette's request runs.
-  const answer = deferred();
-  const { run, scope, calls } = hook({ getCommands: () => answer.promise });
-  const outdated = scope.requestSlashCommands();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(calls.requests, ["get_commands"]);
-  scope.clearSlashCommands();
-  assert.equal(scope.slashCommandsLoadRef.current, null, "the next reader asks again");
-  answer.resolve({ commands: [otherMcp] });
-  assert.deepEqual(await outdated, [otherMcp]);
-  assert.deepEqual(scope.slashCommandsRef.current, [], "the cleared list stays cleared");
-  assert.deepEqual(calls.lists, [[]]);
-  assert.equal(calls.loading.at(-1), false, "nothing newer is loading, so the palette stops waiting");
+  const answer = Promise.withResolvers();
+  const { opened, options } = page((entry) => (entry.body?.type === "get_commands" ? answer.promise : undefined));
+  await withAgentSession(options, async (env) => {
+    const outdated = env.hook.result.loadSlashCommands();
+    await env.settle();
+    assert.equal(askedForCommands(env.requests).length, 1);
+    await env.hook.result.handleToolPresetChange("read-only");
+    await env.settle();
+    answer.resolve(json({ success: true, data: { commands: [otherMcp] } }));
+    assert.deepEqual(await outdated, [otherMcp]);
+    await env.settle();
+    assert.equal(env.hook.result.slashCommandsLoading, false, "nothing newer is loading, so the palette stops waiting");
+    assert.deepEqual(env.hook.result.slashCommands, [], "the cleared list stays cleared");
 
-  // The next bare /mcp asks the session as it is now: Chat only lists no /mcp.
-  scope.sendAgentCommand = async (sid, command) => {
-    calls.requests.push(command.type);
-    return { commands: [] };
-  };
-  assert.deepEqual(await run("/mcp"), { handled: true, action: "openSettings" });
-  assert.deepEqual(calls.requests, ["get_commands", "get_commands"]);
+    // The next bare /mcp asks the session as it is now: Chat only lists no /mcp.
+    const asked = env.requests.length;
+    assert.deepEqual(await env.hook.result.handleBuiltinSlashCommand("/mcp"), { handled: true, action: "openSettings" });
+    assert.equal(env.requests.length - asked, 1);
+    assert.deepEqual(opened, ["mcp"]);
+  });
 });
 
 test("an older request answering after a newer one does not overwrite it", async () => {
-  const answers = [deferred(), deferred()];
-  const { scope, calls } = hook();
+  const answers = [Promise.withResolvers(), Promise.withResolvers()];
   let next = 0;
-  scope.sendAgentCommand = async () => answers[next++].promise;
-  const older = scope.requestSlashCommands();
-  const newer = scope.requestSlashCommands();
-  await new Promise((resolve) => setImmediate(resolve));
-  answers[1].resolve({ commands: [builtinMcp] });
-  await newer;
-  assert.deepEqual(scope.slashCommandsRef.current, [builtinMcp]);
-  answers[0].resolve({ commands: [otherMcp] });
-  await older;
-  assert.deepEqual(scope.slashCommandsRef.current, [builtinMcp]);
-  assert.deepEqual(calls.lists, [[builtinMcp]]);
-  assert.equal(scope.slashCommandsLoadRef.current, null);
+  const { options } = page((entry) => (entry.body?.type === "get_commands" ? answers[next++].promise : undefined));
+  await withAgentSession(options, async (env) => {
+    const older = env.hook.result.loadSlashCommands();
+    const newer = env.hook.result.loadSlashCommands();
+    await env.settle();
+    answers[1].resolve(json({ success: true, data: { commands: [builtinMcp] } }));
+    await newer;
+    await env.settle();
+    assert.deepEqual(env.hook.result.slashCommands, [builtinMcp]);
+    answers[0].resolve(json({ success: true, data: { commands: [otherMcp] } }));
+    await older;
+    await env.settle();
+    assert.deepEqual(env.hook.result.slashCommands, [builtinMcp]);
+    assert.equal(env.hook.result.slashCommandsLoading, false, "the newer answer ended the wait");
+  });
 });
 
 test("without a way to open Settings, /mcp is sent", async () => {
-  const { run, calls } = hook({ commands: [builtinMcp], openSettings: false });
-  assert.deepEqual(await run("/mcp"), { handled: false });
-  assert.deepEqual(calls.requests, []);
+  await withAgentSession({ handle: commandsReply([builtinMcp]) }, async (env) => {
+    await env.hook.result.loadSlashCommands();
+    await env.settle();
+    const before = askedForCommands(env.requests).length;
+    assert.deepEqual(await env.hook.result.handleBuiltinSlashCommand("/mcp"), { handled: false });
+    assert.equal(askedForCommands(env.requests).length, before);
+  });
 });

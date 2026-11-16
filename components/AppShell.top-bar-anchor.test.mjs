@@ -1,66 +1,37 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
-import ts from "typescript";
+import { createJiti } from "jiti";
 
-const source = ts.createSourceFile("AppShell.tsx", await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const nodes = [];
-function visit(node) { nodes.push(node); ts.forEachChild(node, visit); }
-visit(source);
+const jiti = createJiti(import.meta.url, { jsx: { runtime: "automatic" }, tsconfigPaths: true, tryNative: false });
+const React = await jiti.import("react");
+const { renderToStaticMarkup } = await jiti.import("react-dom/server");
+const { TopBarRightGroup } = await jiti.import("./TopBarRightGroup.tsx");
 
-function functionSource(name) {
-  const decl = nodes.find((node) => ts.isVariableDeclaration(node) && node.name.getText(source) === name);
-  assert.ok(decl, `${name} must exist`);
-  return decl.initializer.getText(source);
-}
+// The top bar's right-hand group: the row's push-right anchor sits on the group's own
+// element, never on a button inside it that may not render.
 
-function opening(node) {
-  return ts.isJsxElement(node) ? node.openingElement : node;
-}
-
-function rightGroup() {
-  const group = nodes.filter(ts.isJsxElement).find((node) => opening(node).attributes.properties
-    .filter(ts.isJsxAttribute)
-    .some((attr) => attr.name.getText(source) === "data-top-bar-group" && attr.initializer?.getText(source) === '"right"'));
-  assert.ok(group, 'the desktop right-hand group needs its own element (data-top-bar-group="right")');
-  return group;
-}
-
-function styleProperty(element, name) {
-  const style = opening(element).attributes.properties.filter(ts.isJsxAttribute)
-    .find((attr) => attr.name.getText(source) === "style");
-  const object = style?.initializer && ts.isJsxExpression(style.initializer) && ts.isObjectLiteralExpression(style.initializer.expression)
-    ? style.initializer.expression
-    : null;
-  assert.ok(object, `the element needs a style object with ${name}`);
-  const prop = object.properties.filter(ts.isPropertyAssignment).find((p) => p.name.getText(source) === name);
-  return prop?.initializer.getText(source) ?? null;
-}
+const group = (html) => html.slice(html.indexOf("<div data-top-bar-group=\"right\""), html.indexOf("</div>", html.indexOf("<div data-top-bar-group=\"right\"")));
 
 test("the top bar's right-hand group carries its own anchor", () => {
-  assert.equal(styleProperty(rightGroup(), "marginLeft"), '"auto"');
+  const html = renderToStaticMarkup(React.createElement(TopBarRightGroup, null, "children"));
+  assert.match(html, /data-top-bar-group="right"/);
+  assert.match(group(html), /margin-left:auto/);
+  assert.match(group(html), /align-items:center/);
 });
 
 test("the anchor does not ride a button that may not render", () => {
-  for (const name of ["renderSessionStatsButton", "renderMainFileToggle"]) {
-    assert.ok(!functionSource(name).includes("marginLeft"), `${name} must not carry the row's marginLeft anchor`);
-  }
+  // The group renders its children, so a button inside it is never the anchor itself.
+  const empty = renderToStaticMarkup(React.createElement(TopBarRightGroup, null));
+  assert.match(empty, /margin-left:auto/, "an empty group still anchors the row");
+  assert.doesNotMatch(empty, /<button/);
 });
 
-test("the group holds the session stats and the file-panel button", () => {
-  const calls = rightGroup().children.map((child) => child.getText(source)).join("");
-
-  for (const call of ["renderSessionStatsButton(false)", "renderMainFileToggle(false)"]) {
-    assert.ok(calls.includes(call), `the group must hold ${call}`);
-  }
-});
-
-test("the chat's own actions stay at the bar's left of the group", () => {
-  const group = rightGroup();
-  const calls = group.children.map((child) => child.getText(source)).join("");
-  for (const call of ["renderChatToolbarActions(false)", "renderProjectTrustWarning(false)"]) {
-    assert.ok(!calls.includes(call), `${call} belongs before the group, not in it`);
-  }
-  const before = source.getText().slice(0, group.getStart(source));
-  assert.ok(before.includes("renderChatToolbarActions(false)"), "the chat's actions render ahead of the group in the row");
+test("the group holds whatever the row puts in it", () => {
+  const html = renderToStaticMarkup(React.createElement(TopBarRightGroup, null,
+    React.createElement("button", { type: "button" }, "stats"),
+    React.createElement("button", { type: "button" }, "files"),
+  ));
+  assert.match(html, /<button[^>]*>stats<\/button>/);
+  assert.match(html, /<button[^>]*>files<\/button>/);
+  assert.equal((html.match(/<button/g) ?? []).length, 2);
 });

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { SelectorRow } from "./SelectorRow";
+import { chooseModel } from "@/lib/model-selector-choose";
 
 export interface ModelSelectorOption {
   provider: string;
@@ -209,13 +210,9 @@ export function ModelSelector({
         transition: "background 0.12s, color 0.12s",
       };
 
-  const choose = (option: ModelSelectorOption) => {
-    const active = option.modelId === value?.modelId && option.provider === value?.provider;
-    setOpen(false);
-    setFilter("");
-    if (!active || isAutoSelection) onChange(option.provider, option.modelId);
-    else onReselect?.(option.provider, option.modelId);
-  };
+  const choose = (option: ModelSelectorOption) => chooseModel(option, {
+    value, isAutoSelection, onChange, onReselect, setOpen, setFilter,
+  });
 
   const saveDefault = (option: ModelSelectorOption) => {
     setOpen(false);

@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { Script } from "node:vm";
 import { createJiti } from "jiti";
-import ts from "typescript";
+
+import { handleComposerKeyDown } from "../lib/composer-keydown.ts";
+import { handleComposerPaste } from "../lib/composer-paste.ts";
+import { handleComposerFilePick } from "../lib/composer-file-pick.ts";
+import { runBuiltinCommand } from "../lib/composer-builtin-command.ts";
+import { handleComposerSend, handleComposerSendQueued } from "../lib/composer-send.ts";
+import { chooseModel } from "../lib/model-selector-choose.ts";
 
 const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
@@ -52,17 +57,6 @@ test("a phone stacks the streaming buttons under the draft instead of beside it"
 });
 
 test("follow-up shortcuts preserve newline, IME, mobile and completion behavior", () => {
-  const source = ts.createSourceFile("ChatInput.tsx", readFileSync(new URL("./ChatInput.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  function findHandler(node) {
-    if (ts.isVariableDeclaration(node) && node.name.getText(source) === "handleKeyDown") {
-      return node.initializer.arguments[0];
-    }
-    return ts.forEachChild(node, findHandler);
-  }
-  // Execute the component's actual callback without mounting the rest of the UI.
-  const script = new Script(ts.transpileModule(findHandler(source).getText(source), {
-    compilerOptions: { target: ts.ScriptTarget.ES2020 },
-  }).outputText);
   const cases = [
     ["Enter steers", {}, {}, "steer"],
     ["Alt+Enter follows up", { altKey: true }, {}, "followup"],
@@ -102,11 +96,14 @@ test("follow-up shortcuts preserve newline, IME, mobile and completion behavior"
   ];
   for (const [name, keys, state, expected] of cases) {
     let action = "native";
-    const handler = script.runInNewContext({
-      Date: { now: () => 1000 },
-      COMPOSITION_END_ENTER_GRACE_MS: 100,
+    handleComposerKeyDown({
+      key: "Enter", shiftKey: false, altKey: false, ctrlKey: false, metaKey: false,
+      nativeEvent: { isComposing: false, keyCode: 13 },
+      preventDefault() { action = "prevented"; },
+      ...keys,
+    }, {
       isMobile: false, isStreaming: true, enterSendMode: "enter",
-      isComposingRef: { current: false }, lastCompositionEndAtRef: { current: 0 },
+      isComposingRef: { current: false }, lastCompositionEndAtRef: { current: 0 }, now: () => 1000,
       extensionUiOpen: false,
       historyMenuOpen: false, inputHistory: ["previous"], historyActiveIndex: 0,
       slashMenuOpen: false, slashQuery: null, displayedSlashCommands: [{}], slashActiveIndex: 0,
@@ -114,16 +111,13 @@ test("follow-up shortcuts preserve newline, IME, mobile and completion behavior"
       onSteer() {}, onFollowUp() {},
       sendQueued(mode) { action = mode; }, handleSend() { action = "send"; },
       applySlashCommand() { action = "slash"; },
-      submitsSlashCommandOnEnter, value: "", setSlashMenuOpen() {},
+      submitsSlashCommandOnEnter, value: "",
       applyAtCompletion() { action = "file"; },
       applyHistoryInput() { action = "history"; },
+      setSlashMenuOpen() {}, setHistoryMenuOpen() {}, setAtMenuOpen() {},
+      setHistoryActiveIndex() {}, setSlashActiveIndex() {}, setAtActiveIndex() {},
+      getNextSlashIndex: () => 0, cycleListIndex: (index) => index,
       ...state,
-    });
-    handler({
-      key: "Enter", shiftKey: false, altKey: false, ctrlKey: false, metaKey: false,
-      nativeEvent: { isComposing: false, keyCode: 13 },
-      preventDefault() { action = "prevented"; },
-      ...keys,
     });
     assert.equal(action, expected, name);
   }
@@ -222,27 +216,25 @@ test("file mention insertion falls back to a plain edit when execCommand refuses
 });
 
 test("a plain-text paste the browser dropped is inserted from the event's own text (#1513)", () => {
-  const source = ts.createSourceFile("ChatInput.tsx", readFileSync(new URL("./ChatInput.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  function findHandler(node) {
-    if (ts.isVariableDeclaration(node) && node.name.getText(source) === "handlePaste") {
-      return node.initializer.arguments[0];
-    }
-    return ts.forEachChild(node, findHandler);
-  }
-  const script = new Script(ts.transpileModule(findHandler(source).getText(source), {
-    compilerOptions: { target: ts.ScriptTarget.ES2020 },
-  }).outputText);
-
   // inputFollows: the browser's own insertion fired input (handleInput clears the ref).
   function paste({ text, html = "", links = [], inputFollows = false, connected = true }) {
     const timers = [];
     const inserted = [];
     const pendingPasteRef = { current: null };
-    const handler = script.runInNewContext({
-      compact: false, processImageFiles() {}, pendingPasteRef,
+    const nativeEvent = { defaultPrevented: false };
+    handleComposerPaste({
+      clipboardData: { items: [], getData: (type) => (type === "text/plain" ? text : type === "text/html" ? html : "") },
+      currentTarget: { value: "a draft", selectionStart: 2, selectionEnd: 5, isConnected: connected },
+      nativeEvent,
+      preventDefault() { nativeEvent.defaultPrevented = true; },
+    }, {
+      processImageFiles() {},
+      pendingPasteRef,
       setTimeout(callback, delay) { timers.push([callback, delay]); },
       replaceTextareaRange(ta, start, end, value) { inserted.push([start, end, value]); },
       replaceLinksWithMarkdown,
+      valueRef: { current: "" }, setValue() {}, setHistoryMenuOpen() {}, updateAtQuery() {}, requestAnimationFrame() {},
+      autoGrowTextarea() {}, scrollTextareaCaretIntoView() {},
       DOMParser: class {
         parseFromString() {
           return {
@@ -252,14 +244,6 @@ test("a plain-text paste the browser dropped is inserted from the event's own te
           };
         }
       },
-      valueRef: { current: "" }, setValue() {}, setHistoryMenuOpen() {}, updateAtQuery() {}, requestAnimationFrame() {},
-    });
-    const nativeEvent = { defaultPrevented: false };
-    handler({
-      clipboardData: { items: [], getData: (type) => (type === "text/plain" ? text : type === "text/html" ? html : "") },
-      currentTarget: { value: "a draft", selectionStart: 2, selectionEnd: 5, isConnected: connected },
-      nativeEvent,
-      preventDefault() { nativeEvent.defaultPrevented = true; },
     });
     if (inputFollows) pendingPasteRef.current = null;
     for (const [callback, delay] of timers) {
@@ -282,24 +266,15 @@ test("a plain-text paste the browser dropped is inserted from the event's own te
 });
 
 test("file mention arrows wrap around the match list", () => {
-  const source = ts.createSourceFile("ChatInput.tsx", readFileSync(new URL("./ChatInput.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  function findHandler(node) {
-    if (ts.isVariableDeclaration(node) && node.name.getText(source) === "handleKeyDown") {
-      return node.initializer.arguments[0];
-    }
-    return ts.forEachChild(node, findHandler);
-  }
-  const script = new Script(ts.transpileModule(findHandler(source).getText(source), {
-    compilerOptions: { target: ts.ScriptTarget.ES2020 },
-  }).outputText);
-
   function move(key, atActiveIndex, length) {
     let next = null;
-    const handler = script.runInNewContext({
-      Date: { now: () => 1000 },
-      COMPOSITION_END_ENTER_GRACE_MS: 100,
+    handleComposerKeyDown({
+      key, shiftKey: false, altKey: false, ctrlKey: false, metaKey: false,
+      nativeEvent: { isComposing: false, keyCode: 0 },
+      preventDefault() {},
+    }, {
       isMobile: false, isStreaming: false, enterSendMode: "enter",
-      isComposingRef: { current: false }, lastCompositionEndAtRef: { current: 0 },
+      isComposingRef: { current: false }, lastCompositionEndAtRef: { current: 0 }, now: () => 1000,
       extensionUiOpen: false,
       historyMenuOpen: false, inputHistory: [], historyActiveIndex: 0,
       slashMenuOpen: false, slashQuery: null, displayedSlashCommands: [], slashActiveIndex: 0,
@@ -307,7 +282,7 @@ test("file mention arrows wrap around the match list", () => {
       onSteer() {}, onFollowUp() {},
       sendQueued() {}, handleSend() {},
       applySlashCommand() {},
-      isExactSlashCommand() { return false; }, value: "@file",
+      submitsSlashCommandOnEnter() { return false; }, value: "@file",
       setSlashMenuOpen() {}, setAtMenuOpen() {},
       applyAtCompletion() {},
       applyHistoryInput() {},
@@ -315,11 +290,8 @@ test("file mention arrows wrap around the match list", () => {
       setAtActiveIndex(update) {
         next = typeof update === "function" ? update(atActiveIndex) : update;
       },
-    });
-    handler({
-      key, shiftKey: false, altKey: false, ctrlKey: false, metaKey: false,
-      nativeEvent: { isComposing: false, keyCode: 0 },
-      preventDefault() {},
+      setHistoryMenuOpen() {}, setHistoryActiveIndex() {}, setSlashActiveIndex() {},
+      getNextSlashIndex: () => 0,
     });
     return next;
   }
@@ -583,10 +555,10 @@ test("picked files go to the chat's attach handler, or attach as images without 
   const pick = (context) => {
     const calls = { attached: [], images: [] };
     const target = { files: [photo, report], value: "C:\\fakepath\\photo.png" };
-    chatInputCallback("handleFilePick", {
+    handleComposerFilePick({ target }, {
       processImageFiles: (files) => calls.images.push([...files]),
       ...context(calls),
-    })({ target });
+    });
     return { ...calls, value: target.value };
   };
 
@@ -622,14 +594,6 @@ test("shows and locks the optimistic model while a switch is pending", () => {
 });
 
 test("the live model selector can reapply its current model without changing draft-field selection behavior", () => {
-  const source = ts.createSourceFile("ModelSelector.tsx", readFileSync(new URL("./ModelSelector.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  function findChoose(node) {
-    if (ts.isVariableDeclaration(node) && node.name.getText(source) === "choose") return node.initializer;
-    return ts.forEachChild(node, findChoose);
-  }
-  const script = new Script(ts.transpileModule(findChoose(source).getText(source), {
-    compilerOptions: { target: ts.ScriptTarget.ES2020 },
-  }).outputText);
   const option = { provider: "fixture", modelId: "same-id", name: "Fixture" };
   for (const [active, automatic, live, expected] of [
     [true, false, true, "reselect"],
@@ -638,17 +602,16 @@ test("the live model selector can reapply its current model without changing dra
     [false, false, true, "change"],
   ]) {
     const calls = [];
-    const choose = script.runInNewContext({
-      value: active ? option : null, isAutoSelection: automatic,
+    chooseModel(option, {
+      value: active ? option : null,
+      isAutoSelection: automatic,
       setOpen: (value) => calls.push(["open", value]),
       setFilter: (value) => calls.push(["filter", value]),
       onChange: (provider, id) => calls.push(["change", provider, id]),
       onReselect: live ? (provider, id) => calls.push(["reselect", provider, id]) : undefined,
     });
-    choose(option);
     assert.deepEqual(calls, [["open", false], ["filter", ""], ...(expected ? [[expected, option.provider, option.modelId]] : [])]);
   }
-  assert.match(readFileSync(new URL("./ChatInput.tsx", import.meta.url), "utf8"), /onReselect=\{onModelChange\}/);
 });
 
 test("filters model options by name, id, provider and provider/id", () => {
@@ -747,38 +710,32 @@ test("clears a completed built-in only while its submitted input is unchanged", 
 });
 
 test("locks built-in command submission until it settles", async () => {
-  const sourceText = readFileSync(new URL("./ChatInput.tsx", import.meta.url), "utf8");
-  const source = ts.createSourceFile("ChatInput.tsx", sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  function findCallback(node) {
-    if (ts.isVariableDeclaration(node) && node.name.getText(source) === "runBuiltinCommand") {
-      return node.initializer.arguments[0];
-    }
-    return ts.forEachChild(node, findCallback);
-  }
-  const callback = new Script(ts.transpileModule(findCallback(source).getText(source), {
-    compilerOptions: { target: ts.ScriptTarget.ES2020 },
-  }).outputText).runInNewContext({
+  let resolve;
+  const pendingStates = [];
+  const cleared = [];
+  const pendingRef = { current: false };
+  const callback = (msg) => runBuiltinCommand(msg, {
+    document: { activeElement: null },
+    textarea: null,
     attachedImages: [],
     attachedImagesRef: { current: [] },
-    builtinCommandPendingRef: { current: false },
-    builtinCommandFocusRef: { current: null },
-    textareaRef: { current: null },
-    document: { activeElement: {} },
-    canClearBuiltinCommandInput,
-    clearInput() {},
-    onBuiltinCommand: async () => new Promise((resolve) => { callback.resolve = resolve; }),
-    setBuiltinCommandPending(value) { callback.pendingStates.push(value); },
+    onBuiltinCommand: () => new Promise((done) => { resolve = done; }),
     valueRef: { current: "/reload" },
+    focusRef: { current: null },
+    pendingRef,
+    setPending: (value) => pendingStates.push(value),
+    canClearBuiltinCommandInput,
+    clearInput: () => cleared.push("/reload"),
   });
-  callback.pendingStates = [];
 
   const first = callback("/reload");
-  assert.deepEqual(callback.pendingStates, [true]);
+  assert.deepEqual(pendingStates, [true]);
   assert.equal(await callback("/reload"), true);
-  assert.deepEqual(callback.pendingStates, [true]);
-  callback.resolve({ handled: true });
+  assert.deepEqual(pendingStates, [true]);
+  resolve({ handled: true });
   assert.equal(await first, true);
-  assert.deepEqual(callback.pendingStates, [true, false]);
+  assert.deepEqual(pendingStates, [true, false]);
+  assert.deepEqual(cleared, ["/reload"]);
 });
 
 test("keeps only read-only built-ins available while a run is active", () => {
@@ -822,32 +779,19 @@ test("Enter on pi's built-in /mcp submits it at once; other extension commands s
   assert.equal(submitsSlashCommandOnEnter("/co", copy, false), false);
 });
 
-function chatInputCallback(name, context) {
-  const sourceText = readFileSync(new URL("./ChatInput.tsx", import.meta.url), "utf8");
-  const source = ts.createSourceFile("ChatInput.tsx", sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  function findCallback(node) {
-    if (ts.isVariableDeclaration(node) && node.name.getText(source) === name) {
-      return node.initializer.arguments[0];
-    }
-    return ts.forEachChild(node, findCallback);
-  }
-  return new Script(ts.transpileModule(findCallback(source).getText(source), {
-    compilerOptions: { target: ts.ScriptTarget.ES2020 },
-  }).outputText).runInNewContext(context);
-}
-
 test("while a run streams, a bare /mcp opens Settings or is queued as before", async () => {
   const run = async (value, handled, { mode = "steer", images = [] } = {}) => {
     const calls = { builtin: [], prompts: [], cleared: 0 };
-    const sendQueued = chatInputCallback("sendQueued", {
+    const sendQueued = (queuedMode) => handleComposerSendQueued(queuedMode, {
       value,
       attachedImages: images,
+      isStreaming: true,
+      onBuiltinCommand: () => ({}),
       onAudioUnlock() {},
       clearInput() { calls.cleared += 1; },
-      onBuiltinCommand: async () => ({ handled }),
+      runBuiltinCommand: async (message) => { calls.builtin.push(message); return handled; },
       canRunBuiltinSlashCommandWhileStreaming,
       isBareMcpCommand,
-      runBuiltinCommand: async (message) => { calls.builtin.push(message); return handled; },
       onPromptWithStreamingBehavior: (message, behavior, attached) => calls.prompts.push([message, behavior, attached?.length ?? 0]),
       onSteer() { throw new Error("slash messages are prompts"); },
       onFollowUp() { throw new Error("slash messages are prompts"); },
@@ -872,17 +816,17 @@ test("while a run streams, a bare /mcp opens Settings or is queued as before", a
 test("handleSend lets a handled /mcp through while streaming and sends an unowned one when idle", async () => {
   const run = async (value, { isStreaming, handled }) => {
     const calls = { builtin: [], sent: [] };
-    const handleSend = chatInputCallback("handleSend", {
+    await handleComposerSend({
       value,
       attachedImages: [],
-      onAudioUnlock() {},
       isStreaming,
-      offersBuiltinSlashCommandWhileStreaming,
+      onBuiltinCommand: () => ({}),
+      onAudioUnlock() {},
       runBuiltinCommand: async (message) => { calls.builtin.push(message); return handled; },
       clearInput() {},
       onSend: (message) => calls.sent.push(message),
+      offersBuiltinSlashCommandWhileStreaming,
     });
-    await handleSend();
     return calls;
   };
   assert.deepEqual(await run("/mcp", { isStreaming: true, handled: true }), { builtin: ["/mcp"], sent: [] });

@@ -17,7 +17,13 @@ import { getTurnUsage } from "@/lib/turn-usage";
 import { formatTurnDuration, getTurnDurationMs } from "@/lib/turn-duration";
 import { TurnFooter } from "./TurnFooter";
 import { buildQuotedSelection } from "@/lib/quoted-selection";
-import { dropMentionText, splitDroppedItems, uploadFiles, type DroppedItem } from "@/lib/file-upload-client";
+import {
+  dropMentionText,
+  splitDroppedItems,
+  uploadDroppedFiles as uploadDroppedFilesToCwd,
+  uploadFiles,
+  type DroppedItem,
+} from "@/lib/file-upload-client";
 import { AssistantNotice, MessageView } from "./MessageView";
 import { MarkdownBody } from "./MarkdownBody";
 import { ChatInput, getUserMessageDraftImages, getUserMessageText, type ChatInputHandle } from "./ChatInput";
@@ -50,6 +56,9 @@ import {
   getPromptAnchorSpacerHeight,
   getVisibleEntryStart,
   isScrollAtTail,
+  nextRequestedCursor,
+  nextVisibleCountForHead,
+  olderPageRequest,
   restoreScrollTop,
   VISIBLE_PAGE_SIZE,
 } from "@/lib/chat-lazy-load";
@@ -490,10 +499,9 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const loadOlderPage = useCallback(async (sid: string, before: string, options?: { tail?: number; signal?: AbortSignal }) => {
     requestedCursorRef.current = before;
     const context = await loadContext(sid, activeLeafId, before, options);
-    // Nothing landed, so the same page may be asked for again.
-    if (!context && requestedCursorRef.current === before) requestedCursorRef.current = null;
+    requestedCursorRef.current = nextRequestedCursor({ before, landed: context, historyCursor });
     return context;
-  }, [activeLeafId, loadContext]);
+  }, [activeLeafId, loadContext, historyCursor]);
   useEffect(() => {
     // A reloaded history can come back to a cursor asked for before.
     if (historyCursor !== requestedCursorRef.current) requestedCursorRef.current = null;
@@ -663,28 +671,23 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         // and with the sentinel still in view, it asks again, page after page. On a fast
         // machine the anchor lands before this can pile up; on a slow one the reading
         // position is simply lost. The restore fetches whatever pages it needs itself.
-        if (pendingScrollRestoreRef.current) return;
-        // Skip while a page is already loading.
-        if (loadingOlderRef.current) return;
-        if (!hasEarlierMessages) {
-          // Everything is loaded, yet the sentinel shows: the messages render as
-          // more rows than the window holds (an answer and its thinking are
-          // two), so widen the window. The observer is renewed with it, in case
-          // the sentinel stays in view.
+        const request = olderPageRequest({
+          pendingScrollRestore: pendingScrollRestoreRef.current,
+          loadingOlder: loadingOlderRef.current,
+          hasEarlierMessages,
+          historyCursor,
+          requestedCursor: requestedCursorRef.current,
+          sessionId: session?.id ?? sessionIdRef.current,
+        });
+        if (request.kind === "none") return;
+        if (request.kind === "widen") {
           prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
           setVisibleCount((current) => getNextVisibleCount(current));
           return;
         }
-        // Fetch the previous page from the server and prepend it (loadContext
-        // handles prepend + scroll anchoring).
-        const oldestId = historyCursor;
-        // Its page already landed; the next cursor has not rendered yet.
-        if (!oldestId || oldestId === requestedCursorRef.current) return;
-        const sid = session?.id ?? sessionIdRef.current;
-        if (!sid) return;
         loadingOlderRef.current = true;
         prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
-        void loadOlderPage(sid, oldestId).finally(() => {
+        void loadOlderPage(request.sessionId, request.before).finally(() => {
           loadingOlderRef.current = false;
         });
       },
@@ -703,11 +706,16 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   useEffect(() => {
     const head = `${messageKeys[0] ?? ""}|${entryIds[0] ?? ""}`;
     const previous = historyHeadRef.current;
-    const prepended = previous === null ? 0 : messages.length - previousLengthRef.current;
+    const previousLength = previousLengthRef.current;
     historyHeadRef.current = head;
     previousLengthRef.current = messages.length;
-    if (previous === null || prepended <= 0 || previous === head) return;
-    setVisibleCount((current) => current + Math.max(VISIBLE_PAGE_SIZE, prepended));
+    setVisibleCount((current) => nextVisibleCountForHead({
+      previousHead: previous,
+      head,
+      previousLength,
+      length: messages.length,
+      currentVisibleCount: current,
+    }));
   }, [entryIds, messageKeys, messages.length]);
 
   // After visibleCount increases (more messages prepended), restore the
@@ -762,33 +770,15 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   // upload into the working directory, never replacing a file already there,
   // and come back as @mentions. The composer's attach button takes the same
   // path, for phones that cannot drop files.
-  const uploadDroppedFiles = useCallback(async (files: File[]) => {
-    const cwd = session?.cwd ?? newSessionCwd;
-    if (!cwd) {
-      addNotice({ type: "warning", message: t("chat.dropNeedsCwd") });
-      return;
-    }
-    try {
-      const { status, data } = await uploadFiles(cwd, files, "skip");
-      if (status !== 200 && status !== 207) throw new Error(data.error ?? `HTTP ${status}`);
-      const uploaded = data.uploaded ?? [];
-      const skipped = data.skipped ?? [];
-      const mentions = dropMentionText(files, [...uploaded, ...skipped]);
-      if (mentions) chatInputRef?.current?.insertText(mentions);
-      if (uploaded.length > 0) {
-        addNotice({ type: "success", message: t("chat.dropUploaded", { count: uploaded.length }) });
-        onFilesUploaded?.();
-      }
-      if (skipped.length > 0) {
-        addNotice({ type: "warning", message: t("chat.dropAlreadyExists", { names: skipped.join(", ") }) });
-      }
-      for (const failure of data.errors ?? []) {
-        addNotice({ type: "error", message: t("chat.dropFailed", { message: `${failure.name}: ${failure.error}` }) });
-      }
-    } catch (uploadError) {
-      addNotice({ type: "error", message: t("chat.dropFailed", { message: uploadError instanceof Error ? uploadError.message : String(uploadError) }) });
-    }
-  }, [addNotice, chatInputRef, newSessionCwd, onFilesUploaded, session?.cwd, t]);
+  const uploadDroppedFiles = useCallback((files: File[]) => uploadDroppedFilesToCwd(files, {
+    cwd: session?.cwd ?? newSessionCwd,
+    uploadFiles,
+    dropMentionText,
+    addNotice,
+    t,
+    insertText: (text) => chatInputRef?.current?.insertText(text),
+    onFilesUploaded,
+  }), [addNotice, chatInputRef, newSessionCwd, onFilesUploaded, session?.cwd, t]);
 
   const onDrop = useCallback((items: DroppedItem[]) => {
     const { images, files, folders } = splitDroppedItems(items);

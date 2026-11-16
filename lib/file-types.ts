@@ -105,6 +105,14 @@ const EXT_TO_LANGUAGE: Record<string, string> = {
 };
 
 /**
+ * The extensions whose files the source view can show as text, in the map's own order.
+ * PDF and Word are streamed by ?type=read, never shown as source.
+ */
+export function textPreviewExtensions(): string[] {
+  return Object.keys(EXT_TO_LANGUAGE).filter((ext) => ext !== "pdf" && ext !== "docx");
+}
+
+/**
  * The `react-syntax-highlighter` language for a path, from its name alone: the
  * file API answers it for a file it read, and a snapshot of a file the browser
  * never fetched (a `read` tool call's slice) has to work it out the same way.

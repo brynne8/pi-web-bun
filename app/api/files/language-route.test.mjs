@@ -6,7 +6,6 @@ import test from "node:test";
 import { NextRequest } from "vinext/shims/server";
 import { createJiti } from "jiti";
 import { refractor } from "refractor/all";
-import ts from "typescript";
 
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-files-language-")));
 process.env.PI_CODING_AGENT_DIR = path.join(root, "agent");
@@ -19,24 +18,12 @@ const jiti = createJiti(import.meta.url, {
 });
 const { GET } = await jiti.import("./[...path]/route.ts");
 const { allowFileRoot } = await jiti.import("../../../lib/allowed-roots.ts");
+const { textPreviewExtensions } = await jiti.import("../../../lib/file-types.ts");
 allowFileRoot(root);
 
 // The map lives in lib/file-types.ts, not beside the route: the read panel
 // works a slice's language out in the browser without the file ever being read.
-// A route exports only its handlers, so the extensions it answers for come from
-// the module's source.
-const source = fs.readFileSync(new URL("../../../lib/file-types.ts", import.meta.url), "utf8");
-const sourceFile = ts.createSourceFile("file-types.ts", source, ts.ScriptTarget.Latest, true);
-let extensionMap;
-sourceFile.forEachChild(function visit(node) {
-  if (ts.isVariableDeclaration(node) && node.name.getText(sourceFile) === "EXT_TO_LANGUAGE") extensionMap = node.initializer;
-  else node.forEachChild(visit);
-});
-assert.ok(extensionMap && ts.isObjectLiteralExpression(extensionMap), "EXT_TO_LANGUAGE not found");
-// PDF and Word files are streamed by ?type=read, never shown as source.
-const textExtensions = extensionMap.properties
-  .map((property) => property.name.text)
-  .filter((ext) => ext !== "pdf" && ext !== "docx");
+const textExtensions = textPreviewExtensions();
 assert.ok(textExtensions.includes("ts") && textExtensions.every(Boolean), "EXT_TO_LANGUAGE keys not read");
 
 async function languageOf(name) {

@@ -102,3 +102,72 @@ export function getPromptAnchorSpacerHeight(
     clampedTargetTop + clientHeight - Math.max(0, contentEnd),
   ));
 }
+
+/**
+ * What the sentinel coming into view asks for: the older page to fetch, or nothing,
+ * because a reading position is still restoring, a page is already loading, that page
+ * already landed, or there is no session to ask. `widen` means every message is loaded
+ * and the window grows instead.
+ */
+export function olderPageRequest(input: {
+  pendingScrollRestore: unknown;
+  loadingOlder: boolean;
+  hasEarlierMessages: boolean;
+  historyCursor: string | null;
+  requestedCursor: string | null;
+  sessionId: string | null;
+}): { kind: "none" } | { kind: "widen" } | { kind: "fetch"; sessionId: string; before: string } {
+  // A reading position that has not landed yet outranks the sentinel. While a restore is
+  // pending, every page this callback asks for is prepended with its own distance-from-
+  // bottom restore, which holds the *bottom* of the content and therefore shoves the
+  // viewport back to the top of everything loaded — and with the sentinel still in view,
+  // it asks again, page after page. The restore fetches whatever pages it needs itself.
+  if (input.pendingScrollRestore) return { kind: "none" };
+  // Skip while a page is already loading.
+  if (input.loadingOlder) return { kind: "none" };
+  if (!input.hasEarlierMessages) {
+    // Everything is loaded, yet the sentinel shows: the messages render as more rows
+    // than the window holds (an answer and its thinking are two), so widen the window.
+    // The observer is renewed with it, in case the sentinel stays in view.
+    return { kind: "widen" };
+  }
+  // Its page already landed; the next cursor has not rendered yet.
+  const oldestId = input.historyCursor;
+  if (!oldestId || oldestId === input.requestedCursor) return { kind: "none" };
+  if (!input.sessionId) return { kind: "none" };
+  return { kind: "fetch", sessionId: input.sessionId, before: oldestId };
+}
+
+/**
+ * The window after a page landed above it. A page prepended above the window widens it
+ * by that page, so what the reader was looking at stays mounted and the scroll restore
+ * has the same content to hold. Appends (a run's own messages) need nothing: the window
+ * always ends at the tail, and a shorter history (a branch switch) leaves it alone.
+ */
+export function nextVisibleCountForHead(input: {
+  previousHead: string | null;
+  head: string;
+  previousLength: number;
+  length: number;
+  currentVisibleCount: number;
+  pageSize?: number;
+}): number {
+  const prepended = input.previousHead === null ? 0 : input.length - input.previousLength;
+  if (input.previousHead === null || prepended <= 0 || input.previousHead === input.head) {
+    return input.currentVisibleCount;
+  }
+  return input.currentVisibleCount + Math.max(input.pageSize ?? VISIBLE_PAGE_SIZE, prepended);
+}
+
+/**
+ * The cursor of the page asked for last, kept until the next cursor renders. A page that
+ * did not land may be asked for again; a cursor a reload brought back clears it.
+ */
+export function nextRequestedCursor(input: {
+  before: string;
+  landed: unknown;
+  historyCursor: string | null;
+}): string | null {
+  if (input.historyCursor !== input.before) return null;
+  return input.landed ? input.before : null;
+}

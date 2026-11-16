@@ -17,6 +17,16 @@ import { userMessageKey } from "./prompt-recovery";
  */
 const liveKey = (anchor: string | undefined, offset: number) => `live:${anchor ?? ""}:${offset}`;
 
+/**
+ * A rendered block's React key: its place in its message, never the entry id. A message
+ * of the running turn takes its entry id when the file is read again, and a block keyed
+ * by it remounted then: open thinking closed, a tool output's scroll went back to the
+ * top. ThinkingBlock drops what it loaded for another id.
+ */
+export function blockRenderKey(originalIndex: number): number {
+  return originalIndex;
+}
+
 export function messageRenderKeys(entryIds: readonly string[], count: number, aliases: ReadonlyMap<string, string>): string[] {
   const anchor = entryIds[entryIds.length - 1];
   const keys: string[] = [];

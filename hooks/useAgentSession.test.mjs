@@ -453,10 +453,11 @@ test("uses server pagination state instead of guessing from rendered rows", () =
   assert.match(source, /setHasEarlierMessages\(d\.context\.hasMore\)/);
   assert.match(source, /setHistoryCursor\(d\.context\.oldestEntryId\)/);
   assert.match(loadContextSource, /setData\(\(prev\) => \{[\s\S]*messages: \[\.\.\.d\.context\.messages, \.\.\.prev\.context\.messages\]/);
-  assert.match(chatWindowSource, /const oldestId = historyCursor/);
+  // The page the sentinel asks for is named by the server's cursor, never by a
+  // rendered row (lib/chat-lazy-load.ts decides it).
+  assert.match(chatWindowSource, /olderPageRequest\(\{[\s\S]*?historyCursor,/);
   assert.doesNotMatch(chatWindowSource, /const oldestId = entryIds\[0\]/);
-  // Nothing older on the server: the sentinel only widens the window over loaded rows.
-  assert.match(chatWindowSource, /if \(!hasEarlierMessages\) \{[\s\S]*?setVisibleCount\(\(current\) => getNextVisibleCount\(current\)\);\s*return;\s*\}/);
+  assert.doesNotMatch(chatWindowSource, /rendered\.length >= visibleCount/);
   assert.match(chatWindowSource, /const hasMore = startIndex > 0 \|\| hasEarlierMessages/);
   assert.doesNotMatch(chatWindowSource, /rendered\.length >= visibleCount/);
 });

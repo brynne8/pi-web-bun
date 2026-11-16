@@ -1,139 +1,194 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import test from "node:test";
-import { Script, createContext } from "node:vm";
-import ts from "typescript";
-import { createJiti } from "jiti";
+import test, { mock } from "node:test";
+import { SESSION, json, withAgentSession } from "./__fixtures__/agent-session-harness.mjs";
 
-const { agentStatusUrl } = await createJiti(import.meta.url, { interopDefault: true }).import("../lib/agent-client.ts");
+// The usage panel follows the run: a poll and a read after each complete reply, the newer
+// answer winning, a failed one never discarding what a good one left, and a reply that
+// belongs to a run, a session or a page that is gone changing nothing.
 
-const source = ts.createSourceFile("useAgentSession.ts", await readFile(new URL("./useAgentSession.ts", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true);
-const nodes = [];
-function visit(node) { nodes.push(node); ts.forEachChild(node, visit); }
-visit(source);
-function callback(name) {
-  const node = nodes.find((node) => ts.isVariableDeclaration(node) && node.name.getText(source) === name);
-  assert.ok(node, `missing ${name}`);
-  return new Script(ts.transpileModule(`(${node.initializer.arguments[0].getText(source)})`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText);
-}
-function setup() {
-  const writes = [];
-  const activeWrites = [];
-  const requests = [];
-  const context = createContext({
-    sessionHookMountedRef: { current: true }, sessionIdRef: { current: "a" },
-    promptRunIdRef: { current: 1 }, contextUsageRequestIdRef: { current: 0 }, contextUsageAppliedIdRef: { current: 0 },
-    agentRunningRef: { current: true }, sdkAgentActiveRef: { current: true }, rpcPromptPendingRef: { current: true },
-    setContextUsage: (value) => writes.push(value),
-    setLiveTotalActiveMs: (value) => activeWrites.push({ sessionId: value.sessionId, value: value.value }), agentStatusUrl,
-    fetch: (url) => { const request = Promise.withResolvers(); requests.push({ ...request, url }); return request.promise; },
-    syncLiveModel() {}, setIsCompacting() {}, setAutoCompactionEnabled() {}, setQueuedMessages() {},
-    normalizeQueuedMessages: (value) => value, finishPromptWithoutStream: () => { throw new Error("busy run settled"); },
-  });
-  context.applyLiveUsage = callback("applyLiveUsage").runInContext(context);
-  context.refreshContextUsage = callback("refreshContextUsage").runInContext(context);
-  context.reconcileAgentState = callback("reconcileAgentState").runInContext(context);
-  const reply = (index, usage, busy = true, totalActiveMs) => requests[index].resolve(Response.json({ running: busy, state: { contextUsage: usage, totalActiveMs, isStreaming: busy, isPromptRunning: busy } }));
-  return { context, writes, activeWrites, requests, reply };
-}
 const usage = (tokens) => ({ percent: tokens / 100, contextWindow: 10_000, tokens });
 
+/** Status reads answered one at a time, in the order the hook makes them. */
+function statusGate() {
+  const answers = [];
+  const route = (entry) => {
+    if (!entry.url.includes("?systemPrompt=0")) return undefined;
+    const gate = Promise.withResolvers();
+    answers.push(gate);
+    return gate.promise;
+  };
+  route.answer = (index, state) => answers[index]?.resolve(json({ running: true, state }));
+  route.fail = (index, response) => answers[index]?.resolve(response);
+  route.reject = (index, error) => answers[index]?.reject(error);
+  return route;
+}
+
+const reads = (env) => env.requests.filter((entry) => entry.url.includes("?systemPrompt=0"));
+
+/**
+ * A run in progress, its stream connected, and the test body driving it. Opening the
+ * stream is itself the first status read, so the body answers gate 0 for that one and
+ * gate 1 on for what it drives. The body runs inside withAgentSession: the hook it
+ * drives stays mounted until the body is done, so its poll and its gates stay armed.
+ */
+function withRun(body, handle) {
+  const status = handle ?? statusGate();
+  return withAgentSession({ session: SESSION, handle: status }, async (env) => {
+    await env.start();
+    return body(env, status);
+  });
+}
+
 test("a busy reconciliation refreshes context usage without settling the run", async () => {
-  const state = setup();
-  const pending = state.context.reconcileAgentState("a");
-  state.reply(0, usage(100));
-  await pending;
-  assert.deepEqual(state.writes, [usage(100)]);
-  assert.equal(state.context.agentRunningRef.current, true);
-  // Status reads leave out the system prompt, nearly all of the state (#1302).
-  assert.equal(state.requests[0].url, "/api/agent/a?systemPrompt=0");
+  mock.timers.enable({ apis: ["setInterval"] });
+  try {
+    await withRun(async (env, status) => {
+      // The reconcile poll, on the hook's own clock.
+      mock.timers.tick(15_000);
+      await env.settle();
+      assert.equal(reads(env).length, 2, "the poll read the state");
+      status.answer(1, { contextUsage: usage(100), isStreaming: true, isPromptRunning: true });
+      await env.settle();
+      assert.deepEqual(env.hook.result.contextUsage, usage(100));
+      assert.equal(env.hook.result.agentRunning, true, "the run is still running, so nothing settles");
+    });
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("a usage read also carries the live active time, keyed to its session", async () => {
-  const state = setup();
-  const pending = state.context.reconcileAgentState("a");
-  state.reply(0, usage(100), true, 112_900_000);
-  await pending;
-  assert.deepEqual(state.activeWrites, [{ sessionId: "a", value: 112_900_000 }]);
-  // A read without the field leaves the last value alone.
-  const later = state.context.refreshContextUsage("a");
-  state.reply(1, usage(200));
-  await later;
-  assert.deepEqual(state.activeWrites, [{ sessionId: "a", value: 112_900_000 }]);
+  await withRun(async (env, status) => {
+    await env.emit({ type: "message_end", message: { role: "assistant", content: [] } });
+    status.answer(1, { contextUsage: usage(100), totalActiveMs: 112_900_000 });
+    await env.settle();
+    assert.equal(env.hook.result.sessionStats?.totalActiveMs, 112_900_000);
+
+    // A read without the field leaves the last value alone.
+    await env.emit({ type: "message_end", message: { role: "assistant", content: [] } });
+    status.answer(2, { contextUsage: usage(200) });
+    await env.settle();
+    assert.equal(env.hook.result.sessionStats?.totalActiveMs, 112_900_000);
+  });
 });
 
 test("a newer assistant usage read wins over a delayed poll", async () => {
-  const state = setup();
-  const poll = state.context.reconcileAgentState("a");
-  const refresh = state.context.refreshContextUsage("a");
-  state.reply(1, usage(200)); await refresh;
-  state.reply(0, usage(100)); await poll;
-  assert.deepEqual(state.writes, [usage(200)]);
+  mock.timers.enable({ apis: ["setInterval"] });
+  try {
+    await withRun(async (env, status) => {
+      mock.timers.tick(15_000);
+      await env.settle();
+      await env.emit({ type: "message_end", message: { role: "assistant", content: [] } });
+      status.answer(2, { contextUsage: usage(200) });
+      await env.settle();
+      status.answer(1, { contextUsage: usage(100) });
+      await env.settle();
+      assert.deepEqual(env.hook.result.contextUsage, usage(200));
+    });
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("a failed newer read does not discard an older poll's usage", async () => {
-  const state = setup();
-  const poll = state.context.reconcileAgentState("a");
-  const refresh = state.context.refreshContextUsage("a");
-  state.requests[1].resolve(new Response("Unavailable", { status: 503 })); await refresh;
-  state.reply(0, usage(100)); await poll;
-  assert.deepEqual(state.writes, [usage(100)]);
+  mock.timers.enable({ apis: ["setInterval"] });
+  try {
+    await withRun(async (env, status) => {
+      mock.timers.tick(15_000);
+      await env.settle();
+      await env.emit({ type: "message_end", message: { role: "assistant", content: [] } });
+      status.fail(2, new Response("Unavailable", { status: 503 }));
+      await env.settle();
+      status.answer(1, { contextUsage: usage(100) });
+      await env.settle();
+      assert.deepEqual(env.hook.result.contextUsage, usage(100));
+    });
+  } finally {
+    mock.timers.reset();
+  }
 });
 
-test("usage replies from an old run, another session or an unmounted hook are ignored", async () => {
-  for (const invalidate of [
-    (ctx) => { ctx.promptRunIdRef.current++; },
-    (ctx) => { ctx.sessionIdRef.current = "b"; },
-    (ctx) => { ctx.sessionHookMountedRef.current = false; },
-    (ctx) => { ctx.contextUsageAppliedIdRef.current = ctx.contextUsageRequestIdRef.current; },
-  ]) {
-    const state = setup();
-    const pending = state.context.refreshContextUsage("a");
-    invalidate(state.context); state.reply(0, usage(100)); await pending;
-    assert.deepEqual(state.writes, []);
-  }
+test("usage replies from an old run are ignored", async () => {
+  await withRun(async (env, status) => {
+    const reading = env.emit({ type: "message_end", message: { role: "assistant", content: [] } });
+    await reading;
+    // The run ended and the page sent the next prompt: the read that answer belongs to
+    // is a run that is over.
+    await env.emit({ type: "agent_end" });
+    await env.emit({ type: "agent_settled" });
+    await env.hook.result.handleSend("the next prompt");
+    await env.settle();
+    status.answer(1, { contextUsage: usage(100) });
+    await env.settle();
+    assert.deepEqual(env.hook.result.contextUsage, null);
+  });
+});
+
+test("a usage reply from another session is ignored", async () => {
+  await withRun(async (env, status) => {
+    const reading = env.emit({ type: "message_end", message: { role: "assistant", content: [] } });
+    await reading;
+    // The page moved to another session while the read was out.
+    const other = await env.switchTo({ ...SESSION, id: "B", name: "B" });
+    status.answer(1, { contextUsage: usage(100) });
+    await other.settle();
+    assert.deepEqual(other.hook.result.contextUsage, null);
+  });
+});
+
+test("a usage reply for a page that is gone is ignored", async () => {
+  await withRun(async (env, status) => {
+    const reading = env.emit({ type: "message_end", message: { role: "assistant", content: [] } });
+    await reading;
+    // The tab was closed: the hook is unmounted, so nothing writes to it.
+    env.unmount();
+    status.answer(1, { contextUsage: usage(100) });
+    await env.settle();
+    assert.deepEqual(env.hook.result.contextUsage, null);
+  });
 });
 
 test("failed reads preserve usage and a subsequent read can recover", async () => {
-  const state = setup();
-  const failed = state.context.refreshContextUsage("a");
-  state.requests[0].resolve(new Response("Unavailable", { status: 503 })); await failed;
-  const broken = state.context.refreshContextUsage("a");
-  state.requests[1].reject(new TypeError("offline")); await broken;
-  assert.deepEqual(state.writes, []);
-  const recovered = state.context.refreshContextUsage("a");
-  state.reply(2, null); await recovered;
-  assert.deepEqual(state.writes, [null]);
+  await withRun(async (env, status) => {
+    await env.emit({ type: "message_end", message: { role: "assistant", content: [] } });
+    status.fail(1, new Response("Unavailable", { status: 503 }));
+    await env.settle();
+    assert.deepEqual(env.hook.result.contextUsage, null);
+
+    await env.emit({ type: "message_end", message: { role: "assistant", content: [] } });
+    status.reject(2, new TypeError("offline"));
+    await env.settle();
+    assert.deepEqual(env.hook.result.contextUsage, null);
+
+    // A reply that carries no usage at all clears the panel, as a fresh session's does.
+    await env.emit({ type: "message_end", message: { role: "assistant", content: [] } });
+    status.answer(3, { contextUsage: null });
+    await env.settle();
+    assert.deepEqual(env.hook.result.contextUsage, null);
+  });
 });
 
-test("only completed assistant messages trigger an immediate usage read", () => {
-  const messageEnd = nodes.find((node) => ts.isCaseClause(node) && node.expression.getText(source) === '"message_end"');
-  const script = new Script(ts.transpileModule(`(() => { switch(event.type) { ${messageEnd.getText(source)} } })()`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText);
+test("only completed assistant messages trigger an immediate usage read", async () => {
   for (const role of ["assistant", "toolResult", "user", "system"]) {
-    const reads = [];
-    script.runInNewContext({
-      event: { type: "message_end", message: { role, content: [] } },
-      agentRunningRef: { current: true }, sessionIdRef: { current: "a" }, optimisticUserMessageKeyRef: { current: null },
-      isSystemMessageEvent: (event) => event.message.role === "system",
-      normalizeToolCalls: (message) => message, userMessageKey: () => "user", setMessages() {}, dispatch() {}, setAgentPhase() {},
-      setToolClocks() {}, withoutToolClock: (clocks) => clocks,
-      refreshContextUsage: (sid) => reads.push(sid),
+    await withRun(async (env) => {
+      const before = reads(env).length;
+      await env.emit({ type: "message_end", message: { role, content: [] } });
+      assert.equal(reads(env).length - before, role === "assistant" ? 1 : 0, role);
     });
-    assert.deepEqual(reads, role === "assistant" ? ["a"] : []);
   }
 });
 
-test("each event stream connection reads usage, since connecting resumes an idle-reaped session", () => {
-  const connected = nodes.find((node) => ts.isCaseClause(node) && node.expression.getText(source) === '"connected"');
-  const script = new Script(ts.transpileModule(`(() => { switch(event.type) { ${connected.getText(source)} } })()`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText);
-  for (const [sid, isStreaming] of [["a", false], ["a", true], [null, false]]) {
-    const reads = [];
-    script.runInNewContext({
-      event: { type: "connected", sessionId: sid ?? "pending", isStreaming },
-      sessionIdRef: { current: sid }, sdkAgentActiveRef: { current: false }, agentRunningRef: { current: false },
-      dispatch() {}, cancelEventStreamGrace() {}, setAgentRunning() {}, setAgentPhase() {}, setToolClocks() {}, endedToolClocks: (clocks) => clocks, NO_TOOL_CLOCKS: new Map(),
-      refreshContextUsage: (id) => reads.push(id),
-    });
-    assert.deepEqual(reads, sid ? [sid] : []);
+test("each event stream connection reads usage, since connecting resumes an idle-reaped session", async () => {
+  for (const id of ["A", null]) {
+    const status = statusGate();
+    const readsAfter = await withAgentSession(
+      { session: id ? { ...SESSION, id } : null, newSessionCwd: id ? null : "/project", handle: status },
+      async (env) => {
+        const before = reads(env).length;
+        await env.connect();
+        return reads(env).length - before;
+      },
+    );
+    assert.equal(readsAfter, id ? 1 : 0, `${id}`);
   }
 });

@@ -25,6 +25,15 @@ import {
 import { getMarkdownListContinuation } from "@/lib/markdown-list-continuation";
 import { quoteSeparator } from "@/lib/quoted-selection";
 import { isBareMcpCommand, isBuiltinMcpCommand } from "@/lib/mcp-command";
+import {
+  cancelBuiltinCommandFocusOnPointerDown,
+  restoreBuiltinCommandFocus,
+  runBuiltinCommand as runComposerBuiltinCommand,
+} from "@/lib/composer-builtin-command";
+import { handleComposerKeyDown } from "@/lib/composer-keydown";
+import { handleComposerPaste } from "@/lib/composer-paste";
+import { handleComposerFilePick } from "@/lib/composer-file-pick";
+import { handleComposerSend, handleComposerSendQueued } from "@/lib/composer-send";
 import { FolderIcon, getFileIcon } from "./FileIcons";
 import { ImagePreview } from "./ImagePreview";
 import { DismissButton } from "./DismissButton";
@@ -140,7 +149,6 @@ const TOOL_PRESET_MAP: Record<ToolPresetLabel, ToolPreset> = {
   default: "default",
   full: "full",
 };
-const COMPOSITION_END_ENTER_GRACE_MS = 100;
 const TEXT_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const ANCHORED_MENU_GAP = 8;
 
@@ -1044,13 +1052,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     }
   }, []);
 
-  const handleFilePick = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    // Clearing the value lets the same file be picked again.
-    e.target.value = "";
-    if (onAttachFiles) onAttachFiles(files);
-    else processImageFiles(files);
-  }, [onAttachFiles, processImageFiles]);
+  const handleFilePick = useCallback((e: React.ChangeEvent<HTMLInputElement>) => handleComposerFilePick(e, {
+    onAttachFiles, processImageFiles,
+  }), [onAttachFiles, processImageFiles]);
 
   const removeImage = useCallback((index: number) => {
     setAttachedImages((prev) => {
@@ -1170,50 +1174,30 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
   useLayoutEffect(() => {
     if (builtinCommandPending) {
-      const cancelRestore = (event: PointerEvent) => {
-        if (event.target !== builtinCommandFocusRef.current) builtinCommandFocusRef.current = null;
-      };
-      document.addEventListener("pointerdown", cancelRestore, true);
-      return () => document.removeEventListener("pointerdown", cancelRestore, true);
+      return cancelBuiltinCommandFocusOnPointerDown(document, builtinCommandFocusRef);
     }
-    const textarea = builtinCommandFocusRef.current;
-    builtinCommandFocusRef.current = null;
-    // Disabling the fieldset blurs its editor. Wait for the enabling commit,
-    // and leave focus alone if the command or the user moved it elsewhere.
-    if (textarea?.isConnected && document.activeElement === document.body
-      && !document.querySelector('[aria-modal="true"]')) {
-      textarea.focus({ preventScroll: true });
-    }
+    restoreBuiltinCommandFocus(document, builtinCommandFocusRef);
   }, [builtinCommandPending]);
 
-  const runBuiltinCommand = useCallback(async (msg: string): Promise<boolean> => {
-    if (attachedImages.length || !msg.startsWith("/") || !onBuiltinCommand) return false;
-    if (builtinCommandPendingRef.current) return true;
-    builtinCommandFocusRef.current = document.activeElement === textareaRef.current ? textareaRef.current : null;
-    builtinCommandPendingRef.current = true;
-    setBuiltinCommandPending(true);
-    try {
-      const result = await onBuiltinCommand(msg);
-      if (!result.handled) return false;
-      if (!result.error && canClearBuiltinCommandInput(valueRef.current, attachedImagesRef.current.length, msg)) clearInput();
-      return true;
-    } finally {
-      builtinCommandPendingRef.current = false;
-      setBuiltinCommandPending(false);
-    }
-  }, [attachedImages.length, clearInput, onBuiltinCommand]);
+  const runBuiltinCommand = useCallback(async (msg: string): Promise<boolean> => runComposerBuiltinCommand(msg, {
+    document,
+    textarea: textareaRef.current,
+    attachedImages,
+    onBuiltinCommand,
+    valueRef,
+    attachedImagesRef,
+    focusRef: builtinCommandFocusRef,
+    pendingRef: builtinCommandPendingRef,
+    setPending: setBuiltinCommandPending,
+    canClearBuiltinCommandInput,
+    clearInput,
+  }), [attachedImages, clearInput, onBuiltinCommand]);
 
-  const handleSend = useCallback(async () => {
-    const msg = value.trim();
-    if (!msg && !attachedImages.length) return;
-    onAudioUnlock?.();
-    const builtinAllowed = !isStreaming || offersBuiltinSlashCommandWhileStreaming(msg);
-    if (builtinAllowed && await runBuiltinCommand(msg)) return;
-    // A `!` command runs beside the run, as in pi's TUI; anything else queues.
-    if (isStreaming && !(msg.startsWith("!") && !attachedImages.length)) return;
-    clearInput();
-    onSend(msg, attachedImages.length ? attachedImages : undefined);
-  }, [value, attachedImages, isStreaming, runBuiltinCommand, onSend, clearInput, onAudioUnlock]);
+  const handleSend = useCallback(async () => handleComposerSend({
+    value, attachedImages, isStreaming,
+    onAudioUnlock, onSend, clearInput,
+    runBuiltinCommand, offersBuiltinSlashCommandWhileStreaming,
+  }), [value, attachedImages, isStreaming, runBuiltinCommand, onSend, clearInput, onAudioUnlock]);
 
   const slashQuery = value.startsWith("/") && !/\s/.test(value.slice(1))
     ? value.slice(1).toLowerCase()
@@ -1417,44 +1401,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     });
   }, []);
 
-  const sendQueued = useCallback((mode: "steer" | "followup") => {
-    const msg = value.trim();
-    if (!msg && !attachedImages.length) return;
-    if (msg.startsWith("!") && !attachedImages.length) {
-      // A shell command is never steered into the run as text.
-      void handleSend();
-      return;
-    }
-    onAudioUnlock?.();
-    const images = attachedImages.length ? attachedImages : undefined;
-    const queue = () => {
-      const streamingBehavior = mode === "steer" ? "steer" : "followUp";
-      if (msg.startsWith("/") && onPromptWithStreamingBehavior) {
-        clearInput();
-        onPromptWithStreamingBehavior(msg, streamingBehavior, images);
-        return;
-      }
-      clearInput();
-      if (mode === "steer" && onSteer) {
-        onSteer(msg, images);
-      } else if (mode === "followup" && onFollowUp) {
-        onFollowUp(msg, images);
-      }
-    };
-    if (!attachedImages.length && onBuiltinCommand && canRunBuiltinSlashCommandWhileStreaming(msg)) {
-      void runBuiltinCommand(msg);
-      return;
-    }
-    if (!attachedImages.length && onBuiltinCommand && isBareMcpCommand(msg)) {
-      // Settings › MCP opens when pi's built-in MCP extension owns /mcp; another
-      // extension's /mcp is queued as before. The composer is disabled meanwhile.
-      void runBuiltinCommand(msg).then((handled) => {
-        if (!handled) queue();
-      }, () => queue());
-      return;
-    }
-    queue();
-  }, [value, attachedImages, onBuiltinCommand, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock, runBuiltinCommand, handleSend]);
+  const sendQueued = useCallback((mode: "steer" | "followup") => handleComposerSendQueued(mode, {
+    value, attachedImages, isStreaming, onBuiltinCommand,
+    onAudioUnlock, clearInput, runBuiltinCommand, handleSend,
+    offersBuiltinSlashCommandWhileStreaming, canRunBuiltinSlashCommandWhileStreaming,
+    isBareMcpCommand, onPromptWithStreamingBehavior, onSteer, onFollowUp,
+  }), [value, attachedImages, isStreaming, onBuiltinCommand, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock, runBuiltinCommand, handleSend]);
 
   const getNextSlashIndex = useCallback((direction: "up" | "down" | "left" | "right") => {
     const lastIndex = displayedSlashCommands.length - 1;
@@ -1500,144 +1452,18 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, [displayedSlashCommands.length, slashActiveIndex]);
 
   const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      const nativeEvent = e.nativeEvent;
-      const enterKey = e.key === "Enter" && !e.shiftKey;
-      const sendShortcut = isMobile || enterSendMode === "ctrlEnter"
-        ? enterKey && (e.ctrlKey || e.metaKey)
-        : enterKey;
-      // Popup menus and the IME guard take plain Enter in either send mode on a
-      // desktop keyboard. Mobile keyboards insert a line break on Enter, so they
-      // keep using the send shortcut there.
-      const acceptShortcut = isMobile ? sendShortcut : enterKey;
-      const recentlyComposed = Date.now() - lastCompositionEndAtRef.current < COMPOSITION_END_ENTER_GRACE_MS;
-      const isComposing =
-        isComposingRef.current ||
-        nativeEvent.isComposing ||
-        nativeEvent.keyCode === 229;
-
-      if (acceptShortcut && (isComposing || recentlyComposed)) {
-        if (recentlyComposed) e.preventDefault();
-        return;
-      }
-
-      if (historyMenuOpen && !extensionUiOpen && !isComposing) {
-        if (e.key === "ArrowDown") {
-          e.preventDefault();
-          setHistoryActiveIndex((i) => Math.min(Math.max(0, inputHistory.length - 1), i + 1));
-          return;
-        }
-        if (e.key === "ArrowUp") {
-          e.preventDefault();
-          setHistoryActiveIndex((i) => Math.max(0, i - 1));
-          return;
-        }
-        if (e.key === "Escape") {
-          e.preventDefault();
-          setHistoryMenuOpen(false);
-          return;
-        }
-        if ((e.key === "Tab" || acceptShortcut) && inputHistory[historyActiveIndex]) {
-          e.preventDefault();
-          applyHistoryInput(inputHistory[historyActiveIndex]);
-          return;
-        }
-      }
-
-      if (slashMenuOpen && slashQuery !== null && !extensionUiOpen) {
-        if (e.key === "ArrowDown") {
-          e.preventDefault();
-          setSlashActiveIndex(getNextSlashIndex("down"));
-          return;
-        }
-        if (e.key === "ArrowUp") {
-          e.preventDefault();
-          setSlashActiveIndex(getNextSlashIndex("up"));
-          return;
-        }
-        if (e.key === "ArrowRight") {
-          e.preventDefault();
-          setSlashActiveIndex(getNextSlashIndex("right"));
-          return;
-        }
-        if (e.key === "ArrowLeft") {
-          e.preventDefault();
-          setSlashActiveIndex(getNextSlashIndex("left"));
-          return;
-        }
-        if (e.key === "Escape") {
-          e.preventDefault();
-          setSlashMenuOpen(false);
-          return;
-        }
-        const selectedCommand = displayedSlashCommands[slashActiveIndex];
-        if (e.key === "Tab" && selectedCommand) {
-          e.preventDefault();
-          applySlashCommand(selectedCommand);
-          return;
-        }
-        if (acceptShortcut && selectedCommand) {
-          e.preventDefault();
-          if (sendShortcut && submitsSlashCommandOnEnter(value, selectedCommand, isStreaming)) {
-            setSlashMenuOpen(false);
-            void handleSend();
-          } else {
-            applySlashCommand(selectedCommand);
-          }
-          return;
-        }
-      }
-
-      // @ file menu — skip while composing so IME candidate navigation
-      // (arrows/Enter/Tab) is never intercepted.
-      if (atMenuOpen && atQuery !== null && !extensionUiOpen && !isComposing) {
-        if (e.key === "ArrowDown") {
-          e.preventDefault();
-          setAtActiveIndex((i) => cycleListIndex(i, atMatches.length, 1));
-          return;
-        }
-        if (e.key === "ArrowUp") {
-          e.preventDefault();
-          setAtActiveIndex((i) => cycleListIndex(i, atMatches.length, -1));
-          return;
-        }
-        if (e.key === "Escape") {
-          e.preventDefault();
-          setAtMenuOpen(false);
-          return;
-        }
-        if ((e.key === "Tab" || acceptShortcut) && atMatches[atActiveIndex]) {
-          e.preventDefault();
-          applyAtCompletion(atMatches[atActiveIndex]);
-          return;
-        }
-      }
-
-      if (e.key === "ArrowUp" && !isComposing && !isStreaming && inputHistory.length > 0 && value.trim().length === 0) {
-        e.preventDefault();
-        setSlashMenuOpen(false);
-        setAtMenuOpen(false);
-        setHistoryActiveIndex(inputHistory.length - 1);
-        setHistoryMenuOpen(true);
-        return;
-      }
-
-      // Esc stops the agent when no slash/@/history menu or IME composition is active.
-      if (e.key === "Escape" && !isComposing && isStreaming && onAbort) {
-        e.preventDefault();
-        onAbort();
-        return;
-      }
-
-      if (sendShortcut) {
-        e.preventDefault();
-        if (isStreaming && (onSteer || onFollowUp)) {
-          sendQueued((e.altKey && onFollowUp) || !onSteer ? "followup" : "steer");
-        } else {
-          handleSend();
-        }
-      }
-    },
+    (e: KeyboardEvent<HTMLTextAreaElement>) => handleComposerKeyDown(e, {
+      isMobile, enterSendMode, isStreaming,
+      lastCompositionEndAtRef, isComposingRef, now: () => Date.now(),
+      historyMenuOpen, extensionUiOpen, inputHistory, historyActiveIndex,
+      setHistoryActiveIndex, setHistoryMenuOpen, applyHistoryInput,
+      slashMenuOpen, slashQuery, displayedSlashCommands, slashActiveIndex,
+      setSlashActiveIndex, setSlashMenuOpen, getNextSlashIndex, applySlashCommand,
+      submitsSlashCommandOnEnter, value,
+      atMenuOpen, atQuery, atMatches, atActiveIndex, setAtActiveIndex, setAtMenuOpen,
+      cycleListIndex, applyAtCompletion,
+      onAbort, onSteer, onFollowUp, sendQueued, handleSend,
+    }),
     [isMobile, enterSendMode, isStreaming, onSteer, onFollowUp, onAbort, extensionUiOpen, slashMenuOpen, slashQuery, displayedSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
   );
 
@@ -1648,64 +1474,21 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     autoGrowTextarea(ta);
   }, []);
 
-  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const items = Array.from(e.clipboardData?.items ?? []);
-    const imageItems = items.filter((item) => item.type.startsWith("image/"));
-    if (imageItems.length) {
-      e.preventDefault();
-      const files = imageItems.map((item) => item.getAsFile()).filter((f): f is File => f !== null);
-      processImageFiles(files);
-      return;
-    }
-
-    const html = e.clipboardData.getData("text/html");
-    const text = e.clipboardData.getData("text/plain");
-    if (text) {
-      // A dictation tool that pastes and then restores the clipboard can write
-      // it during this event; Chrome then drops its own insertion (#1513). When
-      // no input followed the paste, insert the text the event delivered.
-      const ta = e.currentTarget;
-      const native = e.nativeEvent;
-      const start = ta.selectionStart;
-      const end = ta.selectionEnd;
-      const paste = {};
-      pendingPasteRef.current = paste;
-      setTimeout(() => {
-        if (pendingPasteRef.current !== paste) return;
-        pendingPasteRef.current = null;
-        if (!native.defaultPrevented && ta.isConnected) replaceTextareaRange(ta, start, end, text);
-      }, 0);
-    }
-    if (!html || !text) return;
-    const document = new DOMParser().parseFromString(html, "text/html");
-    const links = Array.from(document.querySelectorAll("a[href]"), (link) => {
-      const label = link.textContent ?? "";
-      const range = document.createRange();
-      range.setStart(document.body, 0);
-      range.setEndBefore(link);
-      return {
-        label,
-        href: link.getAttribute("href")?.trim() ?? "",
-        occurrence: label ? range.toString().split(label).length - 1 : 0,
-      };
-    });
-    const markdown = replaceLinksWithMarkdown(text, links);
-    if (markdown === null) return;
-
-    const ta = e.currentTarget;
-    const start = ta.selectionStart;
-    const nextValue = ta.value.slice(0, start) + markdown + ta.value.slice(ta.selectionEnd);
-    e.preventDefault();
-    valueRef.current = nextValue;
-    setValue(nextValue);
-    setHistoryMenuOpen(false);
-    updateAtQuery(nextValue, start + markdown.length);
-    requestAnimationFrame(() => {
-      ta.focus();
-      ta.setSelectionRange(start + markdown.length, start + markdown.length);
-      scrollTextareaCaretIntoView(ta);
-    });
-  }, [processImageFiles, updateAtQuery]);
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => handleComposerPaste<HTMLTextAreaElement>(e, {
+    processImageFiles,
+    replaceTextareaRange,
+    replaceLinksWithMarkdown,
+    valueRef,
+    pendingPasteRef,
+    setValue,
+    setHistoryMenuOpen,
+    updateAtQuery,
+    autoGrowTextarea,
+    scrollTextareaCaretIntoView,
+    setTimeout,
+    requestAnimationFrame,
+    DOMParser,
+  }), [processImageFiles, updateAtQuery]);
 
   useEffect(() => {
     if (slashQuery === null) {

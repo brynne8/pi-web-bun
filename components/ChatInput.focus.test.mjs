@@ -1,37 +1,25 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import ts from "typescript";
 
-const source = ts.createSourceFile("ChatInput.tsx", readFileSync(new URL("./ChatInput.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-let command;
-let focusEffect;
-function visit(node) {
-  if (ts.isVariableDeclaration(node) && node.name.getText(source) === "runBuiltinCommand") {
-    command = node.initializer.arguments[0];
-  }
-  if (ts.isCallExpression(node) && node.expression.getText(source) === "useLayoutEffect"
-    && node.arguments[1]?.getText(source) === "[builtinCommandPending]") {
-    focusEffect = node.arguments[0];
-  }
-  ts.forEachChild(node, visit);
-}
-visit(source);
-function compile(node) {
-  const js = ts.transpileModule(`(${node.getText(source)})`, {
-    compilerOptions: { target: ts.ScriptTarget.ES2022 },
-  }).outputText;
-  return new Function("scope", `with (scope) { return ${js} }`);
-}
-const makeCommand = compile(command);
-const makeEffect = focusEffect ? compile(focusEffect) : () => () => {};
+import {
+  cancelBuiltinCommandFocusOnPointerDown,
+  restoreBuiltinCommandFocus,
+  runBuiltinCommand,
+} from "../lib/composer-builtin-command.ts";
 
+// The composer's fieldset is disabled while a `/command` runs, which blurs the editor.
+// The command remembers whose focus it took and gives it back on the enabling commit,
+// unless the command or the user moved it somewhere else meanwhile.
+
+/** The browser as the focus restore sees it, with the commits the page makes. */
 function composer({ focused = true } = {}) {
   const body = {};
   const other = {};
   const listeners = new Map();
   const document = {
-    body, activeElement: body, querySelector: () => null,
+    body,
+    activeElement: body,
+    querySelector: () => null,
     addEventListener: (type, fn) => listeners.set(type, fn),
     removeEventListener: (type) => listeners.delete(type),
   };
@@ -49,35 +37,45 @@ function composer({ focused = true } = {}) {
     },
   };
   document.activeElement = focused ? textarea : other;
+  const focusRef = { current: null };
+  const pendingRef = { current: false };
+  const valueRef = { current: "/compact" };
+  const attachedImagesRef = { current: [] };
   const scope = {
-    document,
-    attachedImages: [], attachedImagesRef: { current: [] },
-    textareaRef: { current: textarea },
-    builtinCommandPending: false,
-    builtinCommandPendingRef: { current: false },
-    builtinCommandFocusRef: { current: null },
-    valueRef: { current: "/compact" },
-    canClearBuiltinCommandInput: (value, count, submitted) => value === submitted && count === 0,
-    clearInput() { scope.valueRef.current = ""; },
-    onBuiltinCommand: () => new Promise((done, fail) => { resolve = done; reject = fail; }),
-    setBuiltinCommandPending(value) { scope.builtinCommandPending = value; },
+    document, textarea, focusRef, pendingRef, valueRef,
+    setPending(value) { scope.disabled = value; },
+    disabled: false,
   };
-  const effect = makeEffect(scope);
+  const run = (msg) => runBuiltinCommand(msg, {
+    document,
+    textarea,
+    attachedImages: [],
+    onBuiltinCommand: () => new Promise((done, fail) => { resolve = done; reject = fail; }),
+    valueRef,
+    attachedImagesRef,
+    focusRef,
+    pendingRef,
+    setPending: (value) => { scope.disabled = value; },
+    canClearBuiltinCommandInput: (value, count, submitted) => value === submitted && count === 0,
+    clearInput: () => { valueRef.current = ""; },
+  });
   // The browser blurs a focused descendant when React commits disabled=true.
-  let cleanup;
+  let stopWatching;
   function commit() {
-    cleanup?.();
-    disabled = scope.builtinCommandPending;
+    stopWatching?.();
+    disabled = scope.disabled;
     if (disabled && document.activeElement === textarea) document.activeElement = body;
-    cleanup = effect();
+    if (disabled) stopWatching = cancelBuiltinCommandFocusOnPointerDown(document, focusRef);
+    else restoreBuiltinCommandFocus(document, focusRef);
   }
   return {
     pointerDown: (target) => listeners.get("pointerdown")?.({ target }),
-    scope, document, textarea, other, commit,
-    run: makeCommand(scope),
+    document, textarea, other, valueRef, commit,
+    run,
     finish: (result = { handled: true }) => resolve(result),
     fail: (error) => reject(error),
     focusCount: () => focusCount,
+    stopWatching: () => stopWatching?.(),
   };
 }
 
@@ -97,7 +95,7 @@ for (const [name, result] of [
     assert.equal(c.focusCount(), 0, "the async finally runs before React enables the fieldset");
     c.commit();
     assert.equal(c.document.activeElement, c.textarea);
-    assert.equal(c.scope.valueRef.current, result.handled && !result.error ? "" : "/compact");
+    assert.equal(c.valueRef.current, result.handled && !result.error ? "" : "/compact");
     c.document.activeElement = c.document.body;
     c.commit();
     assert.equal(c.focusCount(), 1, "the focus request is consumed once");
