@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { dropMentionText, splitDroppedItems, uploadDroppedFiles } from "../lib/file-upload-client.ts";
+
+const chatWindow = readFileSync(new URL("./ChatWindow.tsx", import.meta.url), "utf8");
 
 const photo = new File(["x"], "photo.png", { type: "image/png" });
 const report = new File(["x"], "report.pdf", { type: "application/pdf" });
@@ -56,4 +59,13 @@ test("without a working directory, picked files behave like a drop there (#1101)
   assert.deepEqual(calls.images, [photo]);
   assert.deepEqual(calls.uploads, []);
   assert.deepEqual(calls.notices, [["warning", "chat.dropNeedsCwd"]]);
+});
+
+test("the composer's attach button takes the chat's own drop path", () => {
+  // `attach()` above plays the drop path itself, so the wiring from the picker into it is
+  // what these two links carry: ChatInput gets `onAttachFiles`, and that callback hands its
+  // files to `onDrop` — the callback that sends images to the composer and the rest up.
+  assert.match(chatWindow, /onAttachFiles=\{onAttachFiles\}/);
+  assert.match(chatWindow, /const onAttachFiles = useCallback\(\(files: File\[\]\) => \{\s*onDrop\(files\.map\(\(file\) => \(\{ kind: "file", file \}\)\)\);/);
+  assert.match(chatWindow, /const onDrop = useCallback\(\(items: DroppedItem\[\]\) => \{[\s\S]{0,200}?chatInputRef\?\.current\?\.addImages\(images\)/);
 });

@@ -142,7 +142,6 @@ function lastBgOutputTabId(tabs: readonly { taskId: string }[]): string | null {
   return last ? `bg:${last.taskId}` : null;
 }
 
-
 export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();

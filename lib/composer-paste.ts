@@ -8,6 +8,8 @@ export interface ComposerPasteTarget {
   selectionStart: number;
   selectionEnd: number;
   isConnected: boolean;
+  focus(): void;
+  setSelectionRange(start: number, end: number): void;
 }
 
 /** The part of a paste event the composer reads. */
@@ -30,7 +32,6 @@ export interface ComposerPasteDeps<Target extends ComposerPasteTarget = Composer
   setValue: (value: string) => void;
   setHistoryMenuOpen: (open: boolean) => void;
   updateAtQuery: (value: string, caret: number) => void;
-  autoGrowTextarea: (ta: Target) => void;
   scrollTextareaCaretIntoView: (ta: Target) => void;
   setTimeout: (callback: () => void, delay: number) => void;
   requestAnimationFrame: (callback: () => void) => void;
@@ -95,7 +96,8 @@ export function handleComposerPaste<Target extends ComposerPasteTarget>(
   deps.setHistoryMenuOpen(false);
   deps.updateAtQuery(nextValue, start + markdown.length);
   deps.requestAnimationFrame(() => {
-    deps.autoGrowTextarea(ta);
+    ta.focus();
+    ta.setSelectionRange(start + markdown.length, start + markdown.length);
     deps.scrollTextareaCaretIntoView(ta);
   });
 }

@@ -499,9 +499,9 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const loadOlderPage = useCallback(async (sid: string, before: string, options?: { tail?: number; signal?: AbortSignal }) => {
     requestedCursorRef.current = before;
     const context = await loadContext(sid, activeLeafId, before, options);
-    requestedCursorRef.current = nextRequestedCursor({ before, landed: context, historyCursor });
+    requestedCursorRef.current = nextRequestedCursor({ before, landed: context, requestedCursor: requestedCursorRef.current });
     return context;
-  }, [activeLeafId, loadContext, historyCursor]);
+  }, [activeLeafId, loadContext]);
   useEffect(() => {
     // A reloaded history can come back to a cursor asked for before.
     if (historyCursor !== requestedCursorRef.current) requestedCursorRef.current = null;

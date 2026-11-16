@@ -35,6 +35,18 @@ test("the source view renders and highlights a window, never every line", () => 
     assert.equal(showingSource({ ...large, language }, "preview"), false);
   }
   assert.equal(showingSource({ ...large, truncated: true }, "preview", false, false, "/tmp/data.csv"), false);
+
+  // The window is chosen by `highlightBlocks()` from the total line count and the
+  // rendered range; nothing maps over every source line any more.
+  assert.match(source, /highlightBlocks\(sourceLines\.length, sourceVirtual\.range\.start, sourceVirtual\.range\.end\)/);
+  assert.match(source, /sourceBlocks\.map\(\(block\) => \(/);
+  assert.doesNotMatch(source, /sourceLines\.map\(/);
+  // A block tokenizes its context but renders only its own lines.
+  assert.match(source, /rows=\{rendererProps\.rows\.slice\(contextLines\)\}/);
+  assert.match(source, /startingLineNumber=\{start \+ 1\}/);
+  // Find searches every loaded line, not the rendered window.
+  assert.match(source, /findSourceMatches\(sourceLines, findQuery, findCaseSensitive\)/);
+  assert.match(source, /sourceVirtual\.scrollToLine|scrollToSourceLine\(activeMatch\.line\)/);
 });
 
 test("the source gutter stays pinned and shares the code line's height", () => {

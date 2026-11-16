@@ -161,13 +161,13 @@ export function nextVisibleCountForHead(input: {
 
 /**
  * The cursor of the page asked for last, kept until the next cursor renders. A page that
- * did not land may be asked for again; a cursor a reload brought back clears it.
+ * did not land may be asked for again; a cursor another call set meanwhile stands.
  */
 export function nextRequestedCursor(input: {
   before: string;
   landed: unknown;
-  historyCursor: string | null;
+  requestedCursor: string | null;
 }): string | null {
-  if (input.historyCursor !== input.before) return null;
+  if (input.requestedCursor !== input.before) return input.requestedCursor;
   return input.landed ? input.before : null;
 }
