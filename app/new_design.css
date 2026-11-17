@@ -1,5 +1,20 @@
 @import url("https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400..800&family=Martian+Mono:wght@400..700&display=swap");
 
+/* The design's mono column is 0.7em wide where globals.css sizes the drawing
+   faces for Noto's 0.6em: later in the cascade, these replace them. */
+@font-face {
+  font-family: "Terminal Drawing";
+  src: local("Menlo Regular"), local("Menlo-Regular"), local("DejaVu Sans Mono");
+  unicode-range: U+2190-21FF, U+2500-259F;
+  size-adjust: 116.27%;
+}
+@font-face {
+  font-family: "Terminal Drawing Windows";
+  src: local("Consolas");
+  unicode-range: U+2190-21FF, U+2500-259F;
+  size-adjust: 127.32%;
+}
+
 /* ══ tokens ═════════════════════════════════════════════════════════════ */
 
 :root,
@@ -43,7 +58,7 @@
   --nd-face: "Hanken Grotesk", var(--font-noto-mono), ui-sans-serif, system-ui, sans-serif;
   --nd-sans: var(--nd-face);
   --nd-display: "Instrument Serif", Georgia, "Times New Roman", serif;
-  --nd-mono: "Martian Mono", "IBM Plex Mono", var(--font-noto-mono), ui-monospace, monospace;
+  --nd-mono: "Terminal Drawing", "Terminal Drawing Windows", "Martian Mono", "IBM Plex Mono", var(--font-noto-mono), ui-monospace, monospace;
 
   --bg: var(--nd-ground);
   --bg-panel: var(--nd-surface);

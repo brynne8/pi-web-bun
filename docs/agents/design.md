@@ -14,7 +14,7 @@
 - `README.md`'s entry states the palette split. Do not describe the design as replacing all fourteen hues: the first pass did, and this pass handed them back.
 
 ## Type and atmosphere
-- The three faces come from one Google Fonts `@import` at the top of the file: Instrument Serif italic for the wordmark, hero and quotations; Hanken Grotesk for the interface; Martian Mono for data only (counts, durations, paths, tool names, ids, code). The host falls back to system faces when the import cannot load, so nothing depends on the network for layout.
+- The three faces come from one Google Fonts `@import` at the top of the file: Instrument Serif italic for the wordmark, hero and quotations; Hanken Grotesk for the interface; Martian Mono for data only (counts, durations, paths, tool names, ids, code). The host falls back to system faces when the import cannot load, so nothing depends on the network for layout. Martian Mono's column is 0.7em wide and its Google subset carries no box drawing, so the file redefines `Terminal Drawing` (116.27% of Menlo's 0.602em) and `Terminal Drawing Windows` (127.32% of Consolas' 0.5498em) for arrows, box drawing and blocks, and puts them ahead of the web font in `--nd-mono`: the same fix upstream applies to `--font-mono-default`, sized for this wider column. The later `@font-face` rules replace `globals.css`'s, which are tuned to Noto's 0.6em.
 - A font selected in Settings replaces the grotesk and the mono through `--font-ui`/`--font-mono`; the serif brand stays the design's.
 - Atmosphere is body pseudo-elements and viewport gradients: a warm bloom low and centre, a cool one high and right, a vignette and a faint scanline pitch. The breathing animation is `prefers-reduced-motion: reduce`-gated.
 
