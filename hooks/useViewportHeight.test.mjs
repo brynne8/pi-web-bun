@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createJiti } from "jiti";
-
-const jiti = createJiti(import.meta.url);
-const { shouldUseVisualViewportHeight } = await jiti.import("./useViewportHeight.ts");
+import { shouldUseVisualViewportHeight } from "./useViewportHeight.ts";
 
 test("uses the visual viewport for a focused editor when the keyboard shrinks it", () => {
   assert.equal(shouldUseVisualViewportHeight({

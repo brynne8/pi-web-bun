@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createJiti } from "jiti";
-
-const jiti = createJiti(import.meta.url);
-const { clampChatContentWidth, clampChatContentFontSize, terminalFontSize } = await jiti.import("../hooks/useChatAppearance.ts");
+import { clampChatContentWidth, clampChatContentFontSize, terminalFontSize } from "../hooks/useChatAppearance.ts";
 
 test("chat width validation preserves the default and supported range", () => {
   assert.equal(clampChatContentWidth(undefined), 820);
