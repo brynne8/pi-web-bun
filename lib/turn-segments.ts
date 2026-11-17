@@ -145,6 +145,34 @@ export function turnHasAnswer(segments: TurnSegment[]): boolean {
   return segments.some((segment) => segment.kind === "answer");
 }
 
+/**
+ * The indices a settled turn renders outside its segments: what follows its last
+ * reply, and all of it when the turn has no reply at all. A `!` command is no
+ * segment's, and both halves are the one rule upstream renders it by — its
+ * `finalAssistantIdx === -1` branch and its loop past the last reply.
+ */
+export function unsegmentedTurnMessages(
+  messages: readonly AgentMessage[],
+  segments: readonly TurnSegment[],
+  from: number,
+  to: number,
+): number[] {
+  let lastReply = from;
+  for (let index = from + 1; index < to; index++) {
+    if (messages[index]?.role === "assistant") lastReply = index;
+  }
+  const covered = new Set<number>();
+  for (const segment of segments) {
+    for (const part of segment.parts) covered.add(part.index);
+  }
+  const indexes: number[] = [];
+  for (let index = Math.max(from + 1, lastReply + 1); index < to; index++) {
+    if (covered.has(index)) continue;
+    indexes.push(index);
+  }
+  return indexes;
+}
+
 /** One thing a turn renders, in order: a segment, or a message no segment covers. */
 export type TurnRenderItem =
   | { kind: "segment"; segment: TurnSegment; segmentIndex: number }

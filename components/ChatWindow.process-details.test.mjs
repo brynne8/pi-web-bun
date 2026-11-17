@@ -27,6 +27,15 @@ test("renders a turn as its segments, so nothing the model wrote is filed away",
   assert.match(source, /key=\{`process-group-\$\{entryIds\[groupStartIdx\] \?\? groupStartIdx\}-\$\{segmentIdx\}`\}/);
 });
 
+test("a ! command no segment covers still renders in the turn", () => {
+  // Upstream renders a turn that has no reply at all, and the messages past its last
+  // reply, in place. The segment rewrite dropped both branches, so a command's card
+  // vanished the moment the session was read back: a session whose only entry is one
+  // showed an empty chat, and every command run after a reply disappeared on reload.
+  assert.match(source, /for \(const tailIdx of unsegmentedTurnMessages\(messages, segments, userIdx, endIdx\)\)/);
+  assert.match(source, /rendered\.push\(\{ node: renderMessage\(tailIdx\), messageIdx: tailIdx \}\)/);
+});
+
 test("a group starts collapsed even when the turn wrote nothing", () => {
   // Thinking and tool calls are the workings whatever else the turn produced, so
   // they fold the same way. What used to open the last group was the worry that a

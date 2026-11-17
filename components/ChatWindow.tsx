@@ -11,7 +11,7 @@ import { EXTENSION_DIALOG_BASE_WIDTH, fitExtensionDialogWidth } from "@/lib/exte
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { getAssistantErrorMessage, getTurnAnchors, hasAssistantAnswer, hasTurnRef, isAssistantAborted, isAssistantTruncated, isHiddenCustomMessage, liveOutputPreview, LIVE_OUTPUT_PREVIEW_LINES } from "@/lib/message-display";
 import { extractTurnWrittenFiles } from "@/lib/turn-written-files";
-import { planTurnRender, splitTurnSegments, turnHasAnswer } from "@/lib/turn-segments";
+import { planTurnRender, splitTurnSegments, turnHasAnswer, unsegmentedTurnMessages } from "@/lib/turn-segments";
 import { getTurnPart, type TurnPartCache } from "@/lib/turn-views";
 import { getTurnUsage } from "@/lib/turn-usage";
 import { formatTurnDuration, getTurnDurationMs } from "@/lib/turn-duration";
@@ -1234,6 +1234,15 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           continue;
         }
         rendered.push(...views);
+      }
+
+      // What no segment covers, in its own place in the turn: a `!` command pi ran
+      // once the turn's last reply was written, and every message of a turn that
+      // has no reply at all. Upstream renders both (its finalAssistantIdx === -1
+      // branch and its loop past the last reply); the segment rewrite dropped them,
+      // which hid a command's card as soon as the session was read back.
+      for (const tailIdx of unsegmentedTurnMessages(messages, segments, userIdx, endIdx)) {
+        rendered.push({ node: renderMessage(tailIdx), messageIdx: tailIdx });
       }
 
       // A turn's failure is its outcome, not one of its workings, so it shows
