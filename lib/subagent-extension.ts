@@ -328,7 +328,13 @@ export function subagentFinalText(run: SubagentRunInfo): string {
       ? `${withWorktree(`Subagent ${id} completed.`)}\n\n${result}`
       : withWorktree(`Subagent ${id} completed without text output.`);
   }
-  if (run.status === "aborted") return withWorktree(`Subagent ${id} was stopped.`);
+  if (run.status === "aborted") {
+    // A stop from the child's own chat is the user's decision, and a model told only "stopped"
+    // resumes the child or starts another one for the same task. Both are the wrong answer.
+    return withWorktree(run.stoppedBy === "user"
+      ? `Subagent ${id} was stopped by the user in its own chat. The user must have found a problem with it, so do not resume it and do not start another subagent for the same task; wait for the user's direction.`
+      : `Subagent ${id} was stopped.`);
+  }
   if (run.status === "interrupted") return `Subagent ${id} was interrupted before completion.`;
   const failure = withWorktree(`Subagent ${id} failed: ${run.error ?? "Unknown error"}`);
   const partial = run.result?.trim();

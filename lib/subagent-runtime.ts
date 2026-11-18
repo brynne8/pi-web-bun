@@ -103,7 +103,7 @@ export interface SubagentController {
   /** A turn in a child's own chat ended: settles the run a restart cut off, if that is what the file holds. */
   settleDirectTurn(sessionId: string, aborted: boolean): void;
   /** Stop in a child's own chat: the mark lives on the run, not on the wrapper's current send. */
-  markRunStopped(sessionId: string): void;
+  markRunStopped(sessionId: string, handedOver: boolean): void;
 }
 
 /** A run adopted from a prompt sent to a child's own chat: the run and the call that finishes it. */
@@ -116,6 +116,10 @@ type StoredSubagentExecution = {
   run: SubagentRunInfo;
   completion: Promise<SubagentRunInfo>;
   abortRequested: boolean;
+  /** The abort came from the child chat's Stop, not from this session's parent. */
+  stoppedByUser?: boolean;
+  /** That Stop took queued messages back to the child's chat, which sends them as the next run. */
+  abortHandedOver?: boolean;
   /** Set once the turn limit ends the run; later steering is refused instead of starting another turn. */
   turnLimitReached?: boolean;
   cancelQueued?: () => boolean;
@@ -603,6 +607,7 @@ function recordResult(sessionManager: SessionManager, run: SubagentRunInfo): Sub
     ...(recorded.worktreeCleanupError ? { worktreeCleanupError: recorded.worktreeCleanupError } : {}),
     ...(recorded.worktreeExists !== undefined ? { worktreeExists: recorded.worktreeExists } : {}),
     ...(recorded.toolsWithheld ? { toolsWithheld: true } : {}),
+    ...(recorded.stoppedBy ? { stoppedBy: recorded.stoppedBy } : {}),
   };
   sessionManager.appendCustomEntry(SUBAGENT_RESULT_TYPE, entry);
   return recorded;
@@ -854,12 +859,25 @@ export function createSubagentController(
       }
 
       const runToResult = async (): Promise<SubagentRunInfo> => {
+        /**
+         * A stop in the child's own chat that took queued messages back: its chat sends them as
+         * the next run, so this run goes on and settles wherever that one ends. An isolated run's
+         * checkout is removed when it stops, so there the stop stays an end.
+         */
+        const handsOver = () =>
+          stored.stoppedByUser === true && stored.abortHandedOver === true && !isolatedWorktree;
+        /** Who stopped this run, for the report an end of it leaves the parent. */
+        const userStop = (): Pick<SubagentRunInfo, "stoppedBy" | "abortHandedOver"> =>
+          stored.stoppedByUser === true
+            ? { stoppedBy: "user", ...(handsOver() ? { abortHandedOver: true } : {}) }
+            : {};
         // Reached only when the abort fires while the run is being queued, before `cancelQueued`
         // is set; a run aborted later in the queue ends in `finishQueuedAbort`.
         if (stored.abortRequested) {
           const cleanupError = await cleanupWorktree(parent.cwd, isolatedWorktree);
           const result = recordResult(sessionManager, {
             ...initialRun,
+            ...(stored.stoppedByUser ? { stoppedBy: "user" } : {}),
             status: "aborted",
             completedAt: new Date().toISOString(),
             ...(cleanupError ? { worktreeCleanupError: cleanupError } : {}),
@@ -893,6 +911,7 @@ export function createSubagentController(
           const errorMessage = aborted ? undefined : stop?.error ?? limiter?.error();
           result = {
             ...initialRun,
+            ...(aborted ? userStop() : {}),
             status: aborted ? "aborted" : errorMessage ? "failed" : "completed",
             completedAt: new Date().toISOString(),
             ...(text ? { result: text } : {}),
@@ -903,6 +922,7 @@ export function createSubagentController(
           const aborted = stored.abortRequested || request.signal?.aborted;
           result = {
             ...initialRun,
+            ...(aborted ? userStop() : {}),
             status: aborted ? "aborted" : "failed",
             completedAt: new Date().toISOString(),
             ...(text ? { result: text } : {}),
@@ -915,10 +935,13 @@ export function createSubagentController(
           request.signal?.removeEventListener("abort", handleParentAbort);
         }
 
-        const cleanupError = await cleanupWorktree(parent.cwd, isolatedWorktree);
+        const handedOver = result.abortHandedOver === true;
+        const cleanupError = handedOver ? undefined : await cleanupWorktree(parent.cwd, isolatedWorktree);
         if (cleanupError) result = { ...result, worktreeCleanupError: cleanupError };
         if (limiter?.toolsWithheld()) result = { ...result, toolsWithheld: true };
-        result = recordResult(sessionManager, result);
+        // A handed-over stop is not an end: the status entry keeps saying `running`, for the run
+        // the child's chat sends next, and `notifyParent()` says nothing about this segment.
+        if (!handedOver) result = recordResult(sessionManager, result);
         stored.run = result;
         request.onUpdate?.(result);
         getSubagentRuns().delete(stored.run.sessionId);
@@ -936,7 +959,12 @@ export function createSubagentController(
       const finishQueuedAbort = async () => {
         if (stored.run.status !== "queued") return;
         try {
-          const result: SubagentRunInfo = { ...initialRun, status: "aborted", completedAt: new Date().toISOString() };
+          const result: SubagentRunInfo = {
+            ...initialRun,
+            ...(stored.stoppedByUser ? { stoppedBy: "user" as const } : {}),
+            status: "aborted",
+            completedAt: new Date().toISOString(),
+          };
           const cleanupError = await cleanupWorktree(parent.cwd, isolatedWorktree);
           const finalResult = recordResult(sessionManager, cleanupError ? { ...result, worktreeCleanupError: cleanupError } : result);
           stored.run = finalResult;
@@ -1026,6 +1054,8 @@ export function createSubagentController(
       worktreeExists: undefined,
       // A new run withholds no tools until its own turn limit says otherwise.
       toolsWithheld: undefined,
+      // Who stopped an earlier run says nothing about this one.
+      stoppedBy: undefined,
       resumed: true,
     };
     const manager = wrapper.inner.sessionManager;
@@ -1149,11 +1179,11 @@ export function createSubagentController(
     // A live run already owns this child: the prompt joins it (steering, follow-up) and the
     // run's own completion records the result. One already stopped is settled here instead, or
     // the prompt now starting a turn would have no run of its own and the list would keep the
-    // stopped run's status. A run this controller did not adopt (a dispatched one) is left alone.
+    // stopped run's status. A stop that handed its queue to the chat is how the next run arrives.
     const live = getSubagentRuns().get(sessionId);
     if (live) {
-      if (!live.abortRequested || !live.settleStopped) return undefined;
-      live.settleStopped();
+      if (live.abortRequested && live.settleStopped) live.settleStopped();
+      else if (!live.abortRequested || !live.abortHandedOver) return undefined;
     }
     const wrapper = dependencies.getSession(sessionId);
     if (!wrapper?.isAlive()) return undefined;
@@ -1177,6 +1207,8 @@ export function createSubagentController(
       error: undefined,
       worktreeCleanupError: undefined,
       worktreeExists: undefined,
+      stoppedBy: undefined,
+      abortHandedOver: undefined,
       resumed: true,
     };
     let resolveCompletion!: (run: SubagentRunInfo) => void;
@@ -1192,13 +1224,19 @@ export function createSubagentController(
       const stop = outcome.aborted || stored.abortRequested ? undefined : lastAssistantStop(manager);
       const aborted = Boolean(outcome.aborted || stored.abortRequested || stop?.aborted);
       const message = aborted ? undefined : stop?.error ?? outcome.error;
-      const result = recordResult(manager, {
+      // A stop that took the chat's queued messages back is not an end: the chat sends them as
+      // the next run, which records its own result and tells the parent when it does.
+      const handedOver = aborted && stored.abortHandedOver === true;
+      const settledRun: SubagentRunInfo = {
         ...initialRun,
         status: aborted ? "aborted" : message ? "failed" : "completed",
         completedAt: new Date().toISOString(),
+        ...(handedOver ? { abortHandedOver: true } : {}),
+        ...(aborted && stored.stoppedByUser ? { stoppedBy: "user" as const } : {}),
         ...(text ? { result: text } : {}),
         ...(message ? { error: message } : {}),
-      });
+      };
+      const result = handedOver ? settledRun : recordResult(manager, settledRun);
       stored.run = result;
       // Only this run's own slot: a newer run of this child may already hold it.
       if (dropSubagentRun(sessionId, stored)) dependencies.invalidateSessionList();
@@ -1328,6 +1366,10 @@ export function createSubagentController(
   }
 
   async function notifyParent(run: SubagentRunInfo): Promise<void> {
+    // A stop that handed its queued messages to the child's next run is not an end: the child
+    // goes on, so its parent hears nothing about this segment and nothing enters the pending
+    // index. The report the next run writes is the one that reaches it.
+    if (run.abortHandedOver) return;
     const pending = { sessionId: run.sessionId, parentSessionId: run.parentSessionId, completedAt: run.completedAt, since: Date.now() };
     const notifications = getParentNotifications();
     notifications.add(pending);
@@ -1418,11 +1460,15 @@ export function createSubagentController(
   /**
    * Stop typed in a child's own chat. The wrapper's `lastRunAborted` belongs to a send: the next
    * prompt typed there resets it before this run's `finish()` reads it, which recorded a stopped
-   * run as `failed` with the stop's own error text.
+   * run as `failed` with the stop's own error text. `handedOver` says that Stop took the
+   * child's queued messages back, which its chat sends as the next run of the same work.
    */
-  function markRunStopped(sessionId: string): void {
+  function markRunStopped(sessionId: string, handedOver: boolean): void {
     const stored = getSubagentRuns().get(sessionId);
-    if (stored) stored.abortRequested = true;
+    if (!stored) return;
+    stored.abortRequested = true;
+    stored.stoppedByUser = true;
+    stored.abortHandedOver = handedOver;
   }
 
   function settleDirectTurn(sessionId: string, aborted: boolean): void {

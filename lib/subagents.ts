@@ -110,6 +110,8 @@ export interface SubagentResultMetadata {
   worktreeExists?: boolean;
   /** Whether this run took the child's tools away for its final turn, as the turn limit does. */
   toolsWithheld?: boolean;
+  /** The user stopped this run from the child's own chat, not the parent's `abort_subagent`. */
+  stoppedBy?: "user";
 }
 
 export interface SubagentStatusMetadata {
@@ -149,6 +151,13 @@ export interface SubagentRunInfo {
   toolsWithheld?: boolean;
   /** Set on a run started by `resume`, which reuses the session ID of an earlier run. Not persisted. */
   resumed?: boolean;
+  /** A user stop in the child's own chat, as `SubagentResultMetadata.stoppedBy`. */
+  stoppedBy?: "user";
+  /**
+   * A stop that handed its queued messages to the next run in the child's chat: the run is not
+   * over, so it is never recorded and its parent is not told. Not persisted.
+   */
+  abortHandedOver?: boolean;
 }
 
 const DEFAULT_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
@@ -1040,5 +1049,6 @@ export function readSubagentRun(entries: readonly SessionEntry[], sessionId: str
     ...(result && typeof result.worktreeCleanupError === "string" ? { worktreeCleanupError: result.worktreeCleanupError } : {}),
     ...(result && typeof result.worktreeExists === "boolean" ? { worktreeExists: result.worktreeExists } : {}),
     ...(result && result.toolsWithheld === true ? { toolsWithheld: true } : {}),
+    ...(result && result.stoppedBy === "user" ? { stoppedBy: "user" as const } : {}),
   };
 }

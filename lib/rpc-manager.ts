@@ -196,7 +196,7 @@ type AgentSessionWrapperOptions = {
   /** A subagent's wrapper: a run ended and nothing is left to do. */
   onDirectTurnSettled?: (aborted: boolean) => void;
   /** A subagent's wrapper: Stop was pressed, so the live run is marked stopped before it unwinds. */
-  onAbortRequested?: () => void;
+  onAbortRequested?: (stop: { handedOver: boolean }) => void;
   /** Connects the session's MCP servers before a prompt starts a run, and lets go of them when it closes (lib/mcp-host.ts). */
   mcpHost?: WrapperMcpHost;
   /** Chat only: the extension-provided model the session wanted, named when a prompt finds no model. */
@@ -406,6 +406,7 @@ export class AgentSessionWrapper {
   private agentRunNeedsCompletion = false;
   // Whether the last run ended because it was stopped (pi 1.1's `agent_settled.aborted`), not finished.
   private lastRunAborted = false;
+
   private promptAdmissionTail: Promise<void> = Promise.resolve();
   private extensionsBound = false;
   private extensionBindingPromise: Promise<void> | null = null;
@@ -419,7 +420,7 @@ export class AgentSessionWrapper {
   private readonly onAgentRunComplete?: AgentRunCompleteListener;
   private readonly onPromptAccepted?: (task: string) => DirectSubagentPromptRun | undefined;
   private readonly onDirectTurnSettled?: (aborted: boolean) => void;
-  private readonly onAbortRequested?: () => void;
+  private readonly onAbortRequested?: (stop: { handedOver: boolean }) => void;
   private readonly suppressCompletionNotifications: boolean;
   private readonly mcpHost?: WrapperMcpHost;
   private readonly chatOnlyExtensionModel?: { provider: string; id: string };
@@ -1544,18 +1545,23 @@ export class AgentSessionWrapper {
           // A prompt parked behind compaction is answered with `{ queued: true }`:
           // the message is not a sent one yet.
           let parked = false;
-          let acceptPreflight!: () => void;
+          let acceptPreflight!: (disposition?: "handled" | "queued" | "started") => void;
           let rejectPreflight!: (error: unknown) => void;
           const preflight = new Promise<void>((resolve, reject) => {
             // Acceptance owes no completion: only a run does, and its agent_start says so.
             // An extension command pi handles, or input an extension swallows, starts
             // none, and a run the command starts itself may begin after this (#1345).
-            acceptPreflight = () => {
+            acceptPreflight = (disposition) => {
               preflightAccepted = true;
               // A prompt on a child's own chat starts no subagent run by itself. Adopt it here,
-              // before pi starts the turn, so `get_subagent_result` sees it running; one that
-              // joins an existing run (streamingBehavior) must not start a second run.
-              if (!streamingBehavior && !directRunResolved) {
+              // before pi starts the turn, so `get_subagent_result` sees it running — but only
+              // when pi says it started a run: a `queued` prompt (a steer or follow-up) joins the
+              // one going on and must not start a second, and a `handled` one starts none. A
+              // Stop's hand-over needs no mark: what it took back is sent as a prompt to an idle
+              // child, which pi starts, and a steer already in flight lands as `queued`.
+              const startsRun = disposition === "started"
+                || (disposition === undefined && !streamingBehavior);
+              if (startsRun && !directRunResolved) {
                 directRunResolved = true;
                 try {
                   directRun = this.onPromptAccepted?.(typeof command.message === "string" ? command.message : "");
@@ -1638,7 +1644,7 @@ export class AgentSessionWrapper {
               // validation and extension preflight have accepted the submission.
               // Every disposition (handled, queued, started) is an acceptance; a
               // rejected prompt never calls this and rejects `prompt` instead.
-              preflightResult: () => acceptPreflight(),
+              preflightResult: (disposition) => acceptPreflight(disposition),
             });
           } catch (error) {
             finishPrompt();
@@ -1703,9 +1709,6 @@ export class AgentSessionWrapper {
       }
 
       case "abort": {
-        // Before any await: a prompt that starts the next turn resets the wrapper's own
-        // `lastRunAborted`, and the run being stopped is the one this Stop is for.
-        this.onAbortRequested?.();
         this.forceShutdownOnIdle = true;
         // Arm the forced cleanup now: the reset above ran before this flag,
         // and the final reset only runs once the SDK run has unwound.
@@ -1719,6 +1722,11 @@ export class AgentSessionWrapper {
         // answer it. Queued images are lost with it: pi keeps only the text.
         const queuedCustomMessages = this.takeQueuedCustomMessages();
         const queuedAtStop = this.inner.clearQueue();
+        // Before any await: a prompt that starts the next turn resets the wrapper's own
+        // `lastRunAborted`, and the run being stopped is the one this Stop is for. The texts
+        // just taken go back to the client, which sends them as the run that follows, so a
+        // subagent's parent is told nothing about an end that did not happen.
+        this.onAbortRequested?.({ handedOver: queuedAtStop.steering.length + queuedAtStop.followUp.length > 0 });
         // clearQueue returns only the user texts. Custom messages (a settled report, an
         // extension's notice) are restored below, after the run is idle.
         // Stop must unwind extension commands that have not started the agent yet.
@@ -3161,7 +3169,7 @@ const SUBAGENT_CONTROLLER = createSubagentController({
       suppressCompletionNotifications: true,
       onPromptAccepted: (task) => SUBAGENT_CONTROLLER.beginDirectPrompt(inner.sessionId, task),
       onDirectTurnSettled: (aborted) => SUBAGENT_CONTROLLER.settleDirectTurn(inner.sessionId, aborted),
-      onAbortRequested: () => SUBAGENT_CONTROLLER.markRunStopped(inner.sessionId),
+      onAbortRequested: (stop) => SUBAGENT_CONTROLLER.markRunStopped(inner.sessionId, stop.handedOver),
       ...(options?.mcpHost ? { mcpHost: options.mcpHost } : {}),
     });
     registerRpcWrapper(wrapper);
@@ -4085,7 +4093,7 @@ export async function startRpcSession(
       suppressCompletionNotifications: Boolean(subagentResources) || isSideChat,
       // A prompt typed into a child's own chat is a resumed run, not an untracked prompt.
       onPromptAccepted: (task) => SUBAGENT_CONTROLLER.beginDirectPrompt(inner.sessionId, task),
-      onAbortRequested: () => SUBAGENT_CONTROLLER.markRunStopped(inner.sessionId),
+      onAbortRequested: (stop) => SUBAGENT_CONTROLLER.markRunStopped(inner.sessionId, stop.handedOver),
       ...(subagentResources
         ? { onDirectTurnSettled: (aborted: boolean) => SUBAGENT_CONTROLLER.settleDirectTurn(inner.sessionId, aborted) }
         : {}),
