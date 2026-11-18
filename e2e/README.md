@@ -41,12 +41,14 @@ reason — `page.setDefaultTimeout` does not reach a context wait.
 
 Coverage:
 
-- A 5,000-message session opens with exactly the last 50 entries, bounded
-  detail/context responses, and no browser errors.
+- A 5,000-message session opens with exactly the last 50 entries and no
+  browser errors. The transfer itself is bounded by a route test
+  (`app/api/sessions/[id]/detail-route.test.mjs`).
 - Desktop and mobile scrolling load two consecutive older pages. Each response
   has the expected IDs, no gaps or duplicates, and the messages appear once in
   the chat. A small session checks pagination through the root.
-- Branch context follows the selected leaf and excludes the other branch.
+- Branch context follows the selected leaf and excludes the other branch. The
+  leaf and root pages are a route test (`context-route.test.mjs`).
 - Markdown, code blocks, and real tool-call/tool-result blocks render.
 - Chat width and font size persist, existing drafts resize, and short settings
   panels keep every language option reachable on desktop and mobile.

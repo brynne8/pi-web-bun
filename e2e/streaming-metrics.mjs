@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { createJiti } from "jiti";
-import { chromium } from "playwright";
+import { launchBrowser, newTestContext } from "./browser.mjs";
 
 const jiti = createJiti(import.meta.url, { jsx: { runtime: "automatic" }, tsconfigPaths: true });
 const React = await jiti.import("react");
@@ -68,13 +68,14 @@ export async function checkStreamingMetrics(page) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const browser = await chromium.launch();
+  const browser = await launchBrowser();
   try {
     for (const width of [1280, 390, 320]) {
-      const page = await browser.newPage({ viewport: { width, height: 800 } });
+      const context = await newTestContext(browser, { viewport: { width, height: 800 }, locale: "en-US" });
+      const page = await context.newPage();
       await page.setContent('<body style="font-size:14px;line-height:1.5"></body>');
       await checkStreamingMetrics(page);
-      await page.close();
+      await context.close();
     }
   } finally {
     await browser.close();

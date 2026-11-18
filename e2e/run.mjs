@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { appendFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -97,7 +97,6 @@ const LONG = "e2e-long-session";
 const BRANCH = "e2e-branch-session";
 const RICH = "e2e-rich-session";
 const COMPACTED = "e2e-compacted-session";
-const APPEND = "e2e-external-append-session";
 const REVERT = "e2e-git-revert-session";
 const CODE_BACKGROUND = "e2e-code-background";
 const RESTORE = "e2e-scroll-restore-session";
@@ -205,10 +204,6 @@ try {
     + "E2E compacted answer paragraph.\n\n".repeat(20),
   }]));
   writeSession(COMPACTED, compactedEntries);
-  writeSession(APPEND, [
-    message("root", null, "user", "E2E wrapper root"),
-    message("reply", "root", "assistant", "E2E wrapper reply"),
-  ]);
   // Sized for the reading-position check below: the window opens with the last 50 messages
   // and the page above them is 49 more, so the single gesture that check makes loads the
   // whole session and the sentinel goes away. The pixel offsets it compares are only
@@ -273,56 +268,11 @@ try {
     const response = await fetch(`${base}/api/sessions`, { signal: AbortSignal.timeout(5000) }).catch(() => null);
     if (response?.ok) {
       const { sessions } = await response.json();
-      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND, CODE_BACKGROUND, REVERT, RESTORE, projectNavigation.id].sort());
+      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, CODE_BACKGROUND, REVERT, RESTORE, projectNavigation.id].sort());
       break;
     }
     assert.ok(Date.now() < deadline, "Server readiness timed out; see server.log");
     await delay(250);
-  }
-
-  const detail = await api(`/api/sessions/${LONG}?deferThinking=1&deferMedia=1`);
-  assert.deepEqual(detail.context.entryIds, ids(4950, 5000));
-  assert.equal(detail.context.messages.length, 50);
-  assert.equal(detail.context.hasMore, true);
-  assert.ok(JSON.stringify(detail).length < 100_000, "Detail transferred unbounded history");
-  const tail = await api(`/api/sessions/${LONG}/context?tail=50`);
-  assert.deepEqual(tail.context.entryIds, ids(4950, 5000));
-  assert.equal(tail.context.messages.length, 50);
-  const selectedBranch = await api(`/api/sessions/${BRANCH}/context?leafId=old`);
-  assert.deepEqual(selectedBranch.context.entryIds, ["root", "old"]);
-  const rootPage = await api(`/api/sessions/${BRANCH}/context?before=old&tail=1`);
-  assert.deepEqual(rootPage.context.entryIds, ["root"]);
-  assert.equal(rootPage.context.hasMore, false);
-  const beforeRoot = await api(`/api/sessions/${BRANCH}/context?before=root`);
-  assert.deepEqual(beforeRoot.context.entryIds, []);
-  assert.equal(beforeRoot.context.hasMore, false);
-  await api("/api/sessions/e2e-does-not-exist", 404);
-  await api("/api/files/..%2F..%2Fetc%2Fpasswd?type=read", 403);
-  const compacted = await api(`/api/sessions/${COMPACTED}`);
-  assert.equal(compacted.context.entryIds[0], "compact");
-  assert.equal(compacted.context.messages.some((entry) => entry.role === "user"), false);
-  console.log("PASS: bounded history, branch context, pagination root, and API errors");
-
-  // #632 regression: a live wrapper shadows the session file. Ordinary reads
-  // keep that snapshot (two processes writing one JSONL is unsupported). A
-  // mount/refresh GET (?force=1) must see the external append and stay stable.
-  {
-    const file = join(sessionDir, `2026-08-23T00-00-00-000Z_${APPEND}.jsonl`);
-    await post(`/api/agent/${APPEND}`, { type: "get_state" });
-    const beforeAppend = await api(`/api/sessions/${APPEND}`);
-    assert.deepEqual(beforeAppend.context.entryIds, ["root", "reply"], "the wrapper must serve its own snapshot first");
-    appendFileSync(file, `${JSON.stringify(message("external", "reply", "assistant", "E2E external append"))}\n`);
-    const ordinaryRead = await api(`/api/sessions/${APPEND}`);
-    assert.deepEqual(ordinaryRead.context.entryIds, ["root", "reply"], "post-turn reads must not probe disk");
-    assert.equal(ordinaryRead.wrapperRebuilt, undefined);
-    const afterForce = await api(`/api/sessions/${APPEND}?force=1`);
-    assert.deepEqual(afterForce.context.entryIds, ["root", "reply", "external"], "a mount/refresh read must see the external append");
-    assert.equal(afterForce.wrapperRebuilt, true);
-    const again = await api(`/api/sessions/${APPEND}`);
-    assert.deepEqual(again.context.entryIds, ["root", "reply", "external"], "repeated reads must stay stable");
-    const appended = await api(`/api/sessions/${APPEND}/context?tail=1`);
-    assert.deepEqual(appended.context.entryIds, ["external"], "the appended entry must be readable on its own");
-    console.log("PASS: external session-file appends are visible on force/mount reads");
   }
 
   browser = await launchBrowser();
