@@ -2,11 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
-import { createJiti } from "jiti";
 import { runStripped } from "../lib/__fixtures__/strip-types.mjs";
+import { isHiddenRelation } from "../lib/session-family.ts";
 
 const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
-const { isHiddenRelation } = await createJiti(import.meta.url).import("../lib/session-family.ts");
 
 function callbackBody(name, endAnchor) {
   const start = source.indexOf(`const ${name} = useCallback`);
