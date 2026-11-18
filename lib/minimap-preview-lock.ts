@@ -5,7 +5,7 @@
  * unlocked (`lib/browser-flag.ts`).
  */
 
-import { loadBrowserFlag, saveBrowserFlag, type FlagStorage } from "./browser-flag";
+import { loadBrowserFlag, saveBrowserFlag, type FlagStorage } from "./browser-flag.ts";
 
 const STORAGE_KEY = "pi-web:minimap-preview-locked";
 

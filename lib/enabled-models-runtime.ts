@@ -1,4 +1,4 @@
-import { homeDir } from "./home-dir";
+import { homeDir } from "./home-dir.ts";
 import { join, sep } from "path";
 import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -15,8 +15,8 @@ import {
   type EnabledModelsProviderView,
   type EnabledModelsView,
   type PatternResolution,
-} from "./enabled-models";
-import { getProjectTrustStatus } from "./project-trust";
+} from "./enabled-models.ts";
+import { getProjectTrustStatus } from "./project-trust.ts";
 
 /**
  * SDK adapter for the pure `enabledModels` editor in `lib/enabled-models.ts`.

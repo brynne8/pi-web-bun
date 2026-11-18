@@ -2,8 +2,8 @@ import { EventEmitter } from "node:events";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as undici from "undici";
-import { homeDir } from "./home-dir";
-import { readRegularFileText } from "./regular-file";
+import { homeDir } from "./home-dir.ts";
+import { readRegularFileText } from "./regular-file.ts";
 
 export const DEFAULT_HTTP_IDLE_TIMEOUT_MS = 300_000;
 

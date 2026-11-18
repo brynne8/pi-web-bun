@@ -1,4 +1,4 @@
-import { homeDir } from "./home-dir";
+import { homeDir } from "./home-dir.ts";
 import path from "path";
 
 // "Use default directory" opens a fresh folder per day, ~/pi-cwd/<YYYYMMDD>.

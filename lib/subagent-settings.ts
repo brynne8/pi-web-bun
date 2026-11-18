@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { writePrivateFileAtomicSync } from "./atomic-file";
+import { writePrivateFileAtomicSync } from "./atomic-file.ts";
 
 export interface SubagentSettings {
   builtInEnabled: boolean;

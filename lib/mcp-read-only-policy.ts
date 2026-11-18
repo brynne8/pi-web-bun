@@ -1,8 +1,8 @@
 import type { InlineExtension, ToolInfo } from "@earendil-works/pi-coding-agent";
-import { MCP_EXTENSION_PATH } from "./mcp-command";
-import { readSessionToolSelection } from "./session-tool-selection";
-import { SDK_BUILTIN_TOOLS } from "./subagents";
-import type { SessionEntry } from "./types";
+import { MCP_EXTENSION_PATH } from "./mcp-command.ts";
+import { readSessionToolSelection } from "./session-tool-selection.ts";
+import { SDK_BUILTIN_TOOLS } from "./subagents.ts";
+import type { SessionEntry } from "./types.ts";
 
 // A Read-only session pins coding tools that cannot change anything, but MCP
 // tools stay callable beside them, directly or from a codemode script. While

@@ -1,8 +1,8 @@
 import fs from "fs";
-import { homeDir } from "./home-dir";
+import { homeDir } from "./home-dir.ts";
 import path from "path";
-import { isExistingPathWithinRoots, isPathWithinRoots, resolveRealRoots } from "./path-security";
-import { samePath } from "./paths";
+import { isExistingPathWithinRoots, isPathWithinRoots, resolveRealRoots } from "./path-security.ts";
+import { samePath } from "./paths.ts";
 
 /**
  * The canonical target of a directory link (a symlink, or a junction on

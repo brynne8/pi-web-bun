@@ -1,8 +1,8 @@
-import { LLAMA_CPP_PROVIDER_ID } from "./provider-listing";
+import { LLAMA_CPP_PROVIDER_ID } from "./provider-listing.ts";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { invalidateModelsCache } from "./models-cache";
-import { resolveVisibleModels, selectInitialModelScope, type InitialModelScopeOptions } from "./model-scope";
+import { invalidateModelsCache } from "./models-cache.ts";
+import { resolveVisibleModels, selectInitialModelScope, type InitialModelScopeOptions } from "./model-scope.ts";
 
 type RuntimeModel = Awaited<ReturnType<ModelRuntime["getAvailable"]>>[number];
 

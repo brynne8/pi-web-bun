@@ -2,18 +2,18 @@ import { execFile } from "child_process";
 import fs from "fs";
 import path from "path";
 import { promisify } from "util";
-import { TEXT_PREVIEW_MAX_BYTES } from "./file-types";
+import { TEXT_PREVIEW_MAX_BYTES } from "./file-types.ts";
 import type {
   GitFileDiffResponse,
   GitFileStatus,
   GitStatusResponse,
-} from "./git-types";
+} from "./git-types.ts";
 import {
   classifyGitStatus,
   parseGitPorcelainV1,
   type GitPorcelainEntry,
-} from "./git-status";
-import { resolveExistingPath } from "./paths";
+} from "./git-status.ts";
+import { resolveExistingPath } from "./paths.ts";
 
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 10_000;

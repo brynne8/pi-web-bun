@@ -2,10 +2,10 @@ import { execFile } from "child_process";
 import fs from "fs";
 import path from "path";
 import { promisify } from "util";
-import { getGitStatus, isWithinPath, toGitPath } from "./git-changes";
-import { resolveExistingPath } from "./paths";
-import { gitRevertAction, type GitRevertRefusal, type GitRevertAction } from "./git-revert-rule";
-import type { GitFileStatus } from "./git-types";
+import { getGitStatus, isWithinPath, toGitPath } from "./git-changes.ts";
+import { resolveExistingPath } from "./paths.ts";
+import { gitRevertAction, type GitRevertRefusal, type GitRevertAction } from "./git-revert-rule.ts";
+import type { GitFileStatus } from "./git-types.ts";
 
 /**
  * Reverting the changes of one file — or of every changed file under a folder —

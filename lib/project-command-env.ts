@@ -24,8 +24,8 @@ import {
   trackBgTask,
   untrackBgTask,
   wasBgTaskKilled,
-} from "./bash-bg-tasks";
-import { buildBgTaskNotification, type BgTaskOutcome } from "./bg-task-notification";
+} from "./bash-bg-tasks.ts";
+import { buildBgTaskNotification, type BgTaskOutcome } from "./bg-task-notification.ts";
 
 const HOST_EXTENSION_NAME = "pi-web-project-command-environment";
 const HOST_EXTENSION_PATH = `<inline:${HOST_EXTENSION_NAME}>`;

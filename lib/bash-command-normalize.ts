@@ -1,6 +1,6 @@
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage, AgentToolCall } from "@earendil-works/pi-agent-core";
-import { stripWorkingDirectoryCd, type WorkingDirectoryCdOptions } from "./bash-command-cd";
+import { stripWorkingDirectoryCd, type WorkingDirectoryCdOptions } from "./bash-command-cd.ts";
 
 export const BASH_COMMAND_NORMALIZE_EXTENSION_NAME = "pi-web-bash-command-normalize";
 

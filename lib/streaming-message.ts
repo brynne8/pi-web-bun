@@ -1,12 +1,12 @@
-import type { ClientAssistantMessageEvent } from "./agent-event-wire";
-import { normalizeStreamingToolCalls } from "./normalize";
+import type { ClientAssistantMessageEvent } from "./agent-event-wire.ts";
+import { normalizeStreamingToolCalls } from "./normalize.ts";
 import type {
   AgentMessage,
   AssistantContentBlock,
   AssistantMessage,
-} from "./types";
+} from "./types.ts";
 
-export type { ClientAssistantMessageEvent } from "./agent-event-wire";
+export type { ClientAssistantMessageEvent } from "./agent-event-wire.ts";
 
 export interface StreamingState {
   isStreaming: boolean;

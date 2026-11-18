@@ -3,9 +3,9 @@ import {
   isEventIncludedInSnapshot,
   toClientAgentEvent,
   type AgentEventLike,
-} from "./agent-event-wire";
-import type { DebugEventStream } from "./debug-types";
-import { recordRuntimeDiagnostic } from "./runtime-diagnostics";
+} from "./agent-event-wire.ts";
+import type { DebugEventStream } from "./debug-types.ts";
+import { recordRuntimeDiagnostic } from "./runtime-diagnostics.ts";
 
 export interface AgentEventStreamSession {
   readonly isStreaming: boolean;

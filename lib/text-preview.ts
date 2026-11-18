@@ -1,5 +1,5 @@
 import fs from "fs";
-import { TEXT_PREVIEW_MAX_BYTES } from "./file-types";
+import { TEXT_PREVIEW_MAX_BYTES } from "./file-types.ts";
 
 export interface TextPreviewChunk {
   content: string;

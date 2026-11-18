@@ -1,5 +1,5 @@
-import { isValidLivenessHolder } from "./session-liveness";
-import { describeStreamClient, type StreamClient } from "./stream-client";
+import { isValidLivenessHolder } from "./session-liveness.ts";
+import { describeStreamClient, type StreamClient } from "./stream-client.ts";
 
 /**
  * Open terminal and file-watch event streams with the page that opened them, for the Debug

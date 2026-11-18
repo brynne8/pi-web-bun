@@ -5,7 +5,7 @@
  * folds, not a setting. Falls back to unlocked (`lib/browser-flag.ts`).
  */
 
-import { loadBrowserFlag, saveBrowserFlag, type FlagStorage } from "./browser-flag";
+import { loadBrowserFlag, saveBrowserFlag, type FlagStorage } from "./browser-flag.ts";
 
 const STORAGE_KEY = "pi-web:agent-strip-locked";
 

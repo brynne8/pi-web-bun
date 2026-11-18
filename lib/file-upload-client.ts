@@ -1,5 +1,5 @@
-import { buildAtMentionText } from "./file-fuzzy";
-import { encodeFilePathForApi } from "./file-paths";
+import { buildAtMentionText } from "./file-fuzzy.ts";
+import { encodeFilePathForApi } from "./file-paths.ts";
 
 /** Browser side of `POST /api/files/[...path]?type=upload`; mirrors `lib/file-upload.ts`. */
 export type UploadConflictStrategy = "error" | "overwrite" | "skip";

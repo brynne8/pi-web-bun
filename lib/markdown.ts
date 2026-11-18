@@ -7,8 +7,8 @@ import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
 import remarkMath from "remark-math";
-import { rehypeKatexWhenLoaded } from "./markdown-katex";
-import { isProseMathText, remarkProseDisplayMath } from "./markdown-prose-math";
+import { rehypeKatexWhenLoaded } from "./markdown-katex.ts";
+import { isProseMathText, remarkProseDisplayMath } from "./markdown-prose-math.ts";
 import type { Plugin } from "unified";
 import type { Extension } from "micromark-util-types";
 

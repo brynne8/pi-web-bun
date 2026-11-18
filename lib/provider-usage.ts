@@ -1,7 +1,7 @@
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { ProviderUsageId } from "./provider-usage-ids";
+import type { ProviderUsageId } from "./provider-usage-ids.ts";
 
-export { PROVIDER_USAGE_IDS, isProviderUsageId, type ProviderUsageId } from "./provider-usage-ids";
+export { PROVIDER_USAGE_IDS, isProviderUsageId, type ProviderUsageId } from "./provider-usage-ids.ts";
 
 // Query formats follow @narumitw/pi-usage (MIT, Copyright (c) 2026 narumiruna),
 // but this module deliberately has no runtime dependency on that extension.

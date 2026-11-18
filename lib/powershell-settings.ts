@@ -3,8 +3,8 @@ import {
   getGlobalSettingsPath,
   readGlobalSettings,
   updateGlobalSettings,
-} from "./global-settings-file";
-import { SETTINGS_BUILTIN_TOOLS } from "./tool-presets";
+} from "./global-settings-file.ts";
+import { SETTINGS_BUILTIN_TOOLS } from "./tool-presets.ts";
 
 const DEFAULT_TOOLS = ["read", "bash", "edit", "write"];
 /**

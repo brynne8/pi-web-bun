@@ -1,4 +1,4 @@
-import { GIT_REVERT_REFUSAL_KEYS, type GitRevertRefusal } from "./git-revert-rule";
+import { GIT_REVERT_REFUSAL_KEYS, type GitRevertRefusal } from "./git-revert-rule.ts";
 
 /**
  * The file row's Revert changes request, and how its answer becomes a toast.

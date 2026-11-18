@@ -1,16 +1,16 @@
 import { lstatSync, readdirSync, realpathSync } from "node:fs";
-import { homeDir } from "./home-dir";
+import { homeDir } from "./home-dir.ts";
 import { basename, dirname, join, resolve } from "node:path";
 import {
   hasTrustRequiringProjectResources,
   ProjectTrustStore,
   type ProjectTrustStoreEntry,
 } from "@earendil-works/pi-coding-agent";
-import type { FreshFolderTrustBreadth, ProjectTrustStatus } from "./api-types";
-import { serializeByKey } from "./key-serializer";
-import { isPathWithinRoots } from "./path-security";
-import { samePath, toNativePath } from "./paths";
-import { readRegularFileText } from "./regular-file";
+import type { FreshFolderTrustBreadth, ProjectTrustStatus } from "./api-types.ts";
+import { serializeByKey } from "./key-serializer.ts";
+import { isPathWithinRoots } from "./path-security.ts";
+import { samePath, toNativePath } from "./paths.ts";
+import { readRegularFileText } from "./regular-file.ts";
 
 /** The folder as `trust.json` keys it: resolved, then its real path when it exists. */
 function trustKeyPath(cwd: string): string {

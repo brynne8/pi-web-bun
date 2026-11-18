@@ -10,7 +10,7 @@
  * quietly drops a subtree is an argument the user never sees.
  */
 
-import { relativeToRoot } from "./display-path";
+import { relativeToRoot } from "./display-path.ts";
 
 export interface ToolField {
   key: string;

@@ -5,9 +5,9 @@ import {
   type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
-import { rememberProviderModels } from "./deferred-provider-models";
-import { serializeByKey } from "./key-serializer";
-import { llamaCppExtension } from "./pi-sdk-internals";
+import { rememberProviderModels } from "./deferred-provider-models.ts";
+import { serializeByKey } from "./key-serializer.ts";
+import { llamaCppExtension } from "./pi-sdk-internals.ts";
 
 /**
  * ModelRuntime that also includes providers registered by extensions (an

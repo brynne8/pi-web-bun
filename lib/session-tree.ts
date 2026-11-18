@@ -17,10 +17,10 @@
  * rest; in each band the projects without a place come first.
  */
 
-import { getSessionFamily, listSessionFamilies, type SessionFamily } from "./session-family";
-import { storedProjectName, type ProjectMovePosition, type SessionUiFamilyState, type SessionUiState } from "./session-ui-state-shared";
-import type { SessionInfo } from "./types";
-import { workspaceKeyOf } from "./workspace-memory";
+import { getSessionFamily, listSessionFamilies, type SessionFamily } from "./session-family.ts";
+import { storedProjectName, type ProjectMovePosition, type SessionUiFamilyState, type SessionUiState } from "./session-ui-state-shared.ts";
+import type { SessionInfo } from "./types.ts";
+import { workspaceKeyOf } from "./workspace-memory.ts";
 
 export type SidebarLayout = "desktop" | "mobile";
 export type SidebarRowKind =

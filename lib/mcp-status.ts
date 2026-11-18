@@ -1,5 +1,5 @@
-import type { McpHostInactiveInfo, McpScope, McpServerInfo, McpServerStatus } from "./api-types";
-import { samePath } from "./paths";
+import type { McpHostInactiveInfo, McpScope, McpServerInfo, McpServerStatus } from "./api-types.ts";
+import { samePath } from "./paths.ts";
 
 // The last known connection state of each `mcp.json` entry, for the status
 // dots of Settings › MCP (ADR 0006). GET /api/mcp reads files only and never

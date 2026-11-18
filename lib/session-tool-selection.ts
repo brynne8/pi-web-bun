@@ -1,6 +1,6 @@
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
-import { PRESET_FULL } from "./tool-presets";
-import type { SessionEntry } from "./types";
+import { PRESET_FULL } from "./tool-presets.ts";
+import type { SessionEntry } from "./types.ts";
 
 export const TOOL_SELECTION_TYPE = "pi-web:tool-selection";
 

@@ -1,5 +1,5 @@
 import type { JsonAgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import { withoutContentSignatures, withoutMessageSignatures } from "./message-signatures";
+import { withoutContentSignatures, withoutMessageSignatures } from "./message-signatures.ts";
 
 export interface AgentEventLike {
   type: string;

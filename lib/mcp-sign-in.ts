@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { McpRefusalReason, McpSignInFailure, McpSignInFlowInfo, McpSignInPhase, McpTestResult } from "./api-types";
+import type { McpRefusalReason, McpSignInFailure, McpSignInFlowInfo, McpSignInPhase, McpTestResult } from "./api-types.ts";
 import {
   guardedCredentialStore,
   mcpOAuthUrl,
@@ -10,8 +10,8 @@ import {
   mcpSignOutCount,
   noteMcpSignOut,
   type McpSignInWriteGuard,
-} from "./mcp-sign-out";
-import { recordMcpStatus } from "./mcp-status";
+} from "./mcp-sign-out.ts";
+import { recordMcpStatus } from "./mcp-status.ts";
 import {
   closeTestConnection,
   createTestRedactor,
@@ -24,14 +24,14 @@ import {
   type McpTestInternals,
   type McpTestRun,
   type McpTestTarget,
-} from "./mcp-test";
+} from "./mcp-test.ts";
 import type {
   McpOAuthChallenge,
   McpOAuthSettings,
   McpOAuthServerStore,
   McpSignInOptions,
   PiSdkInternals,
-} from "./pi-sdk-internals";
+} from "./pi-sdk-internals.ts";
 
 // The URL rule, the sign-out counts and the guarded store live in
 // `lib/mcp-sign-out.ts`, which Tests use too; re-exported for the routes.

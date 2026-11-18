@@ -9,10 +9,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { gt, maxSatisfying, rcompare, valid, validRange } from "semver";
 import type { PluginScope, PluginUpdateResult } from "@/lib/api-types";
-import { nodeCliInvocation } from "./node-cli";
-import { parseNpmSource } from "./npm-source";
-import { sanitizeProjectCommandEnvironment } from "./project-command-env";
-import { getProjectTrustStatus } from "./project-trust";
+import { nodeCliInvocation } from "./node-cli.ts";
+import { parseNpmSource } from "./npm-source.ts";
+import { sanitizeProjectCommandEnvironment } from "./project-command-env.ts";
+import { getProjectTrustStatus } from "./project-trust.ts";
 
 const execFileAsync = promisify(execFile);
 

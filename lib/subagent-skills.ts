@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { formatSkillsForPrompt, type DefaultResourceLoader, type InlineExtension, type Skill } from "@earendil-works/pi-coding-agent";
-import { parseFrontmatter } from "./frontmatter";
-import { subagentNameList } from "./subagents";
+import { parseFrontmatter } from "./frontmatter.ts";
+import { subagentNameList } from "./subagents.ts";
 
 /**
  * Prefixed to the skill catalog when it is delivered as its own user turn ahead of the

@@ -1,6 +1,6 @@
-import type { AgentMessage } from "./types";
-import { formatDuration } from "./i18n/format";
-import type { Locale } from "./i18n/types";
+import type { AgentMessage } from "./types.ts";
+import { formatDuration } from "./i18n/format.ts";
+import type { Locale } from "./i18n/types.ts";
 
 function recordedMs(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;

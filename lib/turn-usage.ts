@@ -1,5 +1,5 @@
-import type { AgentMessage, AgentUsage } from "./types";
-import { recordsUsage } from "./turn-views";
+import type { AgentMessage, AgentUsage } from "./types.ts";
+import { recordsUsage } from "./turn-views.ts";
 
 function emptyUsage(): AgentUsage {
   return {

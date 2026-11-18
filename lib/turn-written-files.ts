@@ -1,14 +1,14 @@
-import type { AssistantContentBlock, ToolResultMessage } from "./types";
-import { resolveLocalFilePath } from "./file-links";
-import { isApplyPatchToolName, isEditToolName, isWriteToolName } from "./tool-names";
+import type { AssistantContentBlock, ToolResultMessage } from "./types.ts";
+import { resolveLocalFilePath } from "./file-links.ts";
+import { isApplyPatchToolName, isEditToolName, isWriteToolName } from "./tool-names.ts";
 import {
   applyPatchPreviewToFiles,
   applyPatchResultHasFailures,
   getApplyPatchAppliedFiles,
   getApplyPatchInputText,
   parseApplyPatchInput,
-} from "./apply-patch";
-import type { SplitDiffFile } from "./patch";
+} from "./apply-patch.ts";
+import type { SplitDiffFile } from "./patch.ts";
 
 export interface WrittenFile {
   /** Resolved absolute path of a file this turn wrote. */

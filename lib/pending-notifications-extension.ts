@@ -11,7 +11,7 @@ import {
   formatPendingPointer,
   pendingNotificationsFor,
   type PendingNotification,
-} from "./pending-notifications";
+} from "./pending-notifications.ts";
 
 export const PENDING_NOTIFICATIONS_EXTENSION_NAME = "pi-web-pending-notifications";
 

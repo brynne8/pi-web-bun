@@ -6,10 +6,10 @@ import {
   BG_TASK_NOTIFICATION_CUSTOM_TYPE,
   describeBgTaskOutcome,
   type BgTaskOutcome,
-} from "./bg-task-notification";
-import { pendingTitleFrom } from "./pending-notifications";
-import type { SettledReportSink } from "./settled-report-note";
-import { SESSION_ID_PATTERN } from "./session-ui-state-shared";
+} from "./bg-task-notification.ts";
+import { pendingTitleFrom } from "./pending-notifications.ts";
+import type { SettledReportSink } from "./settled-report-note.ts";
+import { SESSION_ID_PATTERN } from "./session-ui-state-shared.ts";
 
 /**
  * Foreground bash commands that outlive this switch to background mode, where
@@ -238,4 +238,4 @@ export {
   trackBgTask,
   untrackBgTask,
   wasBgTaskKilled,
-} from "./bg-task-registry";
+} from "./bg-task-registry.ts";

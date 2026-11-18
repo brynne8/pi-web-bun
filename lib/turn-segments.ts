@@ -1,5 +1,5 @@
-import type { AgentMessage, AssistantContentBlock, AssistantMessage } from "./types";
-import { isEmptyThinkingBlock, isHiddenCustomMessage } from "./message-display";
+import type { AgentMessage, AssistantContentBlock, AssistantMessage } from "./types.ts";
+import { isEmptyThinkingBlock, isHiddenCustomMessage } from "./message-display.ts";
 
 /**
  * A turn as the chat should show it: everything the model wrote stays on the

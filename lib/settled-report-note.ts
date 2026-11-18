@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { TextContent } from "./types";
-import { recordPendingNotification, removePendingNotification, type PendingNotification, type PendingNotificationKind } from "./pending-notifications";
+import type { TextContent } from "./types.ts";
+import { recordPendingNotification, removePendingNotification, type PendingNotification, type PendingNotificationKind } from "./pending-notifications.ts";
 
 /**
  * One settled background report: what the model reads, and what its card renders.

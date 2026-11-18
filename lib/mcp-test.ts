@@ -1,5 +1,5 @@
 import { ModelRegistry, type McpExposure, type McpServerConfig, type McpServerEntry } from "@earendil-works/pi-coding-agent";
-import type { McpScope, McpTestResult, McpTestState, McpTestTool } from "./api-types";
+import type { McpScope, McpTestResult, McpTestState, McpTestTool } from "./api-types.ts";
 import {
   argSecretParts,
   commandSecretParts,
@@ -9,11 +9,11 @@ import {
   maskUrl,
   SECRET_MASK,
   urlSecretParts,
-} from "./mcp-secrets";
-import { guardedCredentialStore, mcpOAuthUrl, mcpSignInKey, mcpSignOutCount, mcpSignOutGuard, type McpSignInWriteGuard } from "./mcp-sign-out";
-import { recordMcpStatus } from "./mcp-status";
-import { createPiWebMcpTransportFactory, resolvedConfigValues } from "./mcp-transport";
-import { getModelRuntimeWithExtensions } from "./model-runtime";
+} from "./mcp-secrets.ts";
+import { guardedCredentialStore, mcpOAuthUrl, mcpSignInKey, mcpSignOutCount, mcpSignOutGuard, type McpSignInWriteGuard } from "./mcp-sign-out.ts";
+import { recordMcpStatus } from "./mcp-status.ts";
+import { createPiWebMcpTransportFactory, resolvedConfigValues } from "./mcp-transport.ts";
+import { getModelRuntimeWithExtensions } from "./model-runtime.ts";
 import type {
   McpClient,
   McpOAuthCredentialStore,
@@ -22,7 +22,7 @@ import type {
   McpTransport,
   PiSdkInternals,
   StdioTransport,
-} from "./pi-sdk-internals";
+} from "./pi-sdk-internals.ts";
 
 // Settings › MCP's Test (ADR 0006): connect one `mcp.json` entry once, outside
 // any session, list what it offers, and close it again. It connects the way a

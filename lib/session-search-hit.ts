@@ -1,5 +1,5 @@
-import type { SessionInfo } from "./types";
-import { sideChatTitle } from "./session-family";
+import type { SessionInfo } from "./types.ts";
+import { sideChatTitle } from "./session-family.ts";
 
 /** Where a side chat's search hit goes: its parent's chat, with this chat's tab. */
 export interface SideChatHit {

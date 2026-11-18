@@ -1,7 +1,7 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { nodeCliInvocation } from "./node-cli";
-import { sanitizeProjectCommandEnvironment } from "./project-command-env";
+import { nodeCliInvocation } from "./node-cli.ts";
+import { sanitizeProjectCommandEnvironment } from "./project-command-env.ts";
 
 const execFileAsync = promisify(execFile);
 

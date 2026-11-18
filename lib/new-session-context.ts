@@ -7,8 +7,8 @@
  * without a DOM.
  */
 
-import { projectNameOf, type SidebarProject } from "./session-tree";
-import { workspaceKeyOf } from "./workspace-memory";
+import { projectNameOf, type SidebarProject } from "./session-tree.ts";
+import { workspaceKeyOf } from "./workspace-memory.ts";
 
 export interface WorktreeChoice {
   path: string;

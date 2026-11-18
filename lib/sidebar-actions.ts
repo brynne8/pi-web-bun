@@ -12,8 +12,8 @@
  * a project group's "Delete all sessions", with `fetch` passed in.
  */
 
-import { projectNameOf, type SidebarFamilyStatus, type SidebarProject, type SidebarRow } from "./session-tree";
-import type { SessionUiStateRequest } from "./session-ui-state-shared";
+import { projectNameOf, type SidebarFamilyStatus, type SidebarProject, type SidebarRow } from "./session-tree.ts";
+import type { SessionUiStateRequest } from "./session-ui-state-shared.ts";
 
 export type SessionMenuActionId =
   | "open-new-tab"
