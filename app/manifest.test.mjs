@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createJiti } from "jiti";
-
-const jiti = createJiti(import.meta.url);
-const { GET, dynamic } = await jiti.import("./manifest.webmanifest/route.ts");
+import { GET, dynamic } from "./manifest.webmanifest/route.ts";
 
 test("manifest route reads the app name at runtime without changing other metadata", async () => {
   const original = process.env.PI_WEB_APP_NAME;
