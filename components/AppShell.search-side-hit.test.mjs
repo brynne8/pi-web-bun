@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
-import { createJiti } from "jiti";
 import { runStripped } from "../lib/__fixtures__/strip-types.mjs";
 
 // The handlers are copied out of AppShell the way AppShell.side-tabs.test.mjs does:
@@ -14,9 +13,8 @@ const end = source.indexOf("  // A side chat's first prompt names it", start);
 assert.ok(start !== -1 && end > start);
 const handlers = source.slice(start, end);
 
-const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
-const { sideChatHit } = await jiti.import("../lib/session-search-hit.ts");
-const { appendSideTab, restoreSideTabs, sideTabsKey } = await jiti.import("./side-tab-state.ts");
+import { sideChatHit } from "../lib/session-search-hit.ts";
+import { appendSideTab, restoreSideTabs, sideTabsKey } from "./side-tab-state.ts";
 
 const sessions = [
   { id: "main-a", name: "Deploy notes" },

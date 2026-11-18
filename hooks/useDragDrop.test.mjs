@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createJiti } from "jiti";
 
-const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
-const { droppedItems } = await jiti.import("./useDragDrop.ts");
+import { droppedItems } from "./useDragDrop.ts";
 
 const file = (name) => new File(["x"], name);
 
