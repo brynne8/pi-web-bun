@@ -6,12 +6,30 @@ interface Props {
   translate: Translate;
 }
 
+// pi escapes the <available_skills> block as XML, so every quote in a skill
+// description reaches us as &quot;. This panel is for reading the prompt, so
+// unfold those entities back. One pass, left to right: "&amp;quot;" came from a
+// literal "&quot;" in the source and must not unfold a second time.
+const promptEntities = /&(?:amp|lt|gt|quot|#39|apos);/g;
+const promptEntityText: Record<string, string> = {
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&quot;": '"',
+  "&#39;": "'",
+  "&apos;": "'",
+};
+
+function decodePromptEntities(text: string): string {
+  return text.replace(promptEntities, (entity) => promptEntityText[entity] ?? entity);
+}
+
 export function SystemPromptPanel({ loading, prompt, translate }: Props) {
   return (
     <section className="system-prompt-panel" aria-label={translate("system.prompt")}>
       <div className="system-prompt-scroll">
         {prompt ? (
-          <div className="system-prompt-text">{prompt}</div>
+          <div className="system-prompt-text">{decodePromptEntities(prompt)}</div>
         ) : (
           <div className="system-prompt-empty">
             {prompt === ""
