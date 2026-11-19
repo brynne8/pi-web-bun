@@ -583,7 +583,7 @@ test("reconnects active shell output to its streaming tool call", () => {
   assert.match(updateSource, /content,/);
   assert.match(endSource, /setActiveToolResults[\s\S]*next\.delete\(id\)/);
   assert.match(chatWindowSource, /const map = new Map\(activeToolResults\)/);
-  assert.match(chatWindowSource, /<MessageView message=\{message\} toolResults=\{toolResults\} isStreaming/);
+  assert.match(chatWindowSource, /<MessageView(?: key=\{[^}]+\})? message=\{message\} toolResults=\{toolResults\} isStreaming/);
 });
 
 test("reports a running script's newest call as its progress", () => {
@@ -840,7 +840,7 @@ test("keeps prompt anchor measurement outside the React update cycle", () => {
   assert.match(anchorLifecycleEffectSource, /promptAnchorMeasureFrameRef\.current = requestAnimationFrame\(\(\) => \{\s*promptAnchorMeasureFrameRef\.current = null;\s*updatePromptAnchorSpacer\(\)/);
   assert.match(anchorLifecycleEffectSource, /disposed = true;[\s\S]*?promptAnchorUpdateRef\.current === updatePromptAnchorSpacer[\s\S]*?cancelAnimationFrame\(promptAnchorMeasureFrameRef\.current\)/);
   assert.match(anchorSyncEffectSource, /promptAnchorUpdateRef\.current\?\.\(\);[\s\S]*?\}, \[\]\);\s*useLayoutEffect\(updatePromptAnchor, \[isStreaming, hasStreamingContent, updatePromptAnchor\]\);/);
-  assert.match(chatWindowSource, /<div ref=\{messageContentRef\}[^>]*style=\{\{/);
+  assert.match(chatWindowSource, /<div ref=\{attachTranscript\}[^>]*style=\{\{/);
 });
 
 test("uses the prompt anchor as the only trailing message spacer", () => {

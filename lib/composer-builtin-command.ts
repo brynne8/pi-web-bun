@@ -1,3 +1,5 @@
+import { holdStoredDraft as holdStoredDraftInStore } from "./draft-store.ts";
+
 // The composer's `/command` run: what it does while it runs, and how the editor gets its
 // focus back once the fieldset is enabled again. Kept out of the component so a test can
 // drive it against a stand-in document, as the browser's own is here.
@@ -28,6 +30,10 @@ export interface RunBuiltinCommandDeps {
   setPending: (pending: boolean) => void;
   canClearBuiltinCommandInput: (message: string, imageCount: number, submittedMessage: string) => boolean;
   clearInput: () => void;
+  /** The composer's draft key: while the command runs, its text is held out of stored drafts. */
+  draftKeyRef?: { current: string | null | undefined };
+  /** The hold itself; the store's by default, a test's stand-in here. */
+  holdStoredDraft?: (key: string) => () => void;
 }
 
 /**
@@ -40,19 +46,24 @@ export async function runBuiltinCommand(msg: string, deps: RunBuiltinCommandDeps
   const {
     document, textarea, attachedImages, onBuiltinCommand,
     valueRef, attachedImagesRef, focusRef, pendingRef, setPending,
-    canClearBuiltinCommandInput, clearInput,
+    canClearBuiltinCommandInput, clearInput, draftKeyRef,
+    holdStoredDraft = holdStoredDraftInStore,
   } = deps;
   if (attachedImages.length || !msg.startsWith("/") || !onBuiltinCommand) return false;
   if (pendingRef.current) return true;
   focusRef.current = document.activeElement === textarea ? textarea : null;
   pendingRef.current = true;
   setPending(true);
+  // The command stays in the composer while it runs, but it was already issued: a
+  // reload meanwhile must not bring it back to be run again.
+  const releaseStoredDraft = draftKeyRef?.current ? holdStoredDraft(draftKeyRef.current) : null;
   try {
     const result = await onBuiltinCommand(msg);
     if (!result.handled) return false;
     if (!result.error && canClearBuiltinCommandInput(valueRef.current, attachedImagesRef.current.length, msg)) clearInput();
     return true;
   } finally {
+    releaseStoredDraft?.();
     pendingRef.current = false;
     setPending(false);
   }

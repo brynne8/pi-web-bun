@@ -49,6 +49,7 @@ import { resolveShellTools } from "./powershell-settings";
 import { isBuiltInSubagentsEnabled, readSubagentSettings } from "./subagent-settings";
 import { pendingTitleFrom } from "./pending-notifications";
 import type { SettledReportHandoff, SettledReportSink } from "./settled-report-note";
+import { SETTLED_REPORTS_CUSTOM_TYPE } from "./settled-report-note";
 import { SubagentQueue } from "./subagent-queue";
 import { isShortSessionId, shortSessionId } from "./session-short-id";
 import { addWorktree, removeWorktree } from "./worktree";
@@ -122,6 +123,8 @@ type StoredSubagentExecution = {
   abortHandedOver?: boolean;
   /** Set once the turn limit ends the run; later steering is refused instead of starting another turn. */
   turnLimitReached?: boolean;
+  /** Set once the run has spent its turn budget, so its wrap-up turn is the last one it may take. */
+  turnsUsed?: boolean;
   cancelQueued?: () => boolean;
   /** Ends the wait for the child's MCP servers before its prompt (`prepareChildMcp()`). */
   mcpWait?: AbortController;
@@ -158,6 +161,9 @@ const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium
  */
 const CLOSED_BEFORE_RUN = "Subagent session was closed before its run started. Start a new subagent instead.";
 
+/** How often a delivery waits to see whether the parent's run has ended. */
+const PARENT_IDLE_POLL_MS = 200;
+
 const TURN_LIMIT_INSTRUCTION = "You have reached your turn limit. You no longer have access to any tools. Answer now from the context you already have: your final answer or report, in full.";
 /** Sent when the tool-less wrap-up turn produced no words at all, for one more attempt. */
 const EMPTY_ANSWER_INSTRUCTION = "You did not provide an answer. You still have no access to any tools. Give your final answer now, from the context you already have.";
@@ -184,6 +190,51 @@ function lastAssistantStop(sessionManager: { getEntries?: () => unknown }): { ab
     return { error: typeof entry.message.errorMessage === "string" && entry.message.errorMessage ? entry.message.errorMessage : "Provider returned an error" };
   }
   return undefined;
+}
+
+type RunMessage = { role?: unknown; stopReason?: unknown; content?: unknown };
+
+function messageText(message: RunMessage): string {
+  if (!Array.isArray(message.content)) return typeof message.content === "string" ? message.content.trim() : "";
+  return message.content
+    .map((block: { type?: unknown; text?: unknown }) => (block?.type === "text" && typeof block.text === "string" ? block.text : ""))
+    .join("").trim();
+}
+
+type RunEntry = { type?: unknown; id?: unknown; targetId?: unknown; replacement?: { content?: unknown } | null; message?: RunMessage };
+
+/**
+ * A run's report: every answer the run appended that ended without tool calls, joined, plus its
+ * last message however it ended. A steer arriving as the child writes its answer starts another
+ * turn, whose reply alone used to replace the report (#1726). Messages are read as pi projects
+ * them, so an omitted or rewritten one counts as pi shows it. See docs/agents/subagents.md.
+ */
+function runResultText(sessionManager: { getEntries?: () => unknown }, from: number): string | undefined {
+  const entries = sessionManager.getEntries?.();
+  if (!Array.isArray(entries)) return undefined;
+  const runEntries = (entries as RunEntry[]).slice(from);
+  // An edit always follows its target, so the run's own range holds every edit of its messages.
+  const edits = new Map<unknown, RunEntry["replacement"]>();
+  for (const entry of runEntries) if (entry?.type === "context_edit") edits.set(entry.targetId, entry.replacement);
+  const messages = runEntries.flatMap((entry): RunMessage[] => {
+    if (entry?.type !== "message" || entry.message?.role !== "assistant") return [];
+    if (!edits.has(entry.id)) return [entry.message];
+    const replacement = edits.get(entry.id);
+    if (!replacement) return [];
+    const content = typeof replacement.content === "string" ? [{ type: "text", text: replacement.content }] : replacement.content;
+    return [{ ...entry.message, content }];
+  });
+  let last = messages.length - 1;
+  // `getLastAssistantText()` passes over a request stopped before any output.
+  while (last >= 0 && messages[last].stopReason === "aborted" && Array.isArray(messages[last].content) &&
+    (messages[last].content as unknown[]).length === 0) last -= 1;
+  const texts = messages.flatMap((message, index) => {
+    const answer = index === last || (message.stopReason !== "error" && message.stopReason !== "aborted" &&
+      !(Array.isArray(message.content) && message.content.some((block: { type?: unknown }) => block?.type === "toolCall")));
+    const text = answer ? messageText(message) : "";
+    return text ? [text] : [];
+  });
+  return texts.length ? texts.join("\n\n") : undefined;
 }
 
 function turnLimitError(turnLimit: number, undelivered: readonly string[]): string {
@@ -549,7 +600,13 @@ function installTurnLimiter(
     turnCount += 1;
     if (signal?.aborted || decision?.action === "end" ||
       turn.message.stopReason === "error" || turn.message.stopReason === "aborted") return decision;
-    const needsAnotherTurn = toolsContinue || decision?.action === "continue" || session.agent.hasQueuedMessages();
+    // A settled report queued for this parent is not a reason to work on: it is a batch of
+    // finished tasks' results, which this fork delivers as one message and lets a later turn
+    // read, so a child at its limit answers its wrap-up turn and is woken by the report after
+    // it, rather than failing the run for a turn the report bought (#1727).
+    const queuedToAnswer = session.agent.peekQueuedMessages()
+      .some((message) => (message as { customType?: string } | undefined)?.customType !== SETTLED_REPORTS_CUSTOM_TYPE);
+    const needsAnotherTurn = toolsContinue || decision?.action === "continue" || queuedToAnswer;
     // A turn past the budget that stopped without a word still owes an answer. The tools
     // are gone by then, so the retry is one more request and nothing else; a second
     // silence ends the run as the limit being reached.
@@ -563,6 +620,9 @@ function installTurnLimiter(
     }
     if (!needsAnotherTurn || turnCount < turnLimit) return decision;
     if (turnCount >= turnLimit + 1) return endAtTurnLimit();
+    // The budget is spent: the next turn is the wrap-up one, and nothing may be handed to this
+    // run after it, so a settled report waits for the run to end (#1727).
+    stored.turnsUsed = true;
     // The wrap-up turn takes the tools away, so its one request can only answer: a model
     // that keeps working would spend it on more tool calls and answer nothing. A profile
     // with no tools has none to take, and a resumed one is told nothing was taken.
@@ -894,6 +954,7 @@ export function createSubagentController(
         dependencies.invalidateSessionList();
         const limiter = installTurnLimiter(inner, stored, turnLimit, activeTools);
         let result: SubagentRunInfo;
+        const runStart = sessionManager.getEntries().length;
         try {
           // A profile's `mcp: on` connects this child's own mcp.json servers before
           // its first prompt (the parent's host does not cover a child).
@@ -905,7 +966,7 @@ export function createSubagentController(
           const skillCatalogMessage = skillsBinding.getSkillCatalogMessage();
           if (skillCatalogMessage) await inner.prompt(skillCatalogMessage, { source: "rpc" });
           await inner.prompt(delegatedTask, { source: "rpc" });
-          const text = inner.getLastAssistantText()?.trim();
+          const text = runResultText(sessionManager, runStart);
           const stop = stored.abortRequested ? undefined : lastAssistantStop(sessionManager);
           const aborted = stored.abortRequested || stop?.aborted === true;
           const errorMessage = aborted ? undefined : stop?.error ?? limiter?.error();
@@ -918,7 +979,7 @@ export function createSubagentController(
             ...(errorMessage ? { error: errorMessage } : {}),
           };
         } catch (error) {
-          const text = inner.getLastAssistantText()?.trim();
+          const text = runResultText(sessionManager, runStart);
           const aborted = stored.abortRequested || request.signal?.aborted;
           result = {
             ...initialRun,
@@ -1059,6 +1120,12 @@ export function createSubagentController(
       resumed: true,
     };
     const manager = wrapper.inner.sessionManager;
+    // A spawn names the child after its description; a resume with a new one renames it (#1735),
+    // through `setSessionName()` as pi's `/name` does, since the wrapper holds the session.
+    const resumedDescription = request.description.trim();
+    if (resumedDescription && resumedDescription !== manager.getSessionName()) {
+      wrapper.inner.setSessionName(resumedDescription);
+    }
     let resolveCompletion!: (run: SubagentRunInfo) => void;
     const completion = new Promise<SubagentRunInfo>((resolve) => { resolveCompletion = resolve; });
     const stored: StoredSubagentExecution = { run: initialRun, completion, abortRequested: false, dispatchedAt: Date.now() };
@@ -1094,6 +1161,8 @@ export function createSubagentController(
         wrapper!.inner.getActiveToolNames(),
       );
       let result: SubagentRunInfo;
+      // Earlier runs' messages are on the same branch; only this run's answers are its result.
+      const runStart = manager.getEntries().length;
       try {
         if (!wrapper!.isAlive()) throw new Error(CLOSED_BEFORE_RUN);
         await prepareChildMcp(wrapper, stored);
@@ -1102,7 +1171,7 @@ export function createSubagentController(
         // history and stays quiet.
         if (existing.toolsWithheld) announceToolsRestored(wrapper);
         await wrapper!.inner.prompt(request.task, { source: "rpc" });
-        const text = wrapper!.inner.getLastAssistantText()?.trim();
+        const text = runResultText(manager, runStart);
         const stop = stored.abortRequested ? undefined : lastAssistantStop(manager);
         const aborted = stored.abortRequested || stop?.aborted === true;
         const errorMessage = aborted ? undefined : stop?.error ?? limiter?.error();
@@ -1114,10 +1183,12 @@ export function createSubagentController(
           ...(errorMessage ? { error: errorMessage } : {}),
         };
       } catch (error) {
+        const text = runResultText(manager, runStart);
         result = {
           ...initialRun,
           status: stored.abortRequested || request.signal?.aborted ? "aborted" : "failed",
           completedAt: new Date().toISOString(),
+          ...(text ? { result: text } : {}),
           ...(!stored.abortRequested && !request.signal?.aborted ? { error: error instanceof Error ? error.message : String(error) } : {}),
         };
       } finally {
@@ -1406,6 +1477,12 @@ export function createSubagentController(
       parent = await dependencies.reopenSession(run.parentSessionId, sessionFile);
     }
     await parent.waitUntilReady();
+    // A parent that has spent its turn budget cannot be handed work its run may not do: the
+    // report waits for that run to end and reaches the parent as the turn pi starts for it, as
+    // an idle parent's does, instead of buying a turn past the limit (#1727).
+    while (parent.isAlive() && parent.isRunning() && getSubagentRuns().get(run.parentSessionId)?.turnsUsed) {
+      await new Promise((resolve) => setTimeout(resolve, PARENT_IDLE_POLL_MS));
+    }
     // Queued the moment the run settles, not held until the parent looks idle: a parent that runs
     // on for forty minutes delivered a burst of stale reports at the end of it. The one thing
     // still worth waiting for is a `get_subagent_result` in flight for *this* run, which is about

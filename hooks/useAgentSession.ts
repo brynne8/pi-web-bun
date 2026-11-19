@@ -18,13 +18,14 @@ import { normalizeToolCalls } from "@/lib/normalize";
 import { AgentCommandError, agentStatusUrl, EXTENSION_REPORTED_CODE, isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
 import { createSideChat, SIDE_REFUSAL_MESSAGES } from "@/lib/side-chat-client";
 import { missingCwdFromBody } from "@/lib/missing-cwd";
+import { forkFailureMessage } from "@/lib/sidebar-actions";
 import {
   deleteSessionViewSnapshot,
   getSessionViewSnapshot,
   setSessionViewSnapshot,
   snapshotCoversLoadedEntries,
 } from "@/lib/session-view-cache";
-import { clearDraft, getDraft, parkedNewSessionDraftKey, rekeyDraft, restoreDraftSubmission, setDraft, type ChatDraft } from "@/lib/draft-store";
+import { clearDraft, getDraft, holdStoredDraft, parkedNewSessionDraftKey, rekeyDraft, restoreDraftSubmission, setDraft, type ChatDraft } from "@/lib/draft-store";
 import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-preset-preference";
 // `getPresetFromTools` is imported with the rest of this module's tool-presets
 // names on purpose: a dynamic `import()` of the same module emits a chunk of its
@@ -268,7 +269,8 @@ export interface UseAgentSessionOptions {
   onToolEnd?: (toolName: string) => void;
   onAttentionNeeded?: (request: BlockingExtensionUiRequest) => void;
   onSessionCreated?: (session: SessionInfo, sourceDraftKey: string) => void;
-  onSessionForked?: (newSessionId: string) => void;
+  /** A fork to open. `session` is its row when it may belong to another project (a fork into another folder). */
+  onSessionForked?: (newSessionId: string, session?: SessionInfo) => void;
   /** `/side`: a side chat was forked from this session; open its tab. The
    *  prompt argument, if any, seeds the new chat's composer. */
   onSideSession?: (session: SessionInfo, prompt: string | null) => void;
@@ -316,6 +318,20 @@ function asConcreteThinkingLevel(value?: string | null): ConcreteThinkingLevel |
 // Session id -> user entry being edited. ChatWindow remounts per session, so a
 // pending edit lives here as long as that session's in-memory draft does.
 const pendingHistoryEdits = new Map<string, string>();
+// The target lives only in this page, so its draft text is never stored: after
+// a reload the rewritten message would join the branch instead of forking it.
+const historyEditDraftHolds = new Map<string, () => void>();
+
+function setPendingHistoryEdit(sessionId: string, entryId: string | null): void {
+  if (entryId) {
+    pendingHistoryEdits.set(sessionId, entryId);
+    if (!historyEditDraftHolds.has(sessionId)) historyEditDraftHolds.set(sessionId, holdStoredDraft(sessionId));
+    return;
+  }
+  pendingHistoryEdits.delete(sessionId);
+  historyEditDraftHolds.get(sessionId)?.();
+  historyEditDraftHolds.delete(sessionId);
+}
 
 const PROMPT_SETTLE_INITIAL_DELAY_MS = 800;
 const PROMPT_SETTLE_POLL_MS = 600;
@@ -789,13 +805,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // so cancelling or reloading never hides the rest of the conversation.
   const [editEntryId, setEditEntryId] = useState(() => {
     const sid = session?.id;
-    if (sid && !getDraft(sid)) pendingHistoryEdits.delete(sid);
+    if (sid && !getDraft(sid)) setPendingHistoryEdit(sid, null);
     return (sid && pendingHistoryEdits.get(sid)) || null;
   });
   const setEdit = useCallback((entryId: string | null) => {
     if (!session?.id) return;
-    if (entryId) pendingHistoryEdits.set(session.id, entryId);
-    else pendingHistoryEdits.delete(session.id);
+    setPendingHistoryEdit(session.id, entryId);
     setEditEntryId(entryId);
   }, [session?.id]);
   const handleEditContent = useCallback((message: UserMessage, entryId: string) => {
@@ -2650,6 +2665,38 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [addNotice, onSessionForked]);
 
+  /**
+   * pi's Fork for a session whose folder is gone (pi 1.5.2): the whole session
+   * copied into `cwd`, a folder that exists (POST /api/sessions/[id]/fork
+   * `{ cwd }`), then opened. The draft goes along, as the refused prompt was
+   * given back to it. Resolves to an error to show, or null.
+   */
+  const forkIntoCwd = useCallback(async (cwd: string): Promise<string | null> => {
+    const sid = sessionIdRef.current;
+    if (!sid) return translate("sidebar.forkNotFound");
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/fork`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd }),
+      });
+      const data = await res.json().catch(() => ({})) as { sessionId?: string; session?: SessionInfo; code?: string; error?: string };
+      if (!res.ok || !data.sessionId || !data.session) {
+        const { key, params } = forkFailureMessage(data.code, data.error ?? `HTTP ${res.status}`);
+        return translate(key, params);
+      }
+      const input = opts.chatInputRef?.current;
+      if (input) input.rekeyDraft(sid, data.sessionId);
+      else rekeyDraft(sid, data.sessionId);
+      onSessionForked?.(data.sessionId, data.session);
+      return null;
+    } catch (e) {
+      return translate("sidebar.forkFailed", { error: e instanceof Error ? e.message : String(e) });
+    }
+  }, [onSessionForked, opts.chatInputRef, translate]);
+  const canForkMissingCwd = Boolean(missingCwd) && !isNew && Boolean(session?.id)
+    && session?.relation?.kind !== "subagent" && session?.relation?.kind !== "side";
+
   const handleNavigate = useCallback(async (entryId: string): Promise<boolean> => {
     if (bashRunningRef.current) return false;
     const sid = sessionIdRef.current;
@@ -3728,7 +3775,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   return {
     // State
     data, loading, error, activeLeafId, messages, activeToolResults, toolClocks, entryIds, messageKeys, historyCursor, hasEarlierMessages, earlierTurnCount, streamingStore,
-    agentRunning, modelNames, modelList, modelError, missingCwd, modelScopeWarnings, isModelScopeActive, allModelList, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel,
+    agentRunning, modelNames, modelList, modelError, missingCwd, canForkMissingCwd, modelScopeWarnings, isModelScopeActive, allModelList, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, modelSwitching, sessionStats, autoCompactionEnabled,
     slashCommands, slashCommandsLoading, queuedMessages,
@@ -3746,7 +3793,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     sessionIdRef, scrollContainerRef,
     lastUserMsgRef, pendingScrollToUserRef, initialScrollDoneRef,
     // Actions
-    handleSend, handleAbort, startSideChat, handleFork, handleNavigate, handleModelChange,
+    handleSend, handleAbort, startSideChat, handleFork, forkIntoCwd, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     dismissCompactError,
     handleRecallQueue,

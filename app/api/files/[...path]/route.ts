@@ -293,7 +293,9 @@ function streamFile(filePath: string, stat: fs.Stats, contentType: string, range
   const size = getReadableFileSize(filePath, stat.size);
   const headers: Record<string, string> = {
     "Content-Type": contentType,
-    "Cache-Control": "no-cache",
+    // no-transform: a range reply must reach the browser as the bytes it names, never as a
+    // proxy's gzip of a wider body; file bytes go out as stored.
+    "Cache-Control": "no-cache, no-transform",
     "Accept-Ranges": "bytes",
     "Content-Disposition": getContentDisposition(filePath, asDownload),
     "X-Content-Type-Options": "nosniff",

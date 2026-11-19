@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { countRunningSubagents, sideChatTitle } from "@/lib/session-family";
-import type { SessionUsageSummary } from "@/lib/session-stats";
+import { MAX_SESSION_STATS_IDS, type SessionUsageSummary } from "@/lib/session-stats";
 import type { Locale } from "@/lib/i18n/types";
 import { formatActiveDuration, formatCompactCount, formatCostShort } from "@/lib/session-stats-format";
 import type { SessionInfo, SubagentSessionStatus } from "@/lib/types";
@@ -42,16 +42,25 @@ function useAgentUsage(ids: readonly string[], runningKey: string): Record<strin
       if (inFlight) return;
       inFlight = true;
       try {
-        const res = await fetch("/api/sessions/stats", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids: requested }),
-          signal: controller.signal,
-          cache: "no-store",
-        });
-        if (!res.ok) return;
-        const data = await res.json() as { stats?: Record<string, SessionUsageSummary> };
-        if (!controller.signal.aborted && data.stats) setUsage(data.stats);
+        // The route takes at most MAX_SESSION_STATS_IDS ids, so a larger family goes in
+        // batches of that size, one after another: one request for every id lost all the
+        // rows' numbers once a session passed 200 subagents (#1728). A failed batch keeps
+        // the last numbers rather than dropping half the family.
+        const merged: Record<string, SessionUsageSummary> = {};
+        for (let start = 0; start < requested.length; start += MAX_SESSION_STATS_IDS) {
+          const res = await fetch("/api/sessions/stats", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: requested.slice(start, start + MAX_SESSION_STATS_IDS) }),
+            signal: controller.signal,
+            cache: "no-store",
+          });
+          if (!res.ok) return;
+          const data = await res.json() as { stats?: Record<string, SessionUsageSummary> };
+          if (controller.signal.aborted) return;
+          Object.assign(merged, data.stats);
+        }
+        setUsage(merged);
       } catch {
         /* best-effort: rows keep their last numbers */
       } finally {

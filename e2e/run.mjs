@@ -25,6 +25,7 @@ import { checkFilesPlacement, showSidebarSessions } from "./sidebar.mjs";
 import { checkSessionNavigation } from "./session-navigation.mjs";
 import { checkProjectNavigation, createProjectNavigationFixtures } from "./project-navigation.mjs";
 import { checkDirectoryPicker, createDirectoryPickerFixtures } from "./directory-picker.mjs";
+import { checkMissingCwdFork, createMissingCwdForkFixtures } from "./missing-cwd-fork.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(import.meta.url);
@@ -219,6 +220,7 @@ try {
 
   const projectNavigation = createProjectNavigationFixtures({ agentDir, sessionDir, timestamp });
   const directoryPicker = createDirectoryPickerFixtures(agentDir);
+  const missingCwdFork = createMissingCwdForkFixtures({ agentDir, sessionDir, timestamp });
 
   const probe = createServer();
   probe.listen(0, "127.0.0.1");
@@ -250,6 +252,11 @@ try {
     return response.json();
   }
 
+  async function deleteSession(id) {
+    const response = await fetch(`${base}/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE", signal: AbortSignal.timeout(30_000) });
+    assert.ok(response.ok, `DELETE session ${id} -> ${response.status}`);
+  }
+
   async function post(path, body) {
     const response = await fetch(`${base}${path}`, {
       method: "POST",
@@ -268,7 +275,7 @@ try {
     const response = await fetch(`${base}/api/sessions`, { signal: AbortSignal.timeout(5000) }).catch(() => null);
     if (response?.ok) {
       const { sessions } = await response.json();
-      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, CODE_BACKGROUND, REVERT, RESTORE, projectNavigation.id].sort());
+      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, CODE_BACKGROUND, REVERT, RESTORE, projectNavigation.id, missingCwdFork.id].sort());
       break;
     }
     assert.ok(Date.now() < deadline, "Server readiness timed out; see server.log");
@@ -365,23 +372,37 @@ try {
     })), { connected: true, text: text(4998) }, "Prepending history must preserve existing message nodes");
     await latestUser.dispose();
     assert.ok(olderResponses.length >= 2, "Scrolling must fetch consecutive older pages");
-    const firstCursor = Number(new URL(olderResponses[0].url()).searchParams.get("before")?.slice(1));
-    assert.ok(Number.isInteger(firstCursor), "Older page must include a numeric before cursor");
-    {
-      // Each page the client fetched holds the 50 entries above the one before it.
-      // Bodies are read here and only here: a Playwright response body is spent once,
-      // so this walk cannot rerun.
-      let walked = firstCursor;
-      for (const response of olderResponses) {
-        assert.equal(response.status(), 200);
-        assert.equal(new URL(response.url()).searchParams.get("before"), `e${walked}`);
-        const older = (await response.json()).context;
-        assert.deepEqual(older.entryIds, ids(walked - 50, walked));
-        assert.equal(older.messages.length, 50);
-        walked -= 50;
-        assert.equal(older.oldestEntryId, `e${walked}`);
-        assert.equal(older.hasMore, true);
+    let oldest = Number(new URL(olderResponses[0].url()).searchParams.get("before")?.slice(1));
+    assert.ok(Number.isInteger(oldest), "Older page must include a numeric before cursor");
+    for (const response of olderResponses) {
+      assert.equal(response.status(), 200);
+      assert.equal(new URL(response.url()).searchParams.get("before"), `e${oldest}`);
+      const older = (await response.json()).context;
+      assert.deepEqual(older.entryIds, ids(oldest - 50, oldest));
+      assert.equal(older.messages.length, 50);
+      oldest -= 50;
+      assert.equal(older.oldestEntryId, `e${oldest}`);
+      assert.equal(older.hasMore, true);
+    }
+    const rendered = await page.getByText(/^E2E message \d{4}$/).allTextContents();
+    // The sidebar also displays the first message as the session title.
+    assert.deepEqual(rendered.filter((value) => value !== text(0)),
+      Array.from({ length: 5000 - oldest }, (_, i) => text(oldest + i)), "Missing, reordered, or duplicate chat messages");
+    if (viewport.width > 600) {
+      // The minimap lists the turns again a moment after a page lands (its
+      // measure is throttled), while `turnsBefore` changes with the page: read
+      // too soon, the last page's turns are numbered from the new count.
+      let paged;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        paged = await readMinimapTurn("minimap-turns-paged.png");
+        if (paged.number === "2500") break;
+        await page.waitForTimeout(100);
       }
+      assert.deepEqual(paged, {
+        number: "2500",
+        earlier: `Earlier turns not loaded: ${oldest / 2}. Click to load`,
+      }, "Loading older pages must not renumber minimap turns");
+
     }
     await page.screenshot({ path: join(artifacts, `history-${viewport.width}.png`) });
 
@@ -604,13 +625,11 @@ try {
     a: { id: BRANCH, entry: "new", text: "Active branch answer" },
     b: { id: CODE_BACKGROUND, entry: "answer", text: "const x = 1;" },
     api,
-    deleteSession: async (id) => {
-      const response = await fetch(`${base}/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE", signal: AbortSignal.timeout(30_000) });
-      assert.ok(response.ok, `DELETE session ${id} -> ${response.status}`);
-    },
+    deleteSession,
   });
   await checkProjectNavigation({ browser, base, artifacts, fixture: projectNavigation, otherSessionId: BRANCH, api, post });
   await checkDirectoryPicker({ browser, base, fixture: directoryPicker });
+  await checkMissingCwdFork({ browser, base, artifacts, fixture: missingCwdFork, api, deleteSession });
 } catch (error) {
   console.error(error);
   process.exitCode = 1;

@@ -1320,7 +1320,15 @@ export function AppShell() {
     if (toolEndRefreshTimerRef.current) clearTimeout(toolEndRefreshTimerRef.current);
   }, []);
 
-  const handleSessionForked = useCallback((newSessionId: string) => {
+  const handleSessionForked = useCallback((newSessionId: string, session?: SessionInfo) => {
+    if (session) {
+      // A fork into another folder is another project's session: opened as a
+      // pick from the list, so the shell adopts its project before the sidebar
+      // reports the new cwd (which would otherwise close it as stale).
+      setRefreshKey((k) => k + 1);
+      handleSelectSession(session);
+      return;
+    }
     invalidateWorkspaceRestore();
     activeNewSessionDraftKeyRef.current = null;
     setRefreshKey((k) => k + 1);
@@ -1333,7 +1341,7 @@ export function AppShell() {
     }));
     hydrateSelectedSession(newSessionId);
     router.replace(`?session=${encodeURIComponent(newSessionId)}`, { scroll: false });
-  }, [invalidateWorkspaceRestore, router, hydrateSelectedSession]);
+  }, [handleSelectSession, invalidateWorkspaceRestore, router, hydrateSelectedSession]);
 
   // The sidebar calls this when the initial session is not in its list.
   const handleInitialRestoreDone = useCallback(() => {
@@ -3131,9 +3139,9 @@ export function AppShell() {
               quoteSelectionEnabled={quoteSelectionEnabled}
               onOpenFile={handleOpenLinkedFile}
               onOpenSubagent={handleOpenSubagentTab}
-              onSessionForked={(newSessionId) => {
+              onSessionForked={(newSessionId, session) => {
                 if (isMobile) setRightPanelOpen(false);
-                handleSessionForked(newSessionId);
+                handleSessionForked(newSessionId, session);
               }}
               onOpenSettings={openSettingsSection}
               onToolEnd={handleToolEnd}

@@ -261,6 +261,14 @@ test("shows deferred thinking previews without loading the full content", () => 
   assert.match(html, /aria-expanded="false"/);
 });
 
+test("keys a streaming reply by its request identity across reconnects", () => {
+  // Read from the source: a reconnect can batch `connected` ending the old stream with a new
+  // reply's snapshot, and only a changed key gives the view fresh timing refs.
+  const chatWindow = readFileSync(new URL("./ChatWindow.tsx", import.meta.url), "utf8");
+  const reply = chatWindow.slice(chatWindow.indexOf("const StreamingReply"));
+  assert.match(reply, /<MessageView key=\{streamRateKey\(message\)\}/);
+});
+
 test("keys an assistant message's blocks by their place, not the entry id (#1184)", () => {
   // A message of the running turn gets its entry id when the file is read again.
   // A block keyed by it remounted then: open thinking closed, a tool output's

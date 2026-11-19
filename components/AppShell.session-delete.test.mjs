@@ -95,3 +95,4 @@ test("a delete completing while the user is still on it falls back to the empty 
   assert.equal(state.sessionKey, 1, "chat remounts as a fresh composer");
   assert.equal(state.routerReplaced, `?cwd=${encodeURIComponent("/project-a")}`);
 });
+

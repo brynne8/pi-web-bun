@@ -760,6 +760,39 @@ test("locks built-in command submission until it settles", async () => {
   assert.deepEqual(cleared, ["/reload"]);
 });
 
+test("keeps an issued built-in out of stored drafts until it settles", async () => {
+  let resolve;
+  const holds = [];
+  const pendingRef = { current: false };
+  const draftKeyRef = { current: "session-a" };
+  const run = (msg) => runBuiltinCommand(msg, {
+    document: { activeElement: null },
+    textarea: null,
+    attachedImages: [],
+    attachedImagesRef: { current: [] },
+    onBuiltinCommand: () => new Promise((done) => { resolve = done; }),
+    valueRef: { current: "/reload" },
+    focusRef: { current: null },
+    pendingRef,
+    setPending: () => {},
+    canClearBuiltinCommandInput,
+    clearInput: () => {},
+    draftKeyRef,
+    holdStoredDraft: (key) => {
+      holds.push(key);
+      return () => holds.push(`released ${key}`);
+    },
+  });
+
+  const first = run("/reload");
+  assert.deepEqual(holds, ["session-a"]);
+  assert.equal(await run("/reload"), true);
+  assert.deepEqual(holds, ["session-a"], "a second press takes no second hold");
+  resolve({ handled: true });
+  assert.equal(await first, true);
+  assert.deepEqual(holds, ["session-a", "released session-a"]);
+});
+
 test("keeps only read-only built-ins available while a run is active", () => {
   assert.equal(canRunBuiltinSlashCommandWhileStreaming("/copy"), true);
   assert.equal(canRunBuiltinSlashCommandWhileStreaming("/session"), true);
