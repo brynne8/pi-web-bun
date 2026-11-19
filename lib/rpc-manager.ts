@@ -67,8 +67,10 @@ import { isBgTasksEnabled } from "./bg-tasks-settings";
 import { createBgTaskNotifier, hasLiveBgTasks, killBgTasksForSession } from "./bash-bg-tasks";
 import { resolveShellTools } from "./powershell-settings";
 import { withCodemodeDefault } from "./codemode-settings";
+import { withShellDefault } from "./shell-settings";
 import { CHAT_ONLY_RESOURCE_LOADER_OPTIONS, contextFilesSystemPrompt } from "./chat-only";
 import { createExactSystemPromptExtension } from "./exact-system-prompt";
+import { createPlatformInfoExtension } from "./platform-info";
 import { computeForcedSystemPrompt } from "./effective-system-prompt";
 import { createPiWebBuiltinExtensions, createSubagentCodemodeExtension, createSubagentMcpExtensions } from "./builtin-extensions";
 import type { McpHost } from "./mcp-host";
@@ -3808,9 +3810,9 @@ export async function startRpcSession(
     // Trusted only by the folder's decision, as `syncProjectTrust()` reads it: created trusted
     // by default, a session that resolves no trust on load (a subagent that loads no
     // resources, Chat only) read the project settings of a folder never trusted.
-    const settingsManager = withCodemodeDefault(SettingsManager.create(sessionCwd, agentDir, {
+    const settingsManager = withShellDefault(withCodemodeDefault(SettingsManager.create(sessionCwd, agentDir, {
       projectTrusted: getProjectTrustStatus(sessionCwd, agentDir).trusted,
-    }));
+    })));
     // Here the allow-list is the point: extensions stay loaded, their tools and what
     // the parent did not have stay out of the registry.
     if (sideChatTools) toolsOption = resolveShellTools(selectedToolNames ?? [], settingsManager.getDefaultTools());
@@ -3899,6 +3901,7 @@ export async function startRpcSession(
                 settings: settingsManager,
                 ...(isBgTasksEnabled() ? { bgTasks: { notify: BG_TASK_NOTIFIER.notify } } : {}),
               }),
+              createPlatformInfoExtension(),
               createBashCommandNormalizeExtension({
                 cwd: sessionCwd,
                 caseInsensitivePaths: process.platform === "win32",

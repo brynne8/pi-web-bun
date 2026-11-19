@@ -126,6 +126,10 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **多余的 `cd` 不会再出现在卡片上。** 指向会话自身目录的 `cd` 会在命令执行前被剥掉，于是模型写 `cd ~/repo && make`，卡片上显示的是 `make`。这个前缀也一并从会话文件和模型自己的历史里消失，而它原本就是从那里被一遍遍抄下去的。进子目录的 `cd` 原样保留。原版照模型写的那样执行，也照那样显示。（[说明](./agents/tools.md#tool-selection-and-built-in-extensions)）
 
+**在 Mac 上，shell 命令跑在 zsh 里。** 会话执行的每条命令——模型的、你用 `!` 敲的、以及 pi 自带的 bash 工具——在 macOS 上都跑在 zsh 里，而不是系统自带的 bash 3.2，于是同一条命令在对话里和在你的终端里行为一致。pi 设置里的 `shellPath`（全局或按项目）仍然由你决定用哪个 shell；Linux 和 Windows 上一切照旧。原版除非某一层设置另有指定，否则都用 `/bin/bash` 执行命令。（[说明](./agents/tools.md#settings--tools)）
+
+**会话跑在哪台机器上，写进提示里。** 每个会话的系统提示都带一个 `<platform>` 段，写明操作系统、架构、内核版本，以及用户终端使用的 shell——在 Mac 上是 `macOS (darwin, arm64)` 和 `zsh (/bin/zsh)`。它随 Pi Web 自带，不需要安装任何扩展；机器答不出的行就直接不写。原版的提示不说明平台，模型只能按它假定的那一个写命令。（[说明](./agents/tools.md#settings--tools)）
+
 **卡片里的路径从项目目录读起。** `edit`、`write` 或 diff 的文件头从会话所在的目录起写文件——模型写的是 `/Users/you/repo/src/x.ts`，卡片上是 `src/x.ts`——那段永远不变的前缀不再占掉卡片的宽度。只有该目录下的路径才会缩短：只是撞了同名前缀的兄弟目录、目录之外的路径，以及展开后列出的参数，都照模型写的样子显示。原版把每个路径原样显示。（[说明](./agents/sessions.md#tool-execution-events-on-the-sse-stream)）
 
 **`powershell` 卡片显示自己的颜色。** 不管有没有终端在看，PowerShell 都会给自己的输出上色，而这张卡片会把那些转义显示成字母——`SQLite[7mError:[0m no such column`——因为开启一次转义的那个字符本身什么都不画。现在是红色和绿色告诉你哪一条测试失败了，而反相视频（`bun test` 打印 `(fail)` 用的就是它）变成一块底色。移动光标或清除整行的转义什么都不显示。基本颜色跟随你选的那套主题。原版把工具的输出显示成纯文本，和终端里的 pi 一样。（[说明](./agents/sessions.md#a-powershell-card-draws-its-outputs-colours-libansi-textts-componentspowershelloutputtsx)）
