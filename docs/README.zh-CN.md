@@ -96,11 +96,11 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 | 技能安装 | `npx skills add …` | `bun x skills add …` |
 | 插件更新检查 | `npm view … version --json` | `bun pm view … version --json` |
 | 测试套件 | Node 运行器（`npm test`） | 两种运行器都跑、都绿：`bun test` 与 `npm test` |
-| 浏览器回归测试 | Playwright Chromium（`npx playwright install --with-deps chromium`） | 用 Playwright 自带的 Apple WebKit：`npm run test:e2e:install` 拉取，CI 装 `--with-deps webkit`；本分支不安装也不启动任何 Chromium 二进制（见 [docs/agents/tests.md](./agents/tests.md#e2e-playwright)） |
+| 浏览器回归测试 | Playwright Chromium（`npx playwright install --with-deps chromium`） | 用 Playwright 自带的 Apple WebKit：`npm run test:e2e:install` 拉取，CI 则把 e2e 整个 job 跑在 Playwright 官方镜像里——匹配版本的 WebKit 和它的 Linux 依赖都在镜像中；本分支不安装也不启动任何 Chromium 二进制（见 [docs/agents/tests.md](./agents/tests.md#e2e-playwright)） |
 | 构建工具链 | Next.js 16（Turbopack；开发状态与构建产物都在 `.next/`） | vinext 跑在 Vite 8/Rolldown 上，由 `vite.config.ts` 与 `next-config.ts` 配置：`bun run dev` 的状态在 `.vinext/`，`bun run build` 输出到 `dist/`，`bun run start` 提供 `dist/` |
 | 停止服务器 | `next start` 用 `server.close()` 应答 SIGINT/SIGTERM，并等连接结束 | `bun run start` 在 `vinext start` 前面加一个父观察者（`bin/start-supervised.cjs`），后者本身仍然不应答信号：观察者记下信号、转发给服务器，等清理动作跑完后带子进程的状态退出（`lib/server-shutdown.ts`；[说明](./agents/sessions.md#stopping-the-server-libserver-shutdownts)） |
 | 锁文件 | `package-lock.json` | `bun.lock` 已加入忽略列表；`bun-types` 则写进被跟踪的 `package-lock.json`，因为 CI 的 `npm ci` 不接受与它对不上的 `package.json` |
-| CI | Node.js 上跑 `.github/workflows/ci.yml` | 同一个 `ci.yml`，只把它要装的浏览器换成 `--with-deps webkit`，并把推送本分支 `dev` 分支加进触发条件——本分支不加 Bun 的 job，所以上面那些 Bun 检查在本地跑 |
+| CI | Node.js 上跑 `.github/workflows/ci.yml` | 同一个 `ci.yml`，只把 e2e 那个 job 挪进 Playwright 官方镜像——版本号从锁文件读——不再在 runner 上装浏览器，并把推送本分支 `dev` 分支加进触发条件——本分支不加 Bun 的 job，所以上面那些 Bun 检查在本地跑 |
 
 **终端。** node-pty 的原生插件在 Bun 下无法维持 pty master fd 的生命周期：fd 在 `spawn()` 之后立即被关闭，子进程的 stdin 直接读到 EOF，交互式 shell 还没来得及打印提示符就退出了（[agegr/pi-web#745](https://github.com/agegr/pi-web/issues/745)，另见 [oven-sh/bun#7362](https://github.com/oven-sh/bun/issues/7362)）。Bun 原生的 PTY 支持（`Bun.spawn({ terminal })`）会为进程的整个生命周期持有该 fd，因此 `lib/terminal-bun-pty.ts` 实现了 `lib/terminal-manager.ts` 所需要的那一小部分 node-pty 兼容接口——spawn、`onData`、`onExit`、`write`、`resize`、`kill` 和 `pid`——Node.js 和 Windows 则继续使用 node-pty。没有轮询读取器，没有 fd 生命周期补丁，也没有额外依赖。Alpine 下的 Bun 也不会加载未使用的 node-pty 插件；原版的普通 `require()` 可能被 vinext 提升为提前导入。（[加载说明](./agents/client-platform.md#terminal-native-module-loading-libterminal-managerts)）
 

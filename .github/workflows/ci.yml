@@ -27,9 +27,34 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm test
 
+  playwright-version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: package-lock.json
+      - id: get-version
+        run: |
+          VERSION=$(node -p "require('./package-lock.json').packages['node_modules/playwright'].version")
+          if [ -z "$VERSION" ]; then
+            echo "::error::playwright is not in package-lock.json" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
   e2e:
+    needs: playwright-version
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The image carries the WebKit build and the Linux libraries it needs, so the
+    # runner installs neither. The -noble suffix is published from Playwright 1.44
+    # on; an older pin needs -jammy.
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright-version.outputs.version }}-noble
+      options: --ipc=host
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,7 +62,6 @@ jobs:
           node-version: 22.19.0
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps webkit
       - run: npm run build
       - run: npm run test:e2e
         env:
