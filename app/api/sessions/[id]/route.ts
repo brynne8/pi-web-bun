@@ -7,7 +7,7 @@ import {
   resolveSessionIdByPath,
   invalidateSessionListCache,
   invalidateSessionManagerCache,
-  buildSessionContext,
+  buildSessionManagerContext,
 } from "@/lib/session-reader";
 import { getRpcSession, renameRpcSession, subagentDisplayStatus } from "@/lib/rpc-manager";
 import { projectTreeForResponse, toSummaryTree } from "@/lib/project-tree";
@@ -74,7 +74,7 @@ export async function GET(
       leafId: leafId,
       models: liveRpc?.inner.modelRuntime,
     });
-    const context = attachTranscriptNotices(buildSessionContext(entries as never, leafId, {
+    const context = attachTranscriptNotices(buildSessionManagerContext(sm, leafId, {
       deferThinking,
       deferToolResultImages,
       tail,

@@ -73,6 +73,26 @@ export function getTurnAnchors(
   options: { openTail?: boolean } = {},
 ): boolean[] {
   const anchors = messages.map(isMessageGroupAnchor);
+  visitInferredTurnAnchors(messages, anchors, options.openTail === true, (anchor) => { anchors[anchor] = true; });
+  return anchors;
+}
+
+/** The number of closed turn anchors at each possible end of the transcript. */
+export function getClosedTurnCounts(messages: readonly TurnAnchorMessage[]): number[] {
+  const anchors = messages.map(isMessageGroupAnchor);
+  const counts = anchors.map((anchor) => Number(anchor));
+  // An inferred anchor is only visible to a reader whose page reaches the answer.
+  visitInferredTurnAnchors(messages, anchors, false, (_anchor, answer) => { counts[answer] += 1; });
+  for (let i = 1; i < counts.length; i++) counts[i] += counts[i - 1];
+  return counts;
+}
+
+function visitInferredTurnAnchors(
+  messages: readonly TurnAnchorMessage[],
+  anchors: readonly boolean[],
+  openTail: boolean,
+  visit: (anchor: number, answer: number) => void,
+): void {
   for (let start = 0; start < messages.length;) {
     if (isConversationMessage(messages[start])) {
       start += 1;
@@ -81,7 +101,7 @@ export function getTurnAnchors(
     let end = start + 1;
     while (end < messages.length && !isConversationMessage(messages[end])) end += 1;
     const next = messages[end];
-    const answered = next ? next.role === "assistant" : options.openTail === true;
+    const answered = next ? next.role === "assistant" : openTail;
     if (answered && endsRun(messages[start - 1]) && !anchors.slice(start, end).includes(true)) {
       let anchor = -1;
       for (let idx = end - 1; idx >= start; idx--) {
@@ -96,11 +116,10 @@ export function getTurnAnchors(
           break;
         }
       }
-      if (anchor !== -1) anchors[anchor] = true;
+      if (anchor !== -1) visit(anchor, end);
     }
     start = end;
   }
-  return anchors;
 }
 
 /**

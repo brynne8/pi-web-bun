@@ -287,6 +287,8 @@ test("live detail and state routes work without a persisted JSONL file", async (
   const sessionManager = {
     getHeader: () => ({ type: "session", id, cwd: "/tmp", timestamp }),
     getEntries: () => [entry],
+    getEntry: (id) => (id === entry.id ? entry : undefined),
+    getEntryCount: () => 1,
     getLeafId: () => entry.id,
     getTree: () => [],
     getSessionName: () => undefined,
@@ -343,6 +345,8 @@ test("session detail returns a gzip-compressed response when the client accepts 
   const sessionManager = {
     getHeader: () => ({ type: "session", id, cwd: "/tmp", timestamp }),
     getEntries: () => [entry],
+    getEntry: (id) => (id === entry.id ? entry : undefined),
+    getEntryCount: () => 1,
     getLeafId: () => entry.id,
     getTree: () => [],
     getSessionName: () => undefined,

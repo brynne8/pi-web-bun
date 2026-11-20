@@ -8,7 +8,7 @@ import { isAbsolute, join, normalize as normalizePath, relative, resolve as reso
 import type { AgentMessage, ImageContent, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
 import { normalizeToolCalls } from "./normalize";
 import { withoutMessageSignatures } from "./message-signatures";
-import { getThinkingPreview, getTurnAnchors, type TurnAnchorMessage } from "./message-display";
+import { getClosedTurnCounts, getThinkingPreview, getTurnAnchors, type TurnAnchorMessage } from "./message-display";
 import { projectIdentityKey } from "./project-identity";
 import { sessionPathKey } from "./session-path";
 import { skillExpansionToCommand } from "./slash-display";
@@ -772,29 +772,45 @@ export function getLatestModelChange(entries: SessionEntry[]): SessionContext["m
   return null;
 }
 
+type EntryLookup = (id: string) => SessionEntry | undefined;
+
+function indexEntries(entries: SessionEntry[]): EntryLookup {
+  const byId = new Map<string, SessionEntry>();
+  for (const entry of entries) byId.set(entry.id, entry);
+  return (id) => byId.get(id);
+}
+
 export function getSessionSettings(entries: SessionEntry[], leafId?: string | null): Pick<SessionContext, "thinkingLevel" | "model"> {
-  if (leafId === null) return { thinkingLevel: "off", model: null };
-  const branch = sliceActiveBranch(entries, leafId ?? null, entries.length);
+  const lookup = indexEntries(entries);
+  const leaf = leafId === null ? undefined : leafId ? lookup(leafId) : entries.at(-1);
+  return settingsThrough(leaf, lookup, entries.length);
+}
+
+function responseModelOf(message: { provider?: unknown; model?: unknown }): ContextSettings["model"] {
+  return typeof message.provider === "string" && typeof message.model === "string"
+    ? { provider: message.provider, modelId: message.model }
+    : null;
+}
+
+function settingsThrough(leaf: SessionEntry | undefined, lookup: EntryLookup, maxEntries: number): ContextSettings {
   let thinkingLevel: string | undefined;
+  let modelChange: SessionContext["model"] | undefined;
   let responseModel: SessionContext["model"] | undefined;
 
-  for (let i = branch.length - 1; i >= 0 && (thinkingLevel === undefined || responseModel === undefined); i--) {
-    const entry = branch[i];
+  for (let entry = leaf; entry && maxEntries-- > 0; entry = entry.parentId ? lookup(entry.parentId) : undefined) {
     if (thinkingLevel === undefined && entry.type === "thinking_level_change") {
       thinkingLevel = entry.thinkingLevel;
     }
     if (responseModel === undefined && entry.type === "message" && entry.message.role === "assistant") {
-      const message = entry.message as { provider?: unknown; model?: unknown };
-      if (typeof message.provider === "string" && typeof message.model === "string") {
-        responseModel = { provider: message.provider, modelId: message.model };
-      }
+      responseModel = responseModelOf(entry.message) ?? undefined;
     }
+    if (!modelChange && entry.type === "model_change") {
+      modelChange = { provider: entry.provider, modelId: entry.modelId };
+    }
+    if (thinkingLevel !== undefined && modelChange) break;
   }
 
-  return {
-    thinkingLevel: thinkingLevel ?? "off",
-    model: getLatestModelChange(branch) ?? responseModel ?? null,
-  };
+  return { thinkingLevel: thinkingLevel ?? "off", model: modelChange ?? responseModel ?? null };
 }
 
 export interface BuildSessionContextOptions {
@@ -811,14 +827,55 @@ export function buildSessionContext(
   leafId?: string | null,
   options: BuildSessionContextOptions = {},
 ): SessionContext {
+  const lookup = indexEntries(entries);
+  const leaf = leafId === null ? undefined : leafId ? lookup(leafId) : entries.at(-1);
+  return buildContextFromLookup(leaf, lookup, entries.length, options);
+}
+
+type ContextSettings = Pick<SessionContext, "thinkingLevel" | "model">;
+
+const MAX_INDEXED_BRANCH_ENTRIES = 50_000;
+const branchIndexes = new WeakMap<SessionManager, {
+  tip: SessionEntry;
+  entryCount: number;
+  byId: ReturnType<typeof indexBranchContext>;
+}>();
+
+export function buildSessionManagerContext(
+  manager: SessionManager,
+  leafId: string | null,
+  options: BuildSessionContextOptions,
+  branchLeafId = leafId,
+): SessionContext {
+  const lookup: EntryLookup = (id) => manager.getEntry(id) as SessionEntry | undefined;
+  const leaf = leafId === null ? undefined : lookup(leafId);
+  const tip = branchLeafId === null ? undefined : lookup(branchLeafId);
+  const entryCount = manager.getEntryCount();
+  let index = tip ? branchIndexes.get(manager) : undefined;
+  if (tip && entryCount <= MAX_INDEXED_BRANCH_ENTRIES && options.tail && options.tail < entryCount && leaf) {
+    if (index?.tip !== tip || index.entryCount !== entryCount) {
+      index = { tip, entryCount, byId: indexBranchContext(tip, lookup, entryCount) };
+      branchIndexes.set(manager, index);
+    }
+  } else {
+    index = undefined;
+    if (entryCount > MAX_INDEXED_BRANCH_ENTRIES) branchIndexes.delete(manager);
+  }
+  return buildContextFromLookup(leaf, lookup, entryCount, options, index?.byId);
+}
+
+function buildContextFromLookup(
+  leaf: SessionEntry | undefined,
+  lookup: EntryLookup,
+  entryCount: number,
+  options: BuildSessionContextOptions,
+  index?: ReadonlyMap<string, { turns: number; settings: ContextSettings }>,
+): SessionContext {
   const { tail, excludeLeaf } = options;
   // History pages retain the original branch order, including compacted messages.
-  // SDK context filtering can drop a page's messages when firstKeptEntryId is outside it.
-  const sliced = leafId === null ? [] : sliceActiveBranch(
-    entries, leafId ?? null, tail && tail > 0 ? tail : entries.length, excludeLeaf,
-  );
+  const sliced = sliceBranch(leaf, lookup, tail && tail > 0 ? tail : entryCount, excludeLeaf);
   const hasMore = Boolean(tail && tail > 0 && sliced[0]?.parentId);
-  const turnsBefore = hasMore ? countTurnsBefore(entries, sliced) : 0;
+  const turnsBefore = hasMore ? countTurnsBefore(lookup, sliced, entryCount, index?.get(sliced[sliced.length - 1].id)?.turns) : 0;
 
   // Convert messages and their IDs together to keep fork/navigation targets aligned.
   const messages: AgentMessage[] = [];
@@ -837,7 +894,7 @@ export function buildSessionContext(
     oldestEntryId: sliced[0]?.id ?? null,
     hasMore,
     turnsBefore,
-    ...getSessionSettings(entries, leafId),
+    ...((leaf && index?.get(leaf.id)?.settings) ?? settingsThrough(leaf, lookup, entryCount)),
   };
 }
 
@@ -869,18 +926,51 @@ function turnAnchorShape(entry: SessionEntry): TurnAnchorMessage | null {
  * the chat has no reply above its first message, so it shows that turn as the
  * page's leading segment, like a turn whose anchor is on the page above.
  */
-function countTurnsBefore(entries: SessionEntry[], page: SessionEntry[]): number {
-  const byId = new Map<string, SessionEntry>();
-  for (const e of entries) byId.set(e.id, e);
+function indexBranchContext(tip: SessionEntry, lookup: EntryLookup, entryCount: number) {
+  const branch = sliceBranch(tip, lookup, entryCount);
+  const shapes: TurnAnchorMessage[] = [];
+  const shapeEnds = branch.map((entry) => {
+    const shape = turnAnchorShape(entry);
+    if (shape) shapes.push(shape);
+    return shapes.length - 1;
+  });
+  const totals = getClosedTurnCounts(shapes);
+  const byId = new Map<string, { turns: number; settings: ContextSettings }>();
+  let settings: ContextSettings = { thinkingLevel: "off", model: null };
+  let hasModelChange = false;
+  branch.forEach((entry, i) => {
+    if (entry.type === "thinking_level_change" && entry.thinkingLevel !== undefined) {
+      settings = { ...settings, thinkingLevel: entry.thinkingLevel };
+    } else if (entry.type === "model_change") {
+      hasModelChange = true;
+      settings = { ...settings, model: { provider: entry.provider, modelId: entry.modelId } };
+    } else if (!hasModelChange && entry.type === "message" && entry.message.role === "assistant") {
+      const model = responseModelOf(entry.message);
+      if (model && (settings.model?.provider !== model.provider || settings.model.modelId !== model.modelId)) {
+        settings = { ...settings, model };
+      }
+    }
+    byId.set(entry.id, { turns: totals[shapeEnds[i]] ?? 0, settings });
+  });
+  return byId;
+}
+
+function countTurnsBefore(
+  lookup: EntryLookup,
+  page: SessionEntry[],
+  maxEntries: number,
+  closed?: number,
+): number {
+  const shown = page.map(turnAnchorShape).filter((shape): shape is TurnAnchorMessage => shape !== null);
+  if (closed !== undefined) return closed - getTurnAnchors(shown).filter(Boolean).length;
   const above: TurnAnchorMessage[] = [];
-  let current = page[0]?.parentId ? byId.get(page[0].parentId) : undefined;
-  while (current) {
+  let current = page[0]?.parentId ? lookup(page[0].parentId) : undefined;
+  while (current && maxEntries-- > 0) {
     const shape = turnAnchorShape(current);
     if (shape) above.push(shape);
-    current = current.parentId ? byId.get(current.parentId) : undefined;
+    current = current.parentId ? lookup(current.parentId) : undefined;
   }
   above.reverse();
-  const shown = page.map(turnAnchorShape).filter((shape): shape is TurnAnchorMessage => shape !== null);
   const onBranch = getTurnAnchors([...above, ...shown]);
   const onPage = getTurnAnchors(shown);
   let turns = 0;
@@ -927,13 +1017,18 @@ export function sliceActiveBranch(
   excludeLeaf = false,
 ): SessionEntry[] {
   if (tail <= 0) return entries;
-  const byId = new Map<string, SessionEntry>();
-  for (const e of entries) byId.set(e.id, e);
+  const lookup = indexEntries(entries);
+  return sliceBranch(leafId ? lookup(leafId) : entries.at(-1), lookup, tail, excludeLeaf);
+}
 
-  let leaf = leafId ? byId.get(leafId) : entries[entries.length - 1];
-  // Pagination: `before` is the oldest entry already loaded, so the next page
-  // must start at its parent to avoid duplicating `before` when prepended.
-  if (excludeLeaf) leaf = leaf?.parentId ? byId.get(leaf.parentId) : undefined;
+function sliceBranch(
+  leaf: SessionEntry | undefined,
+  lookup: EntryLookup,
+  tail: number,
+  excludeLeaf = false,
+): SessionEntry[] {
+  // `before` names the oldest entry already loaded; start at its parent.
+  if (excludeLeaf) leaf = leaf?.parentId ? lookup(leaf.parentId) : undefined;
   if (!leaf) return [];
   const chain: SessionEntry[] = [];
   let current: SessionEntry | undefined = leaf;
@@ -943,7 +1038,7 @@ export function sliceActiveBranch(
     chain.push(current);
     if (countsTowardTail(current)) visible++;
     if (visible >= tail || chain.length >= rawCap) break;
-    current = current.parentId ? byId.get(current.parentId) : undefined;
+    current = current.parentId ? lookup(current.parentId) : undefined;
   }
   chain.reverse();
   return chain;
