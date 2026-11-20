@@ -61,8 +61,6 @@ type ProjectCommandBashOperationsOptions = {
   commandPrefix?: string;
   /** When set, foreground commands without an explicit timeout hand off to background after this long. */
   autoBackgroundMs?: number;
-  /** When set, a foreground command that prints more lines than this hands off to background instead. */
-  maxOutputLines?: number;
   bgTask?: {
     sessionId: string;
     notify: BgTaskOptions["notify"];
@@ -120,7 +118,6 @@ export function createProjectCommandBashOperations(
     platform = process.platform,
     commandPrefix,
     autoBackgroundMs,
-    maxOutputLines,
     bgTask,
   } = options;
 
@@ -151,12 +148,9 @@ export function createProjectCommandBashOperations(
       // With a handoff armed, capture everything the model has not seen yet so the
       // handoff log keeps it. An explicit timeout does not disable the handoff; it
       // stays the process's own hard limit.
-      const autoBgArmed = (autoBackgroundMs !== undefined || maxOutputLines !== undefined) && bgTask !== undefined;
+      const autoBgArmed = autoBackgroundMs !== undefined && bgTask !== undefined;
       const buffer = autoBgArmed ? new PreHandoffBuffer() : undefined;
       let bgStream: ReturnType<typeof createWriteStream> | undefined;
-      // Set once the command's own promise is wired, so the output path can hand off.
-      let handOffOnOutput: (() => void) | undefined;
-      let outputLines = 0;
       const startedAtMs = Date.now();
       // Pi rejects any other timeout before it starts the command, so the
       // sanitized value goes downstream too: a model that means "unlimited" by
@@ -178,10 +172,6 @@ export function createProjectCommandBashOperations(
             bgStream.write(data);
             if (bgController) noteBgTaskOutput(bgController);
           } else buffer?.push(data);
-          if (maxOutputLines !== undefined && !handedOff) {
-            outputLines += data.toString("utf8").split("\n").length - 1;
-            if (outputLines > maxOutputLines) handOffOnOutput?.();
-          }
         },
       });
       if (!execSignal && timeoutMs === undefined && !autoBgArmed) return execution;
@@ -215,7 +205,7 @@ export function createProjectCommandBashOperations(
           releaseAfter(timeoutMs + abortSettleGraceMs, new Error(`timeout:${timeout}`));
         }
         if (autoBgArmed && buffer && bgTask) {
-          const handOff = (reason: "time" | "lines") => {
+          const handOff = () => {
             if (handedOff) return;
             handedOff = true;
             released = true;
@@ -223,7 +213,7 @@ export function createProjectCommandBashOperations(
             const stream = createWriteStream(logPath);
             bgStream = stream;
             if (bgController) {
-              promoteBgTask(bgController, { command: shownCommand, logPath, startedAtMs, trigger: reason });
+              promoteBgTask(bgController, { command: shownCommand, logPath, startedAtMs, trigger: "time" });
             }
             for (const chunk of buffer.dump()) stream.write(chunk);
             execution.then(
@@ -240,14 +230,10 @@ export function createProjectCommandBashOperations(
               },
             );
             release();
-            reject(new Error(`bg-task-backgrounded:${reason}:${logPath}`));
+            reject(new Error(`bg-task-backgrounded:${logPath}`));
           };
-          handOffOnOutput = () => handOff("lines");
-          // Output that arrived before this block wired the trigger up has already
-          // crossed the limit; checking here is what keeps that window from losing it.
-          if (maxOutputLines !== undefined && outputLines > maxOutputLines) handOffOnOutput();
           if (autoBackgroundMs !== undefined) {
-            const timer = setTimeout(() => handOff("time"), autoBackgroundMs);
+            const timer = setTimeout(() => handOff(), autoBackgroundMs);
             (timer as { unref?: () => void }).unref?.();
             timers.push(timer);
           }
@@ -329,17 +315,11 @@ export function bashToolPromptBlock(): string {
   return [
     "<bash_tool>",
     "- NEVER pipe a command through `| tail` or redirect its output with `>` or `>>`. Both end the output early, so nothing is saved to a file. Run the command plain.",
-    "- To see less, bound the command: `git log --oneline -20`, `gh run list -L 15`, `find . -maxdepth 2`, or pass `max_output_lines` when it has no such flag.",
+    "- To see less, bound the command: `git log --oneline -20`, `gh run list -L 15`, `find . -maxdepth 2`.",
     "- When you can already expect a command to run for a long time (dev server, watcher, long build, large download), DO NOT force a timeout: set run_in_background=true.",
     `- A foreground command auto-backgrounds after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000} seconds; treat that as a handoff, not a failure.`,
     "</bash_tool>",
   ].join("\n");
-}
-
-/** The line budget actually armed: the model's own value, never below 100 lines. */
-function effectiveMaxOutputLines(value: number | undefined): number | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 1) return undefined;
-  return Math.max(Math.floor(value), 100);
 }
 
 export function createProjectCommandBashExtension(options: {
@@ -383,7 +363,6 @@ export function createProjectCommandBashExtension(options: {
                 command: Type.String({ description: "Shell command to execute. Never pipe it through `| tail`; never redirect with `>` or `>>`." }),
                 timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (optional, no default timeout)" })),
                 run_in_background: Type.Optional(Type.Boolean({ description: "Run this command in the background immediately; you will be notified when it completes." })),
-                max_output_lines: Type.Optional(Type.Number({ description: "Line count before the command goes to the background; a lower value counts as 100. Always set it unless you already know the output is short." })),
               }),
             }
           : {}),
@@ -393,18 +372,16 @@ export function createProjectCommandBashExtension(options: {
         // `defaultTools` leaves out (#1235).
         defaultActive: false,
         async execute(toolCallId, params, signal, onUpdate, context) {
-          const input = params as { command: string; timeout?: number; run_in_background?: boolean; max_output_lines?: number };
+          const input = params as { command: string; timeout?: number; run_in_background?: boolean };
           if (bg && input.run_in_background === true) {
             return startBackgroundCommand(options, input, context);
           }
-          const maxOutputLines = effectiveMaxOutputLines(input.max_output_lines);
           const executionDefinition = createBashToolDefinition(options.cwd, {
             commandPrefix: options.settings.getShellCommandPrefix(),
             operations: createProjectCommandBashOperations({
               shellPath: options.settings.getShellPath(),
               commandPrefix: options.settings.getShellCommandPrefix(),
               autoBackgroundMs: bg ? FOREGROUND_AUTO_BACKGROUND_MS : undefined,
-              maxOutputLines,
               bgTask: bg && context?.sessionManager
                 ? { sessionId: context.sessionManager.getSessionId(), notify: bg.notify }
                 : undefined,
@@ -414,12 +391,9 @@ export function createProjectCommandBashExtension(options: {
             return await executionDefinition.execute(toolCallId, params, signal, onUpdate, context);
           } catch (error) {
             if (error instanceof Error && error.message.startsWith("bg-task-backgrounded:")) {
-              const [, reason, logPath] = error.message.split(":");
-              const why = reason === "lines"
-                ? `after printing more than ${maxOutputLines} lines`
-                : `after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000}s`;
+              const logPath = error.message.slice("bg-task-backgrounded:".length);
               return {
-                content: [{ type: "text" as const, text: `Command auto-backgrounded ${why}.\nLog file: ${logPath}\nThe result arrives on its own when the command finishes — do not poll, sleep, check the log, or run any other command for it. Do other work that does not need it if you have any; if you have none, stop — no output, no commands — until it arrives. Stopping does not cancel the task.` }],
+                content: [{ type: "text" as const, text: `Command auto-backgrounded after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000}s.\nLog file: ${logPath}\nThe result arrives on its own when the command finishes — do not poll, sleep, check the log, or run any other command for it. Do other work that does not need it if you have any; if you have none, stop — no output, no commands — until it arrives. Stopping does not cancel the task.` }],
                 details: undefined,
               };
             }

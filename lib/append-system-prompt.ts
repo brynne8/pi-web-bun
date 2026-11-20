@@ -6,12 +6,11 @@ const APPEND_SYSTEM_FILE = "APPEND_SYSTEM.md";
 const PI_CONFIG_DIR = ".pi";
 
 /**
- * The `APPEND_SYSTEM.md` a session's loader discovers, as paths the loader reads itself: the
- * project file when its folder is trusted, else the global one, at most one of them — the SDK's
- * own `discoverAppendSystemPromptFile()` precedence (`lib/project-trust.ts` keeps the matching
- * `.pi` spelling). Only existing paths are returned, since the loader sends a path it cannot
- * read as literal prompt text. Subagents pass their own `appendSystemPrompt`, which switches
- * that discovery off, so they call this to stay level with the main session.
+ * The `APPEND_SYSTEM.md` paths a session's loader discovers itself: the project file when its
+ * folder is trusted, else the global one, at most one — the precedence of the SDK's own
+ * `discoverAppendSystemPromptFile()` (`lib/project-trust.ts` keeps the `.pi` spelling). Only
+ * existing paths are returned: the loader sends a path it cannot read as literal prompt text.
+ * Subagents switch that discovery off with their own `appendSystemPrompt`, so they call this too.
  */
 export function appendSystemPromptSources(
   cwd: string,

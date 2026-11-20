@@ -10,7 +10,7 @@ export interface BgTaskSummary {
   finishedAtMs: number | null;
   exitCode: number | null;
   error: string | null;
-  trigger: "background" | "time" | "lines";
+  trigger: "background" | "time";
   killedByUser: boolean;
 }
 

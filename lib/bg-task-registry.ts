@@ -11,7 +11,7 @@ import type { BgTaskSummary } from "./bg-task-types";
 const BG_TASK_REGISTRY: symbol = Symbol.for("pi-web:bg-tasks");
 
 type BgTaskPhase = "foreground" | "background";
-type BgTaskTrigger = "background" | "time" | "lines";
+type BgTaskTrigger = "background" | "time";
 
 interface BgTaskEntry {
   id: string;
@@ -118,7 +118,7 @@ export function promoteBgTask(controller: AbortController, info: {
   command: string;
   logPath: string;
   startedAtMs: number;
-  trigger: "time" | "lines";
+  trigger: "time";
 }): void {
   const entry = findByController(controller);
   if (!entry) return;
