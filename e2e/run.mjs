@@ -23,6 +23,7 @@ import { checkModelContext } from "./model-context.mjs";
 import { checkModelSelector } from "./model-selector.mjs";
 import { checkFilesPlacement, showSidebarSessions } from "./sidebar.mjs";
 import { checkSessionNavigation } from "./session-navigation.mjs";
+import { checkFoldingRowsLeavesTheViewStill } from "./offscreen-rows.mjs";
 import { checkProjectNavigation, createProjectNavigationFixtures } from "./project-navigation.mjs";
 import { checkDirectoryPicker, createDirectoryPickerFixtures } from "./directory-picker.mjs";
 import { checkMissingCwdFork, createMissingCwdForkFixtures } from "./missing-cwd-fork.mjs";
@@ -391,6 +392,10 @@ try {
     // The sidebar also displays the first message as the session title.
     assert.deepEqual(rendered.filter((value) => value !== text(0)),
       Array.from({ length: 5000 - oldest }, (_, i) => text(oldest + i)), "Missing, reordered, or duplicate chat messages");
+    // Rows folded away for layout must not move the screen: a placeholder that is not
+    // the room the row takes in the flow makes the transcript jump while the reader
+    // scrolls (hooks/useSkipOffscreenRows.ts).
+    await checkFoldingRowsLeavesTheViewStill(page);
     if (viewport.width > 600) {
       // The minimap lists the turns again a moment after a page lands (its
       // measure is throttled), while `turnsBefore` changes with the page: read

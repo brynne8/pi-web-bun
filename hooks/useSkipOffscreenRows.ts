@@ -15,13 +15,6 @@ function scrollParent(element: HTMLElement): HTMLElement | null {
   return null;
 }
 
-function contentBlockSize(element: HTMLElement): number {
-  const style = getComputedStyle(element);
-  const edges = ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth"] as const;
-  const size = edges.reduce((height, edge) => height - (parseFloat(style[edge]) || 0), element.getBoundingClientRect().height);
-  return Math.max(0, size);
-}
-
 /**
  * Lets the browser skip the layout of transcript rows far outside the scroll
  * container (`content-visibility: auto`), so work that scales with the laid-out
@@ -29,10 +22,12 @@ function contentBlockSize(element: HTMLElement): number {
  * selection sync on every mouse press took 42 ms with 300 turns loaded, 1.5 ms
  * with the rows off screen skipped.
  *
- * A row is skipped only once it has been laid out, at the size it was laid out
- * at, so the scroll height and every row's offset stay exact. Near the screen a
- * row is plain again: no containment clips its focus rings or shadows there.
- * The returned callback ref goes on the element whose children are the rows.
+ * A skipped row is held to its own box height, which `.chat-rows` being a flex column
+ * makes equal to the room the row takes: each row is its own formatting context and its
+ * own margins are its own, so a row is one size lying plain and another skipped, and
+ * folding one moves neither the view nor the scrollbar. Near the screen a row is plain
+ * again: no containment clips its focus rings or shadows there. The returned callback
+ * ref goes on the element whose children are the rows.
  */
 export function useSkipOffscreenRows(rowsRef?: RefObject<HTMLElement | null>) {
   return useCallback((rows: HTMLElement | null) => {
@@ -51,32 +46,63 @@ export function useSkipOffscreenRows(rowsRef?: RefObject<HTMLElement | null>) {
       row.style.removeProperty("contain");
       skipped.delete(row);
     };
+    // A size read at one moment can be wrong at the next: the width changed, and with
+    // it how the row's text wraps. Whatever the cause, rows outside the viewport moving
+    // must not move the row the reader is on, so it is put back. A row crossing the band
+    // is never inside the viewport, so the anchor is never one of the rows being changed.
+    const holdWhile = (change: () => void) => {
+      const top = scroller.getBoundingClientRect().top;
+      const anchor = Array.from(rows.children).find((row) => (
+        row instanceof HTMLElement && row.getBoundingClientRect().bottom > top
+      ));
+      const before = anchor?.getBoundingClientRect().top ?? 0;
+      change();
+      if (!(anchor instanceof HTMLElement) || !anchor.isConnected) return;
+      const drift = anchor.getBoundingClientRect().top - before;
+      if (Math.abs(drift) >= 0.5) scroller.scrollTop += drift;
+    };
+
+    // A row outside the viewport whose height is wrong moves the rows under it, so the
+    // size is read in one pass and written in the next: reading a box after writing a
+    // style would cost a layout per row instead of one for the batch.
     const skip = (targets: HTMLElement[]) => {
-      // Layout containment keeps a child's margin inside the row, as skipping
-      // does, so the size read is the size the row keeps while skipped. Rows
-      // sit where they did either way: the margin was between them before.
-      for (const row of targets) row.style.contain = "layout";
-      const sizes = targets.map(contentBlockSize);
-      targets.forEach((row, index) => {
-        row.style.containIntrinsicBlockSize = `auto ${sizes[index]}px`;
+      const sized: { row: HTMLElement; size: number }[] = [];
+      for (const row of targets) {
+        // The last row has nothing under it to keep in place and is the newest content,
+        // where the reader is, so it is never folded.
+        if (!row.nextElementSibling) continue;
+        const style = getComputedStyle(row);
+        const around = ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth"] as const;
+        const outside = around.reduce((sum, edge) => sum + (parseFloat(style[edge]) || 0), 0);
+        // `contain-intrinsic-block-size` sizes the content box, so what the row adds
+        // around its content comes off the box. Left in, a padded row grows by its own
+        // padding when folded (the load-earlier line, 21 px over by its 10.5 px above
+        // and below).
+        const size = Math.max(0, Math.round((row.getBoundingClientRect().height - outside) * 100) / 100);
+        sized.push({ row, size });
+      }
+      for (const { row, size } of sized) {
+        row.style.containIntrinsicBlockSize = `${size}px`;
         row.style.contentVisibility = "auto";
         skipped.add(row);
-      });
+      }
     };
 
     const intersection = new IntersectionObserver((entries) => {
       const far: HTMLElement[] = [];
-      for (const entry of entries) {
-        const row = entry.target as HTMLElement;
-        if (entry.isIntersecting) {
-          near.add(row);
-          if (skipped.has(row)) unskip(row);
-        } else {
-          near.delete(row);
-          if (!skipped.has(row) && row.parentElement === rows) far.push(row);
+      holdWhile(() => {
+        for (const entry of entries) {
+          const row = entry.target as HTMLElement;
+          if (entry.isIntersecting) {
+            near.add(row);
+            if (skipped.has(row)) unskip(row);
+          } else {
+            near.delete(row);
+            if (!skipped.has(row) && row.parentElement === rows) far.push(row);
+          }
         }
-      }
-      if (far.length > 0) skip(far);
+        if (far.length > 0) skip(far);
+      });
     }, { root: scroller, rootMargin: NEAR_MARGIN });
 
     const observe = (node: Node) => {
@@ -110,8 +136,10 @@ export function useSkipOffscreenRows(rowsRef?: RefObject<HTMLElement | null>) {
         settle = null;
         const stale = Array.from(skipped);
         if (stale.length === 0) return;
-        stale.forEach(unskip);
-        skip(stale.filter((row) => row.parentElement === rows && !near.has(row)));
+        holdWhile(() => {
+          stale.forEach(unskip);
+          skip(stale.filter((row) => row.parentElement === rows && !near.has(row)));
+        });
       }, RESIZE_SETTLE_MS);
     });
     resize.observe(rows);

@@ -44,6 +44,13 @@ Coverage:
 - A 5,000-message session opens with exactly the last 50 entries and no
   browser errors. The transfer itself is bounded by a route test
   (`app/api/sessions/[id]/detail-route.test.mjs`).
+- Folding rows of that transcript away for layout leaves the reader on the same
+  screen. A placeholder sized to the row's box rather than to the room it took in the
+  flow moves the rows below it, which reads as the transcript jumping up and down
+  while the reader scrolls. The check parks in the middle of the session, rolls the
+  fold boundary over the rows around it and comes back: the same rows must be in
+  front of the reader, in the same order (`e2e/offscreen-rows.mjs`,
+  `hooks/useSkipOffscreenRows.ts`).
 - Desktop and mobile scrolling load two consecutive older pages. Each response
   has the expected IDs, no gaps or duplicates, and the messages appear once in
   the chat. A small session checks pagination through the root.
