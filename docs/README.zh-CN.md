@@ -158,6 +158,8 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **子代理默认在后台跑。** `Agent` 把任务交出去就返回，子代理干完再把报告送回来。写 `run_in_background: false` 就改成在前台等结果，最多等到 `wait_timeout`；profile 也可以把这个前台等待变成自己的默认。`explore` 和 `plan` 出厂就是前台，所以调研结果和计划都在要用它们的那件事之前到手。原版除非调用明确要后台，否则每次委派都在前台等。（[说明](./agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）
 **一份指令，子代理也读。** `APPEND_SYSTEM.md`——`~/.pi/agent/APPEND_SYSTEM.md`，或受信项目里的 `.pi/APPEND_SYSTEM.md`——会追加进主会话的系统提示，也会追加进它委派出去的每一个 subagent 的系统提示，独立 worktree 的那次运行也在内，位置在 profile 自己的提示词之前。项目目录受信时读项目那一份，否则由全局那一份回答。原版只把它追加进主会话：subagent 的提示里只有 pi 的那些段和 profile 的文字，这份文件一个字都不在。（[说明](./agents/subagents.md#instructions-a-child-shares-with-its-parent)）
+**子代理读项目自己的那一份说明。** 项目的上下文文件——`AGENTS.md`，项目写 `CLAUDE.md` 时就是它——会加载进子代理的提示词，而它上面那几层目录的一概不读：全局 agent 目录的那份和每一级祖先的都留在原处。独立 worktree 的那次运行读的是它 checkout 出来的那一份。原版一点上下文文件都不加载进子代理。（[说明](./agents/subagents.md#instructions-a-child-shares-with-its-parent)）
+
 
 
 **调用了工具没有的字段，这次调用会被拦下。** 模型给某个工具传了它的 schema 里没有的参数，这次调用就被停掉，回答里指出它编出来的那个字段，并指向这个工具的定义，由 `/api/tool_schema/<tool>` 提供——正是工具菜单读的那一份，于是模型是去读字段，而不是再猜一遍。只查字段名：已经声明的字段值仍交给 pi 自己的校验，schema 不限定字段的工具照原样调用。原版让多出来的字段原样通过，调用照跑，那个字段什么也不做。（[说明](./agents/tools.md#tool-selection-and-built-in-extensions)）

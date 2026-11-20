@@ -55,6 +55,7 @@ import {
   readSubagentRun,
   readSubagentSessionResources,
   settleOrphanedSubagentStatus,
+  subagentContextFilesOverride,
   subagentExtensionLoaderOptions,
   subagentToolOptions,
   SUBAGENT_CONTROL_TOOL_NAMES,
@@ -3902,7 +3903,10 @@ export async function startRpcSession(
             extensionFactories: subagentExtensionFactories,
             noPromptTemplates: true,
             noThemes: true,
-            noContextFiles: true,
+            // The project's own context files only, as at spawn: the SDK's full list (global
+            // and every ancestor's) is read and then narrowed here.
+            noContextFiles: false,
+            agentsFilesOverride: subagentContextFilesOverride(sessionCwd),
             ...(chatOnly
               ? {
                   systemPrompt: " ",

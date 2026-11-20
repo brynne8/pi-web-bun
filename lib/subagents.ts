@@ -7,6 +7,7 @@ import { parseFrontmatter } from "./frontmatter.ts";
 import { parseNpmSource } from "./npm-source.ts";
 import { writePrivateFileAtomicSync } from "./atomic-file.ts";
 import { isExistingPathWithinRoots } from "./path-security.ts";
+import { samePath } from "./paths.ts";
 import { getProjectTrustStatus } from "./project-trust.ts";
 import { disabledBuiltInSubagents } from "./subagent-settings.ts";
 import { PRESET_READ_ONLY } from "./tool-presets.ts";
@@ -990,6 +991,19 @@ export function scopeSubagentExtensions(names: readonly string[]) {
  * `createSubagentMcpExtensions()`.
  */
 export const SUBAGENT_MCP_EXTENSION_PATHS: readonly string[] = ["builtin:tool-search", "builtin:mcp"];
+
+/**
+ * The context files a child loads: the project's own, and nothing above it. A child turns
+ * `noContextFiles` off and keeps what this returns of the SDK's own list, so pi's candidate file
+ * names stay the SDK's and a project writing only `CLAUDE.md` reads the same for a child as for
+ * its parent session. No trust gate, as the main session has none. See docs/agents/subagents.md.
+ */
+export function subagentContextFilesOverride(cwd: string) {
+  const root = cwd ? resolve(cwd) : "";
+  return (base: { agentsFiles: Array<{ path: string; content: string }> }) => ({
+    agentsFiles: base.agentsFiles.filter((file) => Boolean(root) && samePath(dirname(file.path), root)),
+  });
+}
 
 /** The extension half of a child's resource loader options, shared by spawn and reopen. */
 export function subagentExtensionLoaderOptions(resources: { loadExtensions: boolean; extensions?: readonly string[]; mcp?: boolean }) {

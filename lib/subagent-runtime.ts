@@ -26,6 +26,7 @@ import {
   SUBAGENT_RESULT_TYPE,
   selectSubagentExtensionTools,
   settleOrphanedSubagentStatus,
+  subagentContextFilesOverride,
   subagentExtensionLoaderOptions,
   subagentToolOptions,
   withSubagentExtensionTools,
@@ -786,7 +787,11 @@ export function createSubagentController(
           ...(extensionFactories.length > 0 ? { extensionFactories } : {}),
           noPromptTemplates: true,
           noThemes: true,
-          noContextFiles: true,
+          // Off, with the override below: a child reads the project's own context files and
+          // none of the folders above it, where a session reads the global file and every
+          // ancestor's too.
+          noContextFiles: false,
+          agentsFilesOverride: subagentContextFilesOverride(childCwd),
           ...(chatOnly || promptPlan.exactSystemPrompt !== undefined
             ? {
                 systemPrompt: " ",
