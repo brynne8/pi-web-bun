@@ -544,6 +544,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
   // decide whether the list needs reloading, and no render reads it.
   const sessionListVersionRef = useRef<number | null>(null);
   const sessionLoadIdRef = useRef(0);
+  const initialSummaryPendingRef = useRef(false);
   const [loading, setLoading] = useState(true);
   // The first paint lists summary rows (their time is the file's mtime); the
   // project order is first saved from the full details.
@@ -946,7 +947,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
       // sidebar. Hydrate exact counts, names, and first messages once the
       // selected chat has had a chance to start loading — only when the
       // summary has rows whose details a full scan still owes.
+      initialSummaryPendingRef.current = true;
       void loadSessions(true, false, true).then((needsDetails) => {
+        initialSummaryPendingRef.current = false;
         if (!active || !needsDetails) return;
         scheduleHydration();
       });
@@ -1141,7 +1144,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
         setSubagentsActiveSessionIds((previous) => sameIdsOr(previous, data.subagentsActiveSessionIds ?? []));
         // Pins and archive changed in another window: reload them.
         noteUiRevision(data.sessionUiStateRevision);
-        if (data.sessionListVersion !== sessionListVersionRef.current) {
+        // A poll may beat the first summary, especially on a cold filesystem.
+        // Don't supersede it with a full transcript scan just because our version is unknown.
+        if (!initialSummaryPendingRef.current && data.sessionListVersion !== sessionListVersionRef.current) {
           // Reuse the invalidated cache; forcing a scan would change the version again.
           await loadSessions();
         }
