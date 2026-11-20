@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync } from "fs";
+import fs from "fs";
 import path from "path";
 import { isWindowsAbsolutePath } from "./paths.ts";
 
@@ -9,28 +9,38 @@ import { isWindowsAbsolutePath } from "./paths.ts";
  */
 export function isPathWithinRoots(target: string, roots: Set<string>): boolean {
   for (const root of roots) {
-    const useWindowsRules = isWindowsAbsolutePath(target) || isWindowsAbsolutePath(root);
-    const resolver = useWindowsRules ? path.win32 : path;
-    const sep = useWindowsRules ? "\\" : path.sep;
-    const normalized = resolver.resolve(target);
-    const normalizedRoot = resolver.resolve(root);
-    const comparable = useWindowsRules ? normalized.toLowerCase() : normalized;
-    const comparableRoot = useWindowsRules ? normalizedRoot.toLowerCase() : normalizedRoot;
-    const rootWithSep = comparableRoot.endsWith(sep) ? comparableRoot : comparableRoot + sep;
-    if (comparable === comparableRoot || comparable.startsWith(rootWithSep)) return true;
+    if (isPathWithinRoot(target, root)) return true;
   }
   return false;
+}
+
+function isPathWithinRoot(target: string, root: string): boolean {
+  const useWindowsRules = isWindowsAbsolutePath(target) || isWindowsAbsolutePath(root);
+  const resolver = useWindowsRules ? path.win32 : path;
+  const sep = useWindowsRules ? "\\" : path.sep;
+  const normalized = resolver.resolve(target);
+  const normalizedRoot = resolver.resolve(root);
+  const comparable = useWindowsRules ? normalized.toLowerCase() : normalized;
+  const comparableRoot = useWindowsRules ? normalizedRoot.toLowerCase() : normalizedRoot;
+  const rootWithSep = comparableRoot.endsWith(sep) ? comparableRoot : comparableRoot + sep;
+  return comparable === comparableRoot || comparable.startsWith(rootWithSep);
+}
+
+function resolveRealRoot(root: string): string | undefined {
+  try {
+    return fs.realpathSync(root);
+  } catch {
+    // Ignore stale roots derived from removed sessions or worktrees.
+    return undefined;
+  }
 }
 
 /** The roots after resolving symbolic links, for comparing canonical paths. */
 export function resolveRealRoots(roots: Set<string>): Set<string> {
   const realRoots = new Set<string>();
   for (const root of roots) {
-    try {
-      realRoots.add(realpathSync(root));
-    } catch {
-      // Ignore stale roots derived from removed sessions or worktrees.
-    }
+    const realRoot = resolveRealRoot(root);
+    if (realRoot !== undefined) realRoots.add(realRoot);
   }
   return realRoots;
 }
@@ -49,10 +59,9 @@ export function hasParentDirectorySegment(target: string): boolean {
 
 export function isExistingPathWithinRoots(target: string, roots: Set<string>): boolean {
   if (hasParentDirectorySegment(target)) return false;
-  const realRoots = resolveRealRoots(roots);
   let realTarget: string;
   try {
-    realTarget = realpathSync(target);
+    realTarget = fs.realpathSync(target);
   } catch {
     // Bun's realpathSync reads the file, where Node's walks directories only: a file
     // without read permission throws EACCES on Bun and names its real path on Node.
@@ -61,11 +70,25 @@ export function isExistingPathWithinRoots(target: string, roots: Set<string>): b
     // for it, exactly as Node's own realpath would have. A link may point anywhere,
     // so it stays refused, as does a parent that does not resolve.
     try {
-      if (lstatSync(target).isSymbolicLink()) return false;
-      realTarget = path.join(realpathSync(path.dirname(target)), path.basename(target));
+      if (fs.lstatSync(target).isSymbolicLink()) return false;
+      realTarget = path.join(fs.realpathSync(path.dirname(target)), path.basename(target));
     } catch {
       return false;
     }
   }
-  return isPathWithinRoots(realTarget, realRoots);
+  function matchesRealRoot(root: string): boolean {
+    const realRoot = resolveRealRoot(root);
+    return realRoot !== undefined && isPathWithinRoot(realTarget, realRoot);
+  }
+
+  // Lexical containment only orders the checks; a symlink can land in another root.
+  const remainingRoots: string[] = [];
+  for (const root of roots) {
+    if (isPathWithinRoot(target, root)) {
+      if (matchesRealRoot(root)) return true;
+    } else {
+      remainingRoots.push(root);
+    }
+  }
+  return remainingRoots.some(matchesRealRoot);
 }
