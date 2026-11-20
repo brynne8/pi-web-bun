@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
 import { promisify } from "util";
 import { allowFileRoot } from "./allowed-roots";
-import { projectGitEnvironment } from "./git-environment";
+import { projectGitEnvironment } from "./git-environment.ts";
 import { samePath, toNativePath } from "./paths";
 
 const execFileAsync = promisify(execFile);

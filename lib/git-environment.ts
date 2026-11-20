@@ -1,4 +1,4 @@
-import { sanitizeProjectCommandEnvironment } from "./project-command-env";
+import { sanitizeProjectCommandEnvironment } from "./project-command-env.ts";
 
 /**
  * The environment of a git child that runs in the user's project folder: the

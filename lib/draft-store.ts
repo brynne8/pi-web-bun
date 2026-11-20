@@ -1,7 +1,7 @@
 import {
   MAX_ATTACHED_IMAGES,
   isBase64ImageWithinLimits,
-} from "./image-attachments";
+} from "./image-attachments.ts";
 
 export interface ChatDraftImage {
   data: string;

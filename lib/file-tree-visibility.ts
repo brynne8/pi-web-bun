@@ -1,5 +1,5 @@
 import { execFile } from "child_process";
-import { projectGitEnvironment } from "./git-environment";
+import { projectGitEnvironment } from "./git-environment.ts";
 
 // ============================================================================
 // Which directory entries the file tree lists.

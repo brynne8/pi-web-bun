@@ -287,6 +287,9 @@ try {
     // acceptDownloads for the file row's Download item (e2e/file-row-menu.mjs); nothing else
     // in the suite downloads, so accepting is inert for every other check.
     context = await newTestContext(browser, { viewport, locale: "en-US", acceptDownloads: true });
+    // The newest minimap node's index, read once the minimap has measured itself and reused by
+    // the checks that hover it: a phone viewport never reads one, so it stays 0 there.
+    let lastMinimapNode = 0;
     await context.tracing.start({ screenshots: true, snapshots: true });
     page = await context.newPage();
     page.setDefaultTimeout(30_000);
@@ -343,14 +346,14 @@ try {
       // The nodes exist a tick after the sentinel does: the minimap draws nothing until its own
       // scroll state has been measured, so a count taken straight from the DOM reads zero turns.
       await page.locator("[data-minimap-node-index]").first().waitFor();
-      const lastNode = await page.evaluate(() => Math.max(
+      lastMinimapNode = await page.evaluate(() => Math.max(
         ...[...document.querySelectorAll("[data-minimap-node-index]")]
           .map((element) => Number(element.dataset.minimapNodeIndex)),
       ));
-      assert.ok(lastNode > 0, "The minimap must show more than one loaded turn");
+      assert.ok(lastMinimapNode > 0, "The minimap must show more than one loaded turn");
       const oldest = await readMinimapPreview({ nodeIndex: 0, screenshot: "minimap-earlier-first-page.png" });
       assert.equal(oldest.earlier, "Earlier turns not loaded: 2475. Click to load");
-      const newest = await readMinimapPreview({ nodeIndex: lastNode, rowText: text(4998), screenshot: "minimap-turns-first-page.png" });
+      const newest = await readMinimapPreview({ nodeIndex: lastMinimapNode, rowText: text(4998), screenshot: "minimap-turns-first-page.png" });
       assert.equal(newest.number, "2500");
     }
 
@@ -394,7 +397,7 @@ try {
       // too soon, the last page's turns are numbered from the new count.
       let paged;
       for (let attempt = 0; attempt < 20; attempt++) {
-        paged = await readMinimapTurn("minimap-turns-paged.png");
+        paged = await readMinimapPreview({ nodeIndex: lastMinimapNode, rowText: text(4998), screenshot: "minimap-turns-paged.png" });
         if (paged.number === "2500") break;
         await page.waitForTimeout(100);
       }
