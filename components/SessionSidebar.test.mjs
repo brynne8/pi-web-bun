@@ -453,9 +453,9 @@ function hydrationSnippet() {
   return between("const scheduleHydration = () => {", "\n    } else {");
 }
 
-/** The running poll's version guard, from the `if` to its closing brace. */
+/** The running poll's version guard, from the in-flight check to the `if`'s closing brace. */
 function runningPollGuardSnippet() {
-  const start = source.indexOf("if (!initialSummaryPendingRef.current && data.sessionListVersion");
+  const start = source.indexOf("const summaryStartedAt = initialSummaryStartedAtRef.current");
   assert.notEqual(start, -1, "the running poll's version guard not found");
   const end = source.indexOf("\n        }", start);
   assert.notEqual(end, -1, "the running poll's version guard has no closing brace");
@@ -478,7 +478,7 @@ test("a hydration whose details have not landed asks again, and stops once they 
       return stillPending[forced.length - 1] ?? false;
     },
     detailsHydrationTimerRef: { current: null },
-    initialSummaryPendingRef: { current: false },
+    initialSummaryStartedAtRef: { current: Date.now() },
     setTimeout: (fn) => {
       timers.push(fn);
       return timers.length;
@@ -491,11 +491,11 @@ test("a hydration whose details have not landed asks again, and stops once they 
   const settled = () => new Promise((resolve) => setImmediate(resolve));
 
   // Until its answer lands, the summary is what the running poll must not supersede.
-  assert.equal(sandbox.initialSummaryPendingRef.current, true);
+  assert.notEqual(sandbox.initialSummaryStartedAtRef.current, null);
 
   // The summary paint owes its details, so one hydration is scheduled for it.
   await settled();
-  assert.equal(sandbox.initialSummaryPendingRef.current, false);
+  assert.equal(sandbox.initialSummaryStartedAtRef.current, null);
   assert.equal(forced.length, 0);
   assert.equal(timers.length, 1);
 
@@ -529,7 +529,7 @@ test("the hydration retries stop rather than polling for details forever", async
       return true;
     },
     detailsHydrationTimerRef: { current: null },
-    initialSummaryPendingRef: { current: false },
+    initialSummaryStartedAtRef: { current: Date.now() },
     setTimeout: (fn) => {
       timers.push(fn);
       return timers.length;
@@ -547,33 +547,33 @@ test("the hydration retries stop rather than polling for details forever", async
   }
   assert.equal(forced, 8);
   assert.equal(timers.length, 0);
-  assert.equal(sandbox.initialSummaryPendingRef.current, false);
+  assert.equal(sandbox.initialSummaryStartedAtRef.current, null);
 });
 
 test("a running poll cannot supersede a summary that has not answered yet", async () => {
-  const code = ts.transpileModule(`(async (initialSummaryPendingRef, data, sessionListVersionRef, loadSessions) => {\n${runningPollGuardSnippet()}\n})`, {
+  const code = ts.transpileModule(`(async (initialSummaryStartedAtRef, data, sessionListVersionRef, loadSessions) => {\n${runningPollGuardSnippet()}\n})`, {
     compilerOptions: { target: ts.ScriptTarget.ES2020 },
   }).outputText;
-  const decide = vm.runInNewContext(code, {});
+  const decide = vm.runInNewContext(code, { Date, INITIAL_SUMMARY_WAIT_MS: 15_000 });
   let loads = 0;
   const loadSessions = async () => { loads += 1; };
   const sessionListVersionRef = { current: 5 };
-  const initialSummaryPendingRef = { current: true };
+  const initialSummaryStartedAtRef = { current: Date.now() };
   const data = { sessionListVersion: 7 };
 
   // The list's version is unknown while the first summary is in flight, so a
   // different number says nothing and a full scan would only replace that summary.
-  await decide(initialSummaryPendingRef, data, sessionListVersionRef, loadSessions);
+  await decide(initialSummaryStartedAtRef, data, sessionListVersionRef, loadSessions);
   assert.equal(loads, 0);
 
   // Once the summary settled, the same answer is a real invalidation.
-  initialSummaryPendingRef.current = false;
-  await decide(initialSummaryPendingRef, data, sessionListVersionRef, loadSessions);
+  initialSummaryStartedAtRef.current = null;
+  await decide(initialSummaryStartedAtRef, data, sessionListVersionRef, loadSessions);
   assert.equal(loads, 1);
 
   // A poll that agrees with the list reloads nothing.
   sessionListVersionRef.current = 7;
-  await decide(initialSummaryPendingRef, data, sessionListVersionRef, loadSessions);
+  await decide(initialSummaryStartedAtRef, data, sessionListVersionRef, loadSessions);
   assert.equal(loads, 1);
 });
 

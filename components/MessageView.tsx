@@ -9,6 +9,7 @@ import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
+import { stripAnsi } from "@/lib/ansi";
 import { getAssistantErrorMessage, getThinkingPreview, hasAssistantAnswer, isAssistantAborted, isAssistantTruncated, isEmptyThinkingBlock } from "@/lib/message-display";
 import { toolClockMs, type ToolClock, type ToolClocks } from "@/lib/tool-clock";
 import { blockRenderKey } from "@/lib/message-keys";
@@ -216,6 +217,7 @@ interface Props {
   searchBlock?: AssistantContentBlock;
   /** `message` as the composer takes it back: pi's /fork puts the forked message in the editor. */
   onFork?: (entryId: string, message: UserMessage) => void;
+  forkEntryId?: string;
   forking?: boolean;
   onEditContent?: (message: UserMessage, entryId: string) => void;
   onCancelEdit?: () => void;
@@ -313,9 +315,9 @@ function haveSameRelevantToolEntries<T>(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, toolClocks, modelNames, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, entryId, searchBlock, onFork, forking, onEditContent, onCancelEdit, isEditing, showTimestamp, prevTimestamp, sessionId, blockIndexOffset, isTurnPart, isTurnTail, onCompact, isCompacting, compactError }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, toolClocks, modelNames, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, entryId, searchBlock, onFork, forkEntryId, forking, onEditContent, onCancelEdit, isEditing, showTimestamp, prevTimestamp, sessionId, blockIndexOffset, isTurnPart, isTurnTail, onCompact, isCompacting, compactError }: Props) {
   if (message.role === "user") {
-    return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onEditContent={onEditContent} onCancelEdit={onCancelEdit} isEditing={isEditing} />;
+    return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forkEntryId={entryId ?? forkEntryId} forking={forking} onEditContent={onEditContent} onCancelEdit={onCancelEdit} isEditing={isEditing} />;
   }
   if (message.role === "assistant") {
     return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} toolClocks={toolClocks} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} blockIndexOffset={blockIndexOffset} isTurnPart={isTurnPart} isTurnTail={isTurnTail} onCompact={onCompact} isCompacting={isCompacting} compactError={compactError} />;
@@ -347,6 +349,7 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.entryId === next.entryId
     && prev.searchBlock === next.searchBlock
     && prev.onFork === next.onFork
+    && prev.forkEntryId === next.forkEntryId
     && prev.forking === next.forking
     && prev.onEditContent === next.onEditContent
     && prev.onCancelEdit === next.onCancelEdit
@@ -359,12 +362,13 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.sessionId === next.sessionId;
 });
 
-function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, onEditContent, onCancelEdit, isEditing }: {
+function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forkEntryId, forking, onEditContent, onCancelEdit, isEditing }: {
   message: UserMessage;
   cwd?: string;
   onOpenFile?: (filePath: string, page?: number) => void;
   entryId?: string;
   onFork?: (entryId: string, message: UserMessage) => void;
+  forkEntryId?: string;
   forking?: boolean;
   onEditContent?: (message: UserMessage, entryId: string) => void;
   onCancelEdit?: () => void;
@@ -402,7 +406,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
     : "";
 
   const time = formatTime(message.timestamp);
-  const canFork = !!entryId && !!onFork;
+  const canFork = !!forkEntryId && !!onFork;
   const copyTarget = commandText ?? content;
   const editTarget = commandText ? replaceUserMessageText(message, commandText) : message;
 
@@ -638,7 +642,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
               )}
               {canFork && (
                 <button
-                  onClick={() => { onFork!(entryId!, editTarget); }}
+                  onClick={() => { onFork!(forkEntryId!, editTarget); }}
                   disabled={forking}
                    title={forking ? t("i18n.creatingSession") : t("i18n.newSessionTitle")}
                   style={{
@@ -1076,7 +1080,9 @@ const BlockView = memo(function BlockView({ block, searchTarget, toolResults, to
 });
 
 function TextBlock({ block, isStreaming, cwd, onOpenFile }: { block: TextContent; isStreaming?: boolean; cwd?: string; onOpenFile?: (filePath: string, page?: number) => void }) {
-  return <SafeMarkdownBody isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>{block.text}</SafeMarkdownBody>;
+  // pi's TUI hands the text to the terminal, which draws a model's escape sequences as styling;
+  // a browser would show them as raw "[38;5;5m" (#1753).
+  return <SafeMarkdownBody isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>{stripAnsi(block.text)}</SafeMarkdownBody>;
 }
 
 export function ThinkingBlock({ block, duration, isStreaming, cwd, onOpenFile, sessionId, entryId, blockIndex }: {
@@ -1205,7 +1211,8 @@ export function ThinkingBlock({ block, duration, isStreaming, cwd, onOpenFile, s
               cwd={cwd}
               onOpenFile={onOpenFile}
             >
-              {block.deferred ? content ?? "" : block.thinking}
+              {/* Escapes stripped, as in TextBlock (#1753). */}
+              {stripAnsi(block.deferred ? content ?? "" : block.thinking)}
             </SafeMarkdownBody>
           )}
         </div>

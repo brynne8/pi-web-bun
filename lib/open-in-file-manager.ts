@@ -32,7 +32,8 @@ export function fileManagerPlatform(
 
 /**
  * The Windows form of a path inside WSL: a mounted drive keeps its letter, the
- * rest of the distro is reached through the UNC root named after the distro.
+ * rest of the distro is reached through the `\\wsl$\<distro>` root, which
+ * Windows 10 and 11 both serve.
  */
 export function windowsPathForWsl(posixPath: string, distro: string): string {
   const trimmed = posixPath.replace(/\/+$/, "") || "/";
@@ -41,7 +42,7 @@ export function windowsPathForWsl(posixPath: string, distro: string): string {
     const rest = (mount[2] ?? "").replaceAll("/", "\\");
     return `${mount[1].toUpperCase()}:${rest ? `\\${rest}` : "\\"}`;
   }
-  return `\\\\wsl.localhost\\${distro}${trimmed.replaceAll("/", "\\")}`;
+  return `\\\\wsl$\\${distro}${trimmed.replaceAll("/", "\\")}`;
 }
 
 /**

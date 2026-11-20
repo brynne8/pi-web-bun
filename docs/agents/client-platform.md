@@ -15,6 +15,7 @@
 ## Terminal shell (`terminalShell()` in `lib/terminal-manager.ts`)
 - A new terminal on Windows starts PowerShell as pi's `powershell` tool finds it, through the SDK's `getPowerShellConfig()`: PowerShell 7 (`pwsh.exe`), then Windows PowerShell (`powershell.exe`), and only without either `ComSpec` / `cmd.exe` (#1394). That is Windows Terminal's default too. The lookup is `where`, so a Store install's `WindowsApps` alias is what gets spawned; node-pty spawns it as it would the bare name. The tool's `-NoProfile -Command` arguments are not reused: the terminal is interactive. Elsewhere it is `$SHELL -l` (`/bin/sh` without `SHELL`).
 - There is no shell setting and no `shell` field on `POST /api/terminal`: one default, and anyone who wants cmd or Git Bash types `cmd` / `bash` in the tab. A refreshed page's tabs reconnect to their own PTY (`createTerminal()` returns the record for a known id), so they keep the shell they started with; only new tabs pick it again.
+- `POST /api/terminal` on a folder that no longer exists answers 400 with `cwdMissingBody()` (`reason: "cwd-missing"`), like `/api/agent/new` and `/api/models`, not a 500 with the OS error; the terminal tab shows its text.
 
 ## Terminal native-module loading (`lib/terminal-manager.ts`)
 

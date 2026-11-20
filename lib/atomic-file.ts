@@ -1,15 +1,21 @@
 import { randomUUID } from "crypto";
-import { chmodSync, linkSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { chmodSync, linkSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { basename, dirname, join } from "path";
 
 /**
  * Atomically replace a file: the bytes land in a sibling temp file that is then
  * renamed onto the destination, so a process killed mid-write leaves the old
  * file whole. With `exclusive` the destination is hard linked instead, which
- * fails rather than replace one that appeared. The caller must create the
- * parent directory first.
+ * fails rather than replace one that appeared. `exactMode` gives a replaced
+ * file its bits back past the umask. The caller must create the parent
+ * directory first.
  */
-function writeFileAtomicSync(path: string, contents: string, mode: number, exclusive: boolean): void {
+function writeFileAtomicSync(
+  path: string,
+  contents: string,
+  mode: number,
+  options: { exclusive?: boolean; exactMode?: boolean } = {},
+): void {
   const dir = dirname(path);
   const tempPath = join(dir, `.${basename(path)}-${randomUUID()}.tmp`);
   let operationFailed = false;
@@ -21,7 +27,8 @@ function writeFileAtomicSync(path: string, contents: string, mode: number, exclu
       mode,
       flush: true,
     });
-    if (exclusive) linkSync(tempPath, path);
+    if (options.exactMode) chmodSync(tempPath, mode);
+    if (options.exclusive) linkSync(tempPath, path);
     else renameSync(tempPath, path);
   } catch (error) {
     operationFailed = true;
@@ -42,7 +49,7 @@ function writeFileAtomicSync(path: string, contents: string, mode: number, exclu
  * process permissions. The caller must create the parent directory first.
  */
 export function writePrivateFileAtomicSync(path: string, contents: string): void {
-  writeFileAtomicSync(path, contents, 0o600, false);
+  writeFileAtomicSync(path, contents, 0o600);
 }
 
 /**
@@ -50,17 +57,24 @@ export function writePrivateFileAtomicSync(path: string, contents: string): void
  * its mode, a new one takes pi's 0644 default through the umask, as pi creates them,
  * not the private 0600. `exclusive` keeps the `flag: "wx"` guarantee for the
  * fresh-id copies pi-web writes itself: the replacement refuses a destination that
- * already exists. The caller must create the parent directory first.
+ * already exists. A symbolic link keeps its link: the bytes replace its target.
+ * The caller must create the parent directory first.
  */
 export function writeSessionFileAtomicSync(
   path: string,
   contents: string,
   options: { exclusive?: boolean } = {},
 ): void {
-  const existing = statSync(path, { throwIfNoEntry: false });
-  const existingMode = existing ? existing.mode & 0o777 : undefined;
-  writeFileAtomicSync(path, contents, existingMode ?? 0o644, options.exclusive === true);
-  // A new file's mode is masked by the umask; an existing file must keep the
-  // exact bits pi gave it.
-  if (existingMode !== undefined) chmodSync(path, existingMode);
+  let target = path;
+  try {
+    target = realpathSync(path);
+  } catch {
+    /* a new file */
+  }
+  const existingMode = statSync(target, { throwIfNoEntry: false })?.mode;
+  const mode = existingMode === undefined ? 0o644 : existingMode & 0o777;
+  writeFileAtomicSync(target, contents, mode, {
+    exclusive: options.exclusive === true,
+    exactMode: existingMode !== undefined,
+  });
 }

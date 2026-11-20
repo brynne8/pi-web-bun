@@ -310,7 +310,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const [restoreAnchorReady, setRestoreAnchorReady] = useState(false);
 
   const {
-    loading, error, messages, activeToolResults, toolClocks, entryIds, messageKeys, historyCursor, hasEarlierMessages, earlierTurnCount, streamingStore,
+    loading, error, messages, activeToolResults, toolClocks, entryIds, messageKeys, liveUserEntryIds, historyCursor, hasEarlierMessages, earlierTurnCount, streamingStore,
     agentRunning, bashRunning, pendingBash, modelNames, modelList, modelError, missingCwd, canForkMissingCwd, modelScopeWarnings, isModelScopeActive, allModelList, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
     retryInfo, contextUsage, forkingEntryId,
     isCompacting, compactError, compactResult, displayModel: displayModelValue, modelSwitching, sessionStats,
@@ -939,6 +939,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           showTimestamp = false;
         }
       }
+      // A prompt sent during the run: its entry id, for New session only (#1746).
+      const liveEntryId = entryIds[idx] === undefined ? liveUserEntryIds.get(messages[idx]) : undefined;
       const view = (
         <MessageView
           key={`${keyPrefix}-view-${messageKey}`}
@@ -953,7 +955,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           entryId={entryIds[idx]}
           searchBlock={entryIds[idx] === pendingSearchScroll?.entryId ? searchBlock : undefined}
           onFork={bashRunning || isNew ? undefined : forkFromMessage}
-          forking={forkingEntryId === entryIds[idx]}
+          forkEntryId={liveEntryId}
+          forking={forkingEntryId === (entryIds[idx] ?? liveEntryId)}
           onEditContent={sessionBusy ? undefined : handleEditContent}
           onCancelEdit={cancelEdit}
           isEditing={editEntryId === entryIds[idx]}
@@ -1262,6 +1265,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     forkingEntryId, editEntryId, sessionBusy, isStreaming, bashRunning, isNew, turnAnchors,
     isCompacting, compactError, forkFromMessage, handleEditContent, cancelEdit, handleCompact,
     onOpenFile, onOpenSubagent, onOpenReadSnapshot, t, locale, messageRefs, lastUserMsgRef,
+    liveUserEntryIds,
   ]);
 
   const availableThinkingLevels = displayModelValue
