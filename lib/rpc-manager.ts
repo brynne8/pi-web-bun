@@ -69,6 +69,7 @@ import { resolveShellTools } from "./powershell-settings";
 import { withCodemodeDefault } from "./codemode-settings";
 import { withShellDefault } from "./shell-settings";
 import { CHAT_ONLY_RESOURCE_LOADER_OPTIONS, contextFilesSystemPrompt } from "./chat-only";
+import { appendSystemPromptSources } from "./append-system-prompt";
 import { createExactSystemPromptExtension } from "./exact-system-prompt";
 import { createPlatformInfoExtension } from "./platform-info";
 import { computeForcedSystemPrompt } from "./effective-system-prompt";
@@ -3908,7 +3909,12 @@ export async function startRpcSession(
                   systemPromptOverride: () => undefined,
                 }
               : {}),
-            appendSystemPrompt: subagentResources.appendSystemPrompt,
+            appendSystemPrompt: [
+              // The spawn path names the same file ahead of the profile's prompt; a reopened
+              // child resolves it again, so an edited file reaches its next run.
+              ...appendSystemPromptSources(sessionCwd, agentDir, settingsManager.isProjectTrusted()),
+              ...subagentResources.appendSystemPrompt,
+            ],
           }
         : chatOnly
           ? { ...CHAT_ONLY_RESOURCE_LOADER_OPTIONS, extensionFactories: [exactSystemPromptExtension] }

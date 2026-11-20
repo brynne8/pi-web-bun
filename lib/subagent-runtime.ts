@@ -37,6 +37,7 @@ import {
 import type { SessionEntry, SessionInfo } from "./types";
 import type { DebugParentNotification, DebugSubagentRun } from "./debug-types";
 import { buildSubagentPromptPlan } from "./subagent-prompt";
+import { appendSystemPromptSources } from "./append-system-prompt";
 import { createSubagentSkillsBinding } from "./subagent-skills";
 import { getProjectTrustStatus } from "./project-trust";
 import { createSubagentCodemodeExtension, createSubagentMcpExtensions } from "./builtin-extensions";
@@ -792,7 +793,12 @@ export function createSubagentController(
                 systemPromptOverride: () => undefined,
               }
             : {}),
-          appendSystemPrompt,
+          // Passing this list switches the loader's own APPEND_SYSTEM.md discovery off, so the
+          // child names the same file the main session reads ahead of the profile's prompt.
+          appendSystemPrompt: [
+            ...appendSystemPromptSources(childCwd, agentDir, projectTrusted),
+            ...appendSystemPrompt,
+          ],
         },
       });
 

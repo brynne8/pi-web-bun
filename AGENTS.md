@@ -162,6 +162,7 @@ lib/
   file-watch-registry.ts    open ?type=watch streams, counted on globalThis for the Debug panel
   browser-flag.ts           client-safe: one per-browser boolean in localStorage, shared by the minimap's preview lock and the Agents strip's
   agent-strip-lock.ts       client-safe: keeps the Agents strip on the main agent too, per browser
+  append-system-prompt.ts  the APPEND_SYSTEM.md a session's loader discovers (project when trusted, else global), so a subagent appends the file its parent session reads
   startup-issues.ts         client-safe: what pi's TUI prints as a session starts (extension load errors and conflicts, warnings, session_start errors), as notices; the page shows each id once
   rpc-manager.ts            AgentSessionWrapper, registry, startRpcSession
   retry-http2-stream-drops.ts temporary wrap over AgentSession._isRetryableError, so a relay's dropped HTTP/2 stream retries (the private name is pinned by its test)
