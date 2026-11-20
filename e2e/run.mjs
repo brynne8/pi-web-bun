@@ -287,8 +287,8 @@ try {
     // acceptDownloads for the file row's Download item (e2e/file-row-menu.mjs); nothing else
     // in the suite downloads, so accepting is inert for every other check.
     context = await newTestContext(browser, { viewport, locale: "en-US", acceptDownloads: true });
-    // The newest minimap node's index, read once the minimap has measured itself and reused by
-    // the checks that hover it: a phone viewport never reads one, so it stays 0 there.
+    // The newest minimap node's index, read once the minimap has measured itself. Only the
+    // first page's checks hover it; a phone viewport never reads one, so it stays 0 there.
     let lastMinimapNode = 0;
     await context.tracing.start({ screenshots: true, snapshots: true });
     page = await context.newPage();
@@ -397,7 +397,14 @@ try {
       // too soon, the last page's turns are numbered from the new count.
       let paged;
       for (let attempt = 0; attempt < 20; attempt++) {
-        paged = await readMinimapPreview({ nodeIndex: lastMinimapNode, rowText: text(4998), screenshot: "minimap-turns-paged.png" });
+        // The newest node is re-read each attempt: the pages that landed added turns below it,
+        // and the minimap's own measure is throttled, so the node the first check hovered is no
+        // longer the newest one and its preview window no longer holds this message.
+        const newestNode = await page.evaluate(() => Math.max(
+          ...[...document.querySelectorAll("[data-minimap-node-index]")]
+            .map((element) => Number(element.dataset.minimapNodeIndex)),
+        ));
+        paged = await readMinimapPreview({ nodeIndex: newestNode, rowText: text(4998), screenshot: "minimap-turns-paged.png" });
         if (paged.number === "2500") break;
         await page.waitForTimeout(100);
       }
