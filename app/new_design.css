@@ -27,6 +27,7 @@
   --nd-rule: #ececf0;
   --nd-border: #d9d9e0;
   --nd-text: #16161a;
+  --nd-ink-strong: #16161a;
   --nd-muted: #57575f;
   --nd-dim: #6c6c76;
   --nd-positive: #1a7a4b;
@@ -87,9 +88,10 @@ html.dark:root {
   --nd-selected: #22222b;
   --nd-rule: #24242d;
   --nd-border: #30303b;
-  --nd-text: #f0f0f2;
-  --nd-muted: #a4a5ad;
-  --nd-dim: #8b8c94;
+  --nd-text: #c8c9d1;
+  --nd-ink-strong: #f0f0f2;
+  --nd-muted: #989aa3;
+  --nd-dim: #7f808a;
   --nd-positive: #3fc07a;
   --nd-negative: #e5566f;
   --nd-warning: #d9a441;
@@ -711,7 +713,7 @@ div:has(> div:first-child > div > button[style*="border-top: 2px solid transpare
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.28;
-  color: var(--nd-text);
+  color: var(--nd-ink-strong);
 }
 .markdown-body h1 { font-size: 21px; }
 .markdown-body h2 { font-size: 18px; }
@@ -719,6 +721,9 @@ div:has(> div:first-child > div > button[style*="border-top: 2px solid transpare
 .markdown-body h4,
 .markdown-body h5,
 .markdown-body h6 { font-size: 14px; }
+html.dark .markdown-body strong {
+  color: var(--nd-ink-strong);
+}
 .markdown-body ul,
 .markdown-body ol {
   margin: 0 0 13px;
