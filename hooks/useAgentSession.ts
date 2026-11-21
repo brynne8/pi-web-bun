@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, useReducer } from "react";
+import { arrivingNotifications, RAIL_NOTIFICATION_EVENT_TYPE, type RailNotification, type RailNotificationEvent } from "@/lib/background-notifications";
 import { stripAnsi } from "@/lib/ansi";
 import type {
   AgentMessage,
@@ -1963,6 +1964,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     onError: (error) => console.error("Failed to read a message sent while idle:", error),
   });
 
+  // The rail's rows for results that have not reached the transcript: pushed by the server as they
+  // settle, seeded from the `connected` event a page gets when its stream opens. No polling.
+  const [railReports, setRailReports] = useState<RailNotification[]>(() => []);
+
   const handleAgentEvent = useCallback((event: AgentEvent) => {
     if (endedSessionRef.current) return;
     switch (event.type) {
@@ -1980,6 +1985,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
       case "connected": {
         dispatch({ type: "end" });
+        setRailReports(arrivingNotifications(Array.isArray(event.pendingReports) ? event.pendingReports : []));
         if (Array.isArray(event.pendingExtensionUiIds)) {
           // The server replays what it still holds right after this event.
           const pending = new Set(event.pendingExtensionUiIds as string[]);
@@ -2002,6 +2008,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // mount's state read may have found no runtime and no usage to show.
         if (sessionIdRef.current) void refreshContextUsage(sessionIdRef.current);
         break;
+      }
+      case RAIL_NOTIFICATION_EVENT_TYPE: {
+        const pushed = event as unknown as RailNotificationEvent;
+        const report = pushed.report;
+        if (!report || typeof report.id !== "string") return;
+        setRailReports((rows) => {
+          const key = `${report.kind}:${report.id}`;
+          const rest = rows.filter((row) => `${row.kind}:${row.id}` !== key);
+          if (pushed.state === "withdrawn") {
+            // Taken, not erased: the row stays as `已取走` for the buffer, then leaves on its own.
+            const taken = rows.find((row) => `${row.kind}:${row.id}` === key);
+            return taken ? [...rest, { ...taken, consumed: true, consumedAtMs: Date.now() }] : rest;
+          }
+          const row = arrivingNotifications([{ ...report }])[0];
+          return row ? [...rest, row] : rest;
+        });
+        return;
       }
       case "agent_start":
         markPromptLanded();
@@ -3832,7 +3855,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, loadTools, loadSlashCommands, loadAllModels, setActiveLeafId, setData, setMessages, loadContext,
     scrollToBottom, scrollUserMsgToTop, scrollToMessage,
     dispatch, setAgentRunning, setForkingEntryId,
-    bashRunning, pendingBash,
+    bashRunning, pendingBash, railReports,
     // Subscriptions
     handleAgentEventRef,
   };

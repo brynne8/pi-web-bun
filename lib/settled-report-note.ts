@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { TextContent } from "./types.ts";
 import { recordPendingNotification, removePendingNotification, type PendingNotificationKind } from "./pending-notifications.ts";
 import { SETTLED_REPORTS_CUSTOM_TYPE, SETTLED_REPORTS_DETAILS_KIND, type SettledReport } from "./settled-report.ts";
+import { RAIL_NOTIFICATION_EVENT_TYPE, type RailNotificationEvent } from "./background-notifications.ts";
 
 /**
  * How many times a batch is put back before the sink gives up on it. One retry covers the ordinary
@@ -61,6 +62,8 @@ type SettledReportNote = {
 export interface SettledReportParent {
   isAlive(): boolean;
   isRunning(): boolean;
+  /** Tell this session's page that a result settled or was taken back; absent for a bare parent. */
+  notifyRail?(event: RailNotificationEvent): void;
   inner: {
     sendCustomMessage(
       message: { customType: string; content: string | TextContent[]; display: boolean; details?: unknown },
@@ -328,6 +331,14 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
       note.reports.push(report);
       note.blocks.push({ type: "text", text: report.text });
 
+      // The page hears it now, in the same call: a result that exists is a row, however long it
+      // waits here — polling for it lost every result whose fetch came between two polls.
+      parent.notifyRail?.({
+        type: RAIL_NOTIFICATION_EVENT_TYPE,
+        state: "pending",
+        report: { kind: report.kind, id: report.id, title: report.title, outcome: report.outcome, finishedAtMs: report.finishedAtMs },
+      });
+
       // Indexed for the parent to look up while the batch has not reached it. Keyed by the
       // message, so one batch landing clears every report it carried.
       recordPendingNotification({
@@ -356,8 +367,13 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
     },
 
     withdraw(sessionId, kind, id) {
-      // The index is the parent's own record of what it has not seen, and collecting the result
-      // is exactly seeing it.
+      // The row leaves the page as it leaves the index: both are the parent's record of a report
+      // it has not seen, and collecting the result is exactly seeing it.
+      deps.getSession(sessionId)?.notifyRail?.({
+        type: RAIL_NOTIFICATION_EVENT_TYPE,
+        state: "withdrawn",
+        report: { kind, id, title: "", outcome: "", finishedAtMs: 0 },
+      });
       removePendingNotification(sessionId, kind, id);
       const note = notes.get(sessionId);
       if (!note) return;

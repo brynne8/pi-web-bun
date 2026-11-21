@@ -10,6 +10,8 @@ import { recordRuntimeDiagnostic } from "./runtime-diagnostics.ts";
 export interface AgentEventStreamSession {
   readonly isStreaming: boolean;
   readonly streamingMessage: unknown;
+  /** The results settled and not yet delivered: the rail's rows at the moment of connecting. */
+  getPendingReportsDebug?(): readonly unknown[];
   isAlive?(): boolean;
   isExtensionShutdownRequested?(): boolean;
   onEvent(listener: (event: AgentEventLike) => void): () => void;
@@ -345,6 +347,8 @@ export function createAgentEventStream(
             isStreaming: session.isStreaming,
             // onEvent() has just replayed every request the session still holds,
             // so a reconnecting client can drop the ones closed while it was away.
+            // The rail's source of truth for what is waiting: pushed now, not polled for.
+            pendingReports: session.getPendingReportsDebug?.() ?? [],
             pendingExtensionUiIds: replayEvents
               .filter((event) => event.type === "extension_ui_request" && typeof event.id === "string")
               .map((event) => event.id as string),

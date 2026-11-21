@@ -168,9 +168,9 @@ lib/
   retry-http2-stream-drops.ts temporary wrap over AgentSession._isRetryableError, so a relay's dropped HTTP/2 stream retries (the private name is pinned by its test)
   pending-notifications.ts   index of background results that settled before the conversation had room for them, read (and waited on) by the await_results tool
   pending-notifications-extension.ts  registers that tool on its own, so switching subagents off cannot hide background commands' results; also steers the turn-boundary reminder while results wait
-  background-notifications.ts  client-safe: the rail's notification rows — a batch's reports read off the messages, the server's arriving ones merged in, three at a glance
-  settled-report.ts         client-safe: one settled report's shape and the batch message's two names, shared by the sink and the rail
-  get-result-tool.ts        the get_result tool's name and the two hint spellings four call sites print, so they cannot drift
+  background-notifications.ts  client-safe: the rail's notification rows — a batch's reports read off the messages, the ids the model took with `get_result` (a row's read state), a result fetched instead of delivered, the server's pushed pending ones merged in, three at a glance
+  settled-report.ts         client-safe: one settled report's shape, the batch message's two names and `parseReportOutcome()`, shared by the sink and the rail
+  get-result-tool.ts        the get_result tool's name and the two hint spellings the report, the stop note and the pending index print — never the start text — so they cannot drift
   get-result-extension.ts   the one tool that fetches a finished result: a command's log page or a subagent's report, offered per switch, a fetch counting as reading
   bg-task-handle.ts         client-safe: a command's `bash-<8hex>` handle, the log's own random tail, in place of a path the model would read
   bg-task-log.ts            a command's log file: per-session directory, handle lookup, line-numbered slices for get_result, line count for the index
@@ -318,7 +318,7 @@ components/
   BashCommand.tsx          token-coloured shell command for a tool card
   PowerShellOutput.tsx     a powershell result's output, drawn with the colours PowerShell wrote it in
   BgTaskNotificationView.tsx  a settled background task as fields plus its output tail
-  ActivityNotifications.tsx  the rail's Notifications section: what finished in the background, three at a glance and the rest folded, a click scrolling to its card
+  ActivityNotifications.tsx  the rail's Notifications section: what finished in the background as its id and how it ended, arriving / delivered / taken, three at a glance and the rest folded, a row leaving 30 s after its result reached the model, a click scrolling to its card
   ActivityPanel.tsx      the rail's activity view: faults, agents, notifications, commands, the server's sessions, then the numbers in one fold (open by default)
   ActivityAgents.tsx     its Agents section: the chat and the subagents it delegated, with the transcript tab's icon
   BgTaskOutputView.tsx   one task's log as its own right-panel tab: header state, byte-offset tail, scroll arrow

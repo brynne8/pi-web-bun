@@ -30,6 +30,33 @@ export interface SettledReport {
   details?: unknown;
 }
 
+/** How a report ended, in the shapes the two producers emit. */
+export type ReportStatus =
+  | { state: "completed" }
+  | { state: "exit"; code: number }
+  | { state: "signal" }
+  | { state: "stopped" }
+  | { state: "failed"; detail?: string };
+
+/**
+ * A report's `outcome` read back as something a row can say in any language.
+ *
+ * `outcome` is the model's own sentence — `completed`, `exited with code 1`, `terminated by a
+ * signal` from a background command, `failed` / `aborted` / `interrupted` from a subagent — and it
+ * stays the text the report carries. This is only for display, so an unknown sentence degrades to
+ * `failed` with its own words rather than to nothing.
+ */
+export function parseReportOutcome(outcome: string): ReportStatus {
+  if (outcome === "completed") return { state: "completed" };
+  const exit = /^exited with code (-?\d+)$/.exec(outcome);
+  if (exit) return { state: "exit", code: Number(exit[1]) };
+  if (outcome === "terminated by a signal") return { state: "signal" };
+  if (outcome === "aborted" || outcome === "interrupted") return { state: "stopped" };
+  const failed = /^failed(?: \((.*)\))?$/.exec(outcome);
+  if (failed) return { state: "failed", ...(failed[1] ? { detail: failed[1] } : {}) };
+  return { state: "failed", ...(outcome ? { detail: outcome } : {}) };
+}
+
 /** The custom message type a batch of settled reports is delivered under. */
 export const SETTLED_REPORTS_CUSTOM_TYPE = "pi-web:settled-reports";
 

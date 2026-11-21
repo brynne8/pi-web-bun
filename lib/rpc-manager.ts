@@ -44,6 +44,7 @@ import type {
 import { extensionUiTheme } from "./extension-ui-theme";
 import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS, type HeadlessCustomUiTui } from "./custom-ui-terminal";
 import { createSettledReportSink } from "./settled-report-note";
+import type { RailNotificationEvent } from "./background-notifications";
 import { createPendingNotificationsExtension } from "./pending-notifications-extension";
 import { pendingNotificationsFor } from "./pending-notifications";
 import { createGetResultExtension } from "./get-result-extension";
@@ -690,6 +691,11 @@ export class AgentSessionWrapper {
    * Reports that settled and have not reached this session yet: the model can already fetch them
    * with `get_result`, and the rail's Notifications section lists them as arriving.
    */
+  /** Tell this session's pages that a result settled or was taken back (the rail's own event). */
+  notifyRail(event: RailNotificationEvent): void {
+    this.emit(event as unknown as AgentEvent);
+  }
+
   getPendingReportsDebug(): DebugPendingReport[] {
     const manager = this.inner.sessionManager;
     const pending = pendingNotificationsFor(manager.getSessionId(), manager.getEntries() as unknown as unknown[]);

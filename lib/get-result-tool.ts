@@ -1,7 +1,9 @@
 /**
  * The one tool that fetches a background result: a background command's log or a subagent's
- * report. Its name lives here because four places spell the hint a model copies: the background
- * command's start text, its report, a subagent's report, and the pending index.
+ * report. Its name lives here because three places spell the hint a model copies: a background
+ * command's report, the note a stop leaves, and the pending index `await_results` answers. Never
+ * the start text: a model handed a handle before the result is ready fetches it early, and a
+ * fetched result is withdrawn from delivery.
  */
 export const GET_RESULT_TOOL_NAME = "get_result";
 

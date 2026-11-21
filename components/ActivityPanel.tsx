@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type RefObject } from "react
 import { useI18n } from "@/hooks/useI18n";
 import { bgTaskState } from "@/lib/bg-task-status";
 import { formatActiveDuration, formatCompactCount } from "@/lib/session-stats-format";
-import { arrivingNotifications, mergeRailNotifications, type RailNotification } from "@/lib/background-notifications";
+import type { RailNotification } from "@/lib/background-notifications";
 import type { BgTaskSummary } from "@/lib/bg-task-types";
 import type { DebugClientSession } from "@/lib/debug-types";
 import type { SessionInfo } from "@/lib/types";
@@ -93,12 +93,7 @@ export function ActivityPanel({
   const readout = useDebugReadout({ readerRef, selectedSessionId, pollingMs: detailsOpen ? DEBUG_POLL_MS : SLOW_POLL_MS });
   const { page, server, shown } = readout;
   const runningCount = tasks.filter((task) => task.finishedAtMs === null).length;
-  // Delivered results come from the transcript (no request); the ones still on their way ride the
-  // read-out's poll, so the section never asks the server anything of its own.
-  const allNotifications = mergeRailNotifications(
-    notifications,
-    arrivingNotifications(shown.server.reply?.session?.pendingReports ?? []),
-  );
+
   const titleOf = useMemo(() => {
     const byId = new Map(sessions.map((session) => [session.id, session]));
     return (id: string) => {
@@ -178,7 +173,7 @@ export function ActivityPanel({
         )}
 
         {selectedSessionId !== null && (
-          <ActivityNotifications notifications={allNotifications} now={now} onOpenNotification={onOpenNotification} />
+          <ActivityNotifications notifications={notifications} now={now} onOpenNotification={onOpenNotification} />
         )}
 
         <section className="activity-section">
@@ -432,6 +427,14 @@ const ACTIVITY_PANEL_CSS = `
     white-space: nowrap;
   }
   .agent-row.is-selected .agent-name { color: var(--text); }
+  .notification-state {
+    flex-shrink: 0;
+    color: var(--text-dim);
+    font-size: 10px;
+    white-space: nowrap;
+  }
+  .notification-state.is-read { opacity: 0.75; }
+  .agent-row.is-consumed .agent-name { color: var(--text-dim); }
   .agent-total { margin-left: auto; display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
   .agent-total-label { color: var(--text-dim); font-size: 10px; }
   .agent-search {

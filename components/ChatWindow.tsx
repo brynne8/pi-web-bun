@@ -34,7 +34,7 @@ import { useI18n } from "@/hooks/useI18n";
 import type { Locale } from "@/lib/i18n/types";
 import { phaseLabel } from "@/lib/chat-phase-label";
 import { useAgentSession, type AgentEndInfo, type NewSessionChoices, type NoticeItem } from "@/hooks/useAgentSession";
-import { settledNotificationsFromMessages, type RailNotification } from "@/lib/background-notifications";
+import { fetchedNotifications, mergeRailNotifications, settledNotificationsFromMessages, type RailNotification } from "@/lib/background-notifications";
 import { selectHasStreamingContent, selectIsStreaming, selectStreamingMessage, useStreamingSelector } from "@/hooks/useStreamingSelector";
 import type { StreamingStore } from "@/lib/streaming-message";
 import { streamRateKey } from "@/lib/stream-token-rate";
@@ -314,7 +314,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
   const {
     loading, error, messages, activeToolResults, toolClocks, entryIds, messageKeys, liveUserEntryIds, historyCursor, hasEarlierMessages, earlierTurnCount, streamingStore,
-    agentRunning, bashRunning, pendingBash, modelNames, modelList, modelError, missingCwd, canForkMissingCwd, modelScopeWarnings, isModelScopeActive, allModelList, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
+    agentRunning, bashRunning, pendingBash, railReports, modelNames, modelList, modelError, missingCwd, canForkMissingCwd, modelScopeWarnings, isModelScopeActive, allModelList, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
     retryInfo, contextUsage, forkingEntryId,
     isCompacting, compactError, compactResult, displayModel: displayModelValue, modelSwitching, sessionStats,
     slashCommands, slashCommandsLoading, queuedMessages,
@@ -701,10 +701,15 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   }, [statsKey, onSessionStatsChange]);
   useEffect(() => () => { onSessionStatsChange?.(null); }, [onSessionStatsChange]);
 
-  // Push the rail's notifications up: the reports this transcript already holds. Compared by a
-  // key, so a reply streaming in does not hand a new array up on every chunk.
-  const notifications = settledNotificationsFromMessages(messages, entryIds);
-  const notificationsKey = notifications.map((entry) => `${entry.kind}:${entry.id}:${entry.entryId ?? ""}`).join("|");
+  // Push the rail's notifications up: the reports this transcript already holds, the results the
+  // model took instead of receiving them, and the ones the server pushed as they settled (those
+  // have no message yet, so nothing in the transcript can name them). Compared by a key, so a
+  // reply streaming in does not hand a new array up on every chunk.
+  const delivered = settledNotificationsFromMessages(messages, entryIds);
+  const notifications = mergeRailNotifications(delivered, [...fetchedNotifications(messages, delivered), ...railReports]);
+  const notificationsKey = notifications
+    .map((entry) => `${entry.kind}:${entry.id}:${entry.entryId ?? ""}:${entry.consumed ? entry.consumedAtMs : ""}`)
+    .join("|");
   const notificationsRef = useRef(notifications);
   notificationsRef.current = notifications;
   useEffect(() => {

@@ -17,6 +17,8 @@ Background bash and built-in subagents are two independent switches, and the sub
 
 A background command's result is named by a handle: `bash-3f2a9b1c`, the 8 random characters its log file already carries (`lib/bg-task-handle.ts`). The log's **path** never reaches the model — not in the start text, not in the report, not in the pending index. A path is an invitation to `read` the file directly, and a model that takes it still receives the report afterwards: the same result, twice, once of them paid in tool output and once in a delivered message.
 
+The **handle** is not offered at start either, only when a result exists: the pending index and the report. A handle handed over while the command still runs is a handle a model uses instead of waiting, and fetching counts as reading — the report is withdrawn, so the result is delivered to nobody, leaves no card in the transcript and no row in the rail's Notifications (`docs/agents/background-bash.md`).
+
 The handle is resolved against the session's own log directory (`resolveBgTaskLogPath()`), so nothing has to be registered and a result survives a server restart. A handle from another session does not resolve: one session does not read another's log.
 
 ## Reading pages like `read`, from the top

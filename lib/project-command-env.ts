@@ -25,9 +25,7 @@ import {
   untrackBgTask,
   wasBgTaskKilled,
 } from "./bash-bg-tasks.ts";
-import { bgTaskHandle } from "./bg-task-handle.ts";
 import { buildBgTaskNotification, type BgTaskOutcome } from "./bg-task-notification.ts";
-import { bgTaskFetchHint } from "./get-result-tool.ts";
 
 const HOST_EXTENSION_NAME = "pi-web-project-command-environment";
 const HOST_EXTENSION_PATH = `<inline:${HOST_EXTENSION_NAME}>`;
@@ -393,9 +391,8 @@ export function createProjectCommandBashExtension(options: {
             return await executionDefinition.execute(toolCallId, params, signal, onUpdate, context);
           } catch (error) {
             if (error instanceof Error && error.message.startsWith("bg-task-backgrounded:")) {
-              const logPath = error.message.slice("bg-task-backgrounded:".length);
               return {
-                content: [{ type: "text" as const, text: `Command auto-backgrounded after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000}s.\nResult: ${bgTaskFetchHint(bgTaskHandle(logPath))}\nThe result arrives on its own when the command finishes — do not poll, sleep, check the log, or run any other command for it. Do other work that does not need it if you have any; if you have none, stop — no output, no commands — until it arrives. Stopping does not cancel the task.` }],
+                content: [{ type: "text" as const, text: `Command auto-backgrounded after ${FOREGROUND_AUTO_BACKGROUND_MS / 1000}s.\nThe result arrives on its own when the command finishes — do not poll, sleep, check the log, or run any other command for it. Do other work that does not need it if you have any; if you have none, stop — no output, no commands — until it arrives. Stopping does not cancel the task.` }],
                 details: undefined,
               };
             }
@@ -473,7 +470,7 @@ function startBackgroundCommand(
     }
   })();
   return Promise.resolve({
-    content: [{ type: "text" as const, text: `Command started in background.\nResult: ${bgTaskFetchHint(bgTaskHandle(logPath))}\nThe result arrives on its own when the command finishes — do not poll, sleep, check the log, or run any other command for it. Do other work that does not need it if you have any; if you have none, stop — no output, no commands — until it arrives. Stopping does not cancel the task.` }],
+    content: [{ type: "text" as const, text: `Command started in background.\nThe result arrives on its own when the command finishes — do not poll, sleep, check the log, or run any other command for it. Do other work that does not need it if you have any; if you have none, stop — no output, no commands — until it arrives. Stopping does not cancel the task.` }],
     details: undefined,
   });
 }

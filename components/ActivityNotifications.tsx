@@ -2,21 +2,22 @@
 
 import { useMemo, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
-import { railNotificationWindow, type RailNotification } from "@/lib/background-notifications";
-import { formatAgo } from "./debug-panel-state";
+import { RAIL_NOTIFICATION_LINGER_MS, railNotificationWindow, type RailNotification } from "@/lib/background-notifications";
+import type { ReportStatus } from "@/lib/settled-report";
 
 /**
  * The background results this session finished, as a list a person can read.
  *
  * The model learns about a finished command or subagent from a report; on screen a report was only
  * ever a card in the transcript, so someone who was not looking at that spot never knew it existed.
- * Each row is one result — its kind, its title, how it ended, how long ago — and a click scrolls the
- * transcript to the card that carries it. Newest first, three at a glance, the rest behind one fold.
+ * Each row is one result: what ran, how it ended, and whether the model has read it yet. A click
+ * scrolls the transcript to the card that carries it. Newest first, three at a glance, the rest
+ * behind one fold.
  */
 
 interface Props {
   notifications: readonly RailNotification[];
-  /** The rail's clock, ticking once a second: every row says how long ago it finished. */
+  /** The rail's clock, ticking once a second: a read result lingers, then leaves. */
   now: number;
   /** Scrolls the chat to the report's card. Never called for a report still on its way there. */
   onOpenNotification(entryId: string): void;
@@ -36,22 +37,30 @@ function KindGlyph({ kind }: { kind: RailNotification["kind"] }) {
 export function ActivityNotifications({ notifications, now, onOpenNotification }: Props) {
   const { t } = useI18n();
   const [showAll, setShowAll] = useState(false);
-  const { shown, hidden } = useMemo(() => railNotificationWindow(notifications), [notifications]);
+  // A result still on its way has no clock; one that has reached the model — delivered or taken —
+  // leaves a buffer after that moment.
+  const live = useMemo(
+    () => notifications.filter((entry) => {
+      const reachedAt = entry.consumed ? entry.consumedAtMs : entry.deliveredAtMs;
+      return reachedAt === undefined || now - reachedAt < RAIL_NOTIFICATION_LINGER_MS;
+    }),
+    [notifications, now],
+  );
+  const { shown, hidden } = useMemo(() => railNotificationWindow(live), [live]);
   return (
     <section className="activity-section" aria-label={t("activity.notifications")}>
       <div className="activity-section-head">
         <span className="activity-section-title">{t("activity.notifications")}</span>
-        {notifications.length > 0 && <span className="activity-section-count">{notifications.length}</span>}
+        {live.length > 0 && <span className="activity-section-count">{live.length}</span>}
       </div>
-      {notifications.length === 0
+      {live.length === 0
         ? <div className="bg-tasks-empty">{t("activity.notificationsEmpty")}</div>
         : (
           <div className="agent-rows">
-            {(showAll ? notifications : shown).map((entry) => (
+            {(showAll ? live : shown).map((entry) => (
               <NotificationRow
                 key={`${entry.kind}:${entry.id}`}
                 entry={entry}
-                now={now}
                 onOpen={() => entry.entryId && onOpenNotification(entry.entryId)}
               />
             ))}
@@ -67,28 +76,59 @@ export function ActivityNotifications({ notifications, now, onOpenNotification }
 }
 
 /**
- * One result on one line. A result still on its way has no card to scroll to, so it is not a
- * button: it says it is arriving and waits, the way the done chime does.
+ * One result on one line: the fetch id a command answers to (or a subagent's description), how it
+ * ended, and whether the model has it yet. A command's own text is not repeated here — it is in
+ * the card this row opens, where there is room for it.
  */
-function NotificationRow({ entry, now, onOpen }: { entry: RailNotification; now: number; onOpen(): void }) {
+function NotificationRow({ entry, onOpen }: { entry: RailNotification; onOpen(): void }) {
   const { t } = useI18n();
   const arriving = entry.entryId === undefined;
-  const when = arriving ? t("activity.notificationArriving") : formatAgo(now - entry.finishedAtMs, t);
-  const tip = [entry.title, `${t("activity.notificationOutcome")}: ${entry.outcome}`, when].join("\n");
+  const label = entry.kind === "bash" ? entry.id || entry.title : entry.title || entry.id;
+  const ended = statusWord(entry.status, t);
+  const tip = [entry.kind === "bash" ? entry.title : "", ended, clockTime(entry.finishedAtMs)].filter(Boolean).join("\n");
+  const state = arriving
+    ? <span className="notification-state">{t("activity.notificationArriving")}</span>
+    : entry.consumed
+      ? <span className="notification-state is-read">{t("activity.notificationTaken")}</span>
+      : <span className="notification-state">{t("activity.notificationDelivered")}</span>;
   const body = (
     <>
       <span className="agent-glyph">
         <KindGlyph kind={entry.kind} />
       </span>
-      <span className="agent-name">{entry.title || entry.id}</span>
-      <span className="notification-when">{when}</span>
+      <span className="agent-name">{label}</span>
+      <span className="notification-state">{ended}</span>
+      {state}
     </>
   );
   return (
-    <div className={`agent-row${arriving ? " is-arriving" : ""}`}>
+    <div className={`agent-row${arriving ? " is-arriving" : ""}${entry.consumed ? " is-consumed" : ""}`}>
       {arriving
         ? <span className="agent-open" title={tip}>{body}</span>
         : <button type="button" className="agent-open" onClick={onOpen} title={tip}>{body}</button>}
     </div>
   );
+}
+
+/**
+ * How the result ended, in the reader's language.
+ *
+ * A command that exited is a command that finished, whatever the code: a non-zero exit is the
+ * command's own verdict on its work, not something this list asks a reader to weigh. The card and
+ * the report keep the code for whoever needs it.
+ */
+function statusWord(status: ReportStatus, t: ReturnType<typeof useI18n>["t"]): string {
+  switch (status.state) {
+    case "completed":
+    case "exit": return t("activity.notificationDone");
+    case "signal": return t("activity.notificationSignal");
+    case "stopped": return t("activity.notificationStopped");
+    case "failed": return t("activity.notificationFailed");
+  }
+}
+
+/** A finish time on the clock, not an age that counts up while the reader looks at it. */
+function clockTime(at: number): string {
+  if (!at) return "";
+  return new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
