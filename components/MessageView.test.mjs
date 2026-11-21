@@ -55,7 +55,7 @@ function settledBatchMessage() {
     content: [
       {
         type: "text",
-        text: `${BG_TASK_NOTIFICATION_PREFIX}Background bash task completed in 12s.\nCommand: bun test\nLog file: /tmp/a.log\n\nOutput tail:\n\`\`\`\nok\n\`\`\``,
+        text: `${BG_TASK_NOTIFICATION_PREFIX}Background bash task completed in 12s.\nCommand: bun test\nResult: get_result("bash-abcdef12")\n\nOutput tail:\n\`\`\`\nok\n\`\`\``,
       },
       // Both guards are written into the text the model reads, so a fixture without them would
       // let the screen assertions below pass on a card that prints them.
@@ -99,7 +99,7 @@ test("a single-report message keeps rendering as the one card it always was", ()
     role: "custom",
     customType: BG_TASK_NOTIFICATION_CUSTOM_TYPE,
     display: true,
-    content: `${BG_TASK_NOTIFICATION_PREFIX}Background bash task completed in 3s.\nCommand: ls\nLog file: /tmp/b.log\n\nOutput tail:\n\`\`\`\nfile\n\`\`\``,
+    content: `${BG_TASK_NOTIFICATION_PREFIX}Background bash task completed in 3s.\nCommand: ls\nResult: get_result("bash-abcdef12")\n\nOutput tail:\n\`\`\`\nfile\n\`\`\``,
   });
   assert.equal(html.split("Outcome").length - 1, 1);
   assert.match(html, /ls/);
@@ -1484,7 +1484,8 @@ test("renders a settled background task as its fields, and never the guard writt
   const text = textOf(html);
   assert.match(text, /completed in 12\.4s/);
   assert.match(text, /bun run dev/);
-  assert.match(text, /\/tmp\/pi-web-bg-tasks\/dev\.log/);
+  // The card shows the handle's fetch hint, not the log's path: the model never got a path to read.
+  assert.match(text, /get_result\("bash-devlog"\)/);
   assert.match(text, /Output tail/);
   assert.match(html, /<pre[^>]*>ready in 42ms<\/pre>/);
   // The report's first paragraph is for the model alone.

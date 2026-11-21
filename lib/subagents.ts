@@ -16,7 +16,7 @@ import type { SessionEntry, SubagentSessionStatus } from "./types.ts";
 export const SUBAGENT_META_TYPE = "pi-web:subagent";
 export const SUBAGENT_STATUS_TYPE = "pi-web:subagent-status";
 export const SUBAGENT_RESULT_TYPE = "pi-web:subagent-result";
-export const SUBAGENT_CONTROL_TOOL_NAMES = ["Agent", "get_subagent_result", "steer_subagent", "abort_subagent", "list_subagent_runs"] as const;
+export const SUBAGENT_CONTROL_TOOL_NAMES = ["Agent", "steer_subagent", "abort_subagent", "list_subagent_runs"] as const;
 
 export type SubagentStatus = SubagentSessionStatus;
 export type SubagentCodemode = "inherit" | "on" | "off";

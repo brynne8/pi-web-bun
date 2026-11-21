@@ -31,7 +31,7 @@ export interface PendingNotificationsOptions {
  */
 const PENDING_TOOL_EXPOSURE = "model-only" satisfies ToolExposure;
 
-/** How often the wait re-reads the index; the same interval `get_subagent_result`'s wait uses. */
+/** How often the wait re-reads the index; the same interval `get_result`'s wait uses. */
 const PENDING_WAIT_POLL_MS = 500;
 
 /**

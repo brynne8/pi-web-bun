@@ -1,11 +1,11 @@
-import type { SUBAGENT_CONTROL_TOOL_NAMES } from "./subagents";
 import type { SessionEntry, ToolResultMessage } from "./types";
 
 // Spelled out rather than imported: subagents.ts loads the SDK, and this module stays
-// importable on its own. The type rejects a name subagents.ts no longer registers.
-const SUBAGENT_TOOL_NAMES: ReadonlyArray<typeof SUBAGENT_CONTROL_TOOL_NAMES[number]> = [
+// importable on its own. `get_result` is the subagent report's fetch tool, registered outside
+// subagents.ts (it is also background bash's), so the list no longer shares that module's type.
+const SUBAGENT_TOOL_NAMES: readonly string[] = [
   "Agent",
-  "get_subagent_result",
+  "get_result",
   "steer_subagent",
   "abort_subagent",
   "list_subagent_runs",

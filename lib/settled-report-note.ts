@@ -23,6 +23,8 @@ export interface SettledReport {
   /** The report's own custom type, which decides the card that renders it. */
   customType: string;
   fetchHint: string;
+  /** How many lines the result holds, when it has that shape (a background command's log). */
+  lines?: number;
   /** What the model reads for this report, and what its card renders. */
   text: string;
   /** Whatever that report's card used to carry in `details`, kept per report. */
@@ -368,6 +370,7 @@ export function createSettledReportSink(deps: SettledReportSinkDependencies): Se
         customType: report.customType,
         messageId: note.notificationId,
         fetchHint: report.fetchHint,
+        ...(report.lines === undefined ? {} : { lines: report.lines }),
       });
 
       if (note.queued) return;

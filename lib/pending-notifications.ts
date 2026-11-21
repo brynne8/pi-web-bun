@@ -4,8 +4,7 @@
  * A background command or subagent run can settle while its parent session is deep in a run.
  * The report itself arrives when that run ends (pi drains its follow-up queue there), so between
  * those two moments the parent has no way to know a result exists. This registry is that missing
- * index: one entry per settled report, read back by the `await_notifications` tool, and nothing
- * else. It holds no output — only what the model needs to decide whether to go and fetch it.
+ * index: one entry per settled report, read back by the `await_results` tool, and nothing else. It holds no output — only what the model needs to decide whether to go and fetch it.
  *
  * "Delivered" is read off the parent's own transcript rather than tracked here: a batch message
  * carries its id in its `details`, so every report it carried is gone from the list the moment
@@ -35,10 +34,15 @@ export interface PendingNotification {
   messageId: string;
   /** How to fetch the whole result, spelled so the model can copy it out of the list. */
   fetchHint: string;
+  /**
+   * How many lines the result holds, when it has that shape: a background command's log. It tells
+   * the model whether one fetch is enough, so it does not page through a result it has in hand.
+   */
+  lines?: number;
 }
 
 /** The tool the model calls to read this registry: it waits for one, and the reminder names it. */
-export const PENDING_TOOL_NAME = "await_notifications";
+export const PENDING_TOOL_NAME = "await_results";
 
 /** The custom message type the reminder is steered under. */
 export const PENDING_POINTER_CUSTOM_TYPE = "pi-web:pending-pointer";
@@ -159,11 +163,12 @@ export function formatPendingNotifications(
   ].filter(Boolean).join(", ");
   const lines = [`Pending background results: ${pending.length} (${counts}).`];
   for (const entry of pending.slice(0, PENDING_DISPLAY_LIMIT)) {
-    lines.push(`  [${entry.kind}] ${entry.title} · ${entry.outcome} · ${formatAgo(entry.finishedAtMs, nowMs)} → ${entry.fetchHint}`);
+    const size = entry.lines === undefined ? "" : ` · ${entry.lines} ${entry.lines === 1 ? "line" : "lines"}`;
+    lines.push(`  [${entry.kind}] ${entry.title} · ${entry.outcome} · ${formatAgo(entry.finishedAtMs, nowMs)}${size} → ${entry.fetchHint}`);
   }
   const hidden = pending.length - Math.min(pending.length, PENDING_DISPLAY_LIMIT);
   if (hidden > 0) lines.push(`  +${hidden} more, listed on request by kind.`);
-  lines.push("Fetch one with its hint, or leave it: reports you have not seen yet arrive on their own.");
+  lines.push("Fetch one with its hint — fetching counts as reading, so its report is not delivered again — or leave it: reports you have not seen yet arrive on their own.");
   return lines.join("\n");
 }
 

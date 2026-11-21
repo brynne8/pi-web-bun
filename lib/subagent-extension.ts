@@ -36,10 +36,10 @@ const ABORT_SETTLE_POLL_MS = 50;
 export const SUBAGENT_WAIT_TIMEOUT_MS = 30 * 60_000;
 // Node timers overflow above a signed 32-bit millisecond delay.
 const MAX_SUBAGENT_WAIT_SECONDS = Math.floor(2_147_483_647 / 1000);
-const waitTimeoutParameter = () => Type.Optional(Type.Integer({
+export const waitTimeoutParameter = () => Type.Optional(Type.Integer({
   minimum: 1,
   maximum: MAX_SUBAGENT_WAIT_SECONDS,
-  description: "Seconds to wait for completion. Default: 1800 (30 minutes). Use a longer budget for long tasks. Applies only to a foreground Agent or get_subagent_result with wait: true; expiry returns status without cancelling the child.",
+  description: "Seconds to wait for completion. Default: 1800 (30 minutes). Use a longer budget for long tasks. Applies only to a foreground Agent or get_result with wait: true; expiry returns status without cancelling the child.",
 }));
 
 function waitTimeoutMs(seconds?: number): number {
@@ -259,7 +259,7 @@ export interface SubagentExtensionRuntime {
   notifyParent(run: SubagentRunInfo): Promise<void>;
   markResultConsumed(run: SubagentRunInfo): void;
   /**
-   * Mark a `get_subagent_result` for `sessionId` as in flight and return the fn that ends it.
+   * Mark a `get_result` call for `sessionId` as in flight and return the fn that ends it.
    * Optional so a fake runtime without it still runs; nothing is suppressed for it then.
    */
   beginResultCollection?(sessionId: string): () => void;
@@ -314,7 +314,7 @@ function worktreeOutcomeText(run: SubagentRunInfo): string | undefined {
 export function subagentFinalText(run: SubagentRunInfo): string {
   // The report names the run by the 8 characters that tell it apart from every other session; the
   // model only sees `content`, never `details`, so this is the id it copies into `resume` and
-  // `get_subagent_result`. A full UUIDv7 shares its head with every session started around it.
+  // `get_result`. A full UUIDv7 shares its head with every session started around it.
   const id = shortSessionId(run.sessionId);
   if (run.status === "queued" || run.status === "starting" || run.status === "running") {
     return `Subagent ${id} is ${run.status}.`;
@@ -471,7 +471,7 @@ async function resolveAgentId(runtime: SubagentExtensionRuntime, input: string):
 
 /** The way back to a run's transcript, named in every answer that leaves one behind. */
 function subagentTranscriptBackText(sessionId: string): string {
-  return `What it got to stays in its session: read it with get_subagent_result("${shortSessionId(sessionId)}"), or continue it with Agent's \`resume\`.`;
+  return `What it got to stays in its session: read it with get_result("${shortSessionId(sessionId)}"), or continue it with Agent's \`resume\`.`;
 }
 
 /** The answer for a run that had nothing left to stop. */
@@ -491,6 +491,85 @@ function subagentStopText(run: SubagentRunInfo): string {
       : subagentFinalText(run);
   }
   return `Stop requested for subagent ${id}; it is still unwinding. ${back}`;
+}
+
+export interface SubagentResultRequest {
+  /** The id the model passed: the 8-character form a report shows, or the full session id. */
+  id: string;
+  /** Wait for the run to settle; the user has to have asked for it. */
+  wait?: boolean;
+  /** The wait budget in seconds; validated before the first lookup. */
+  waitTimeoutSeconds?: number;
+  signal?: AbortSignal;
+  /** The parent's own entries, for naming the subagents a mistyped id could have meant. */
+  sessionManager?: { getEntries?: () => unknown };
+}
+
+export interface SubagentResultAnswer {
+  text: string;
+  details?: unknown;
+  isError?: boolean;
+}
+
+/**
+ * One settled run's report for `get_result`, whose extension registers the tool whether this
+ * switch is on or not. Fetching is seeing: the run is marked collected, so its notification is
+ * not delivered as well.
+ */
+export async function lookupSubagentResult(
+  runtime: SubagentExtensionRuntime,
+  request: SubagentResultRequest,
+): Promise<SubagentResultAnswer> {
+  let agentId: string;
+  try {
+    agentId = await resolveAgentId(runtime, request.id);
+  } catch (error) {
+    return { text: errorMessage(error), isError: true };
+  }
+  const endCollection = runtime.beginResultCollection?.(agentId);
+  try {
+    let run: SubagentRunInfo | null | undefined;
+    if (request.wait) {
+      // The budget is validated before the first lookup, so an invalid one costs no read and
+      // starts nothing.
+      const timeoutMs = waitTimeoutMs(request.waitTimeoutSeconds);
+      // The last status a lookup answered with, never one invented for a lookup that has not
+      // answered yet.
+      let lastSeen: SubagentRunInfo | null | undefined;
+      const settled = await waitForSubagent(async (pollSignal) => {
+        for (;;) {
+          const found = await runtime.get(agentId);
+          pollSignal.throwIfAborted();
+          lastSeen = found;
+          if (!found || TERMINAL_SUBAGENT_STATUSES.has(found.status)) return found;
+          await pollDelay(pollSignal);
+        }
+      }, timeoutMs, request.signal);
+      if (settled === undefined) {
+        return {
+          text: waitTimeoutText(lastSeen ?? undefined, agentId, timeoutMs),
+          details: lastSeen ? subagentToolDetails(lastSeen) : undefined,
+        };
+      }
+      run = settled;
+    } else {
+      run = await runtime.get(agentId);
+    }
+    if (!run) {
+      return { text: withSubagentCandidates(`Subagent not found: ${request.id}`, request.sessionManager), isError: true };
+    }
+    // The parent now holds this result, so the completion notification must not deliver the same
+    // text again and wake a duplicate turn — a foreground run whose wait expired reports on its
+    // own as well, so every terminal run is marked.
+    if (TERMINAL_SUBAGENT_STATUSES.has(run.status)) runtime.markResultConsumed(run);
+    return {
+      text: subagentFinalText(run),
+      details: subagentToolDetails(run),
+      ...(run.status === "failed" ? { isError: true } : {}),
+    };
+  } finally {
+    endCollection?.();
+  }
 }
 
 export function createSubagentExtension(
@@ -594,7 +673,7 @@ export function createSubagentExtension(
             if (execution.run.runInBackground) {
               notifyOnCompletion(execution);
               return {
-                content: [{ type: "text", text: `Subagent started in background. Session ID: ${shortSessionId(execution.run.sessionId)}. Its report arrives on its own when it finishes — do not poll it, call get_subagent_result for it, or wait on it. Do other work that does not need it if you have any; if you have none, stop — no output, no tools — until it arrives. Stopping does not cancel the subagent.` }],
+                content: [{ type: "text", text: `Subagent started in background. Session ID: ${shortSessionId(execution.run.sessionId)}. Its report arrives on its own when it finishes — do not poll it, call get_result for it, or wait on it. Do other work that does not need it if you have any; if you have none, stop — no output, no tools — until it arrives. Stopping does not cancel the subagent.` }],
                 details: subagentToolDetails(execution.run),
               };
             }
@@ -621,70 +700,6 @@ export function createSubagentExtension(
           } finally {
             attached = false;
             signal?.removeEventListener("abort", onParentAbort);
-          }
-        },
-      }));
-
-      pi.registerTool(defineTool({
-        name: "get_subagent_result",
-        label: "Get agent result",
-        description: "Fetch a subagent's report that is no longer in the conversation, or when the user asks for it. Never call this to check or wait for a run; its report arrives on its own.",
-        exposure: SUBAGENT_TOOL_EXPOSURE,
-        parameters: Type.Object({
-          agent_id: Type.String({ description: "The subagent's 8-character id, as its report shows it (the full session id also works)." }),
-          wait: Type.Optional(Type.Boolean({ description: "Only when the user asks you to wait for a run." })),
-          wait_timeout: waitTimeoutParameter(),
-        }),
-        async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-          // Registers this call so a run that settles under it is not also announced as a
-          // notification; see `beginSubagentResultCollection` in the runtime.
-          let agentId: string;
-          try {
-            agentId = await resolveAgentId(runtime, params.agent_id);
-          } catch (error) {
-            return { content: [{ type: "text", text: errorMessage(error) }], details: undefined, isError: true };
-          }
-          const endCollection = runtime.beginResultCollection?.(agentId);
-          try {
-            let run: SubagentRunInfo | null | undefined;
-            if (params.wait) {
-              // The budget is validated before the first lookup, so an invalid one
-              // costs no read and starts nothing.
-              const timeoutMs = waitTimeoutMs(params.wait_timeout);
-              // The last status a lookup answered with, never one invented for a
-              // lookup that has not answered yet.
-              let lastSeen: SubagentRunInfo | null | undefined;
-              const settled = await waitForSubagent(async (pollSignal) => {
-                for (;;) {
-                  const found = await runtime.get(agentId);
-                  pollSignal.throwIfAborted();
-                  lastSeen = found;
-                  if (!found || TERMINAL_SUBAGENT_STATUSES.has(found.status)) return found;
-                  await pollDelay(pollSignal);
-                }
-              }, timeoutMs, signal);
-              if (settled === undefined) {
-                return {
-                  content: [{ type: "text", text: waitTimeoutText(lastSeen ?? undefined, agentId, timeoutMs) }],
-                  details: lastSeen ? subagentToolDetails(lastSeen) : undefined,
-                };
-              }
-              run = settled;
-            } else {
-              run = await runtime.get(agentId);
-            }
-            if (!run) return { content: [{ type: "text", text: withSubagentCandidates(`Subagent not found: ${params.agent_id}`, ctx?.sessionManager) }], details: undefined, isError: true };
-            // The parent now holds this result, so the completion notification must not
-            // deliver the same text again and wake a duplicate turn — a foreground run whose
-            // wait expired reports on its own as well, so every terminal run is marked.
-            if (TERMINAL_SUBAGENT_STATUSES.has(run.status)) runtime.markResultConsumed(run);
-            return {
-              content: [{ type: "text", text: subagentFinalText(run) }],
-              details: subagentToolDetails(run),
-              ...(run.status === "failed" ? { isError: true } : {}),
-            };
-          } finally {
-            endCollection?.();
           }
         },
       }));
@@ -739,7 +754,7 @@ export function createSubagentExtension(
             };
           }
           // A run the parent stops itself has no reason to report back, so this call holds its
-          // completion the way an in-flight `get_subagent_result` does and takes the settled run as
+          // completion the way an in-flight `get_result` does and takes the settled run as
           // its own result: the notification then finds the parent already holding the outcome.
           const endCollection = runtime.beginResultCollection?.(agentId);
           try {

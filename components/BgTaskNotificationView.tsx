@@ -19,7 +19,7 @@ export function BgTaskNotificationView({ text, fallback }: { text: string; fallb
         rows={[
           { label: "Outcome", value: `${report.outcome} in ${report.duration}s` },
           { label: "Command", value: report.command },
-          { label: "Log file", value: report.logPath },
+          { label: "Result", value: report.fetchHint },
         ]}
       />
       <div style={{ marginTop: 8 }}>

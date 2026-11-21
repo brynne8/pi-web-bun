@@ -1,15 +1,21 @@
-import { randomBytes } from "node:crypto";
-import { lstatSync, mkdirSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { lstatSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
+import {
+  BG_LOG_DIR,
+  BG_LOG_UNASSIGNED_DIR,
+  bgLogDirName,
+  countBgTaskLogLines,
+  newBgLogPath,
+} from "./bg-task-log.ts";
 import {
   BG_TASK_NOTIFICATION_CUSTOM_TYPE,
   describeBgTaskOutcome,
   type BgTaskOutcome,
 } from "./bg-task-notification.ts";
+import { bgTaskHandle } from "./bg-task-handle.ts";
+import { bgTaskFetchHint } from "./get-result-tool.ts";
 import { pendingTitleFrom } from "./pending-notifications.ts";
 import type { SettledReportSink } from "./settled-report-note.ts";
-import { SESSION_ID_PATTERN } from "./session-ui-state-shared.ts";
 
 /**
  * Foreground bash commands that outlive this switch to background mode, where
@@ -21,48 +27,17 @@ export const FOREGROUND_AUTO_BACKGROUND_MS = 120_000;
 /** Cap on the pre-handoff output kept in memory before it spills to the log file. */
 const BUFFER_CAP_BYTES = 4 * 1024 * 1024;
 
-/**
- * Where spill logs live: `<BG_LOG_DIR>/<sessionId>/<name>.log`, one directory per
- * session so that deleting a session can take its logs with it
- * (`deleteBgLogsForSession`) — a flat file named after nothing, which is what this
- * was, could never be found again from the session that owned it.
- */
-const BG_LOG_DIR = join(tmpdir(), "pi-web-bg-tasks");
-
-/**
- * Bucket for a task whose session id is unknown. Its leading `_` is a name
- * `SESSION_ID_PATTERN` can never produce, so it can never collide with a real
- * session's directory, and no session delete can ever be aimed at it. Logs here
- * are kept only by the sweep.
- */
-const BG_LOG_UNASSIGNED_DIR = "_unassigned";
-
-/** A pi session id is a UUID; a longer string is not one and does not become a directory name. */
-const MAX_BG_LOG_SESSION_ID_LENGTH = 128;
-
 /** A background log goes this long after its last write. */
 const BG_LOG_RETENTION_MS = 24 * 60 * 60 * 1000;
-
-/**
- * The one directory name a session's logs may live in: the id itself when it is a
- * single safe path component (`SESSION_ID_PATTERN`, the rule the session id is
- * already validated with everywhere else), otherwise the shared bucket — never the
- * root directory, and never a `..` or a separator on its way out of `BG_LOG_DIR`.
- */
-function bgLogDirName(sessionId?: string): string {
-  if (!sessionId || sessionId.length > MAX_BG_LOG_SESSION_ID_LENGTH) return BG_LOG_UNASSIGNED_DIR;
-  return SESSION_ID_PATTERN.test(sessionId) ? sessionId : BG_LOG_UNASSIGNED_DIR;
-}
 
 /**
  * Hand out a task's log path, sweeping on the way. The startup sweep
  * (`registerNodeInstrumentation()`) is the one that does not need a task to start.
  */
 export function bgLogPath(sessionId?: string): string {
-  const dir = join(BG_LOG_DIR, bgLogDirName(sessionId));
-  mkdirSync(dir, { recursive: true });
+  const path = newBgLogPath(sessionId);
   pruneBgLogs();
-  return join(dir, `${Date.now().toString(36)}-${randomBytes(4).toString("hex")}.log`);
+  return path;
 }
 
 /**
@@ -93,11 +68,9 @@ export function deleteBgLogsForSession(sessionId: string): void {
 }
 
 /**
- * A log is read again only by the report that names its path, so a task's log is
- * worth a day; the sweep keys on mtime, which a task still running keeps fresh by
- * writing. Three shapes go: the flat `*.log` files left in the root by the layout
- * that had no per-session directories, a session directory's stale logs, and a
- * session directory left empty. Nothing here throws.
+ * A task's log is worth a day; the sweep keys on mtime, which a task still running keeps fresh by
+ * writing. Two shapes go: a session directory's stale logs, and a session directory left empty.
+ * Nothing here throws.
  */
 export function pruneBgLogs(dir: string = BG_LOG_DIR): void {
   const deadline = Date.now() - BG_LOG_RETENTION_MS;
@@ -108,16 +81,11 @@ export function pruneBgLogs(dir: string = BG_LOG_DIR): void {
     return; // no log directory yet, or it went away mid-sweep
   }
   for (const entry of entries) {
-    const path = join(dir, entry.name);
+    // Only a session's directory is this sweep's business. A symlink, a socket or a foreign
+    // file is left alone: following one out of BG_LOG_DIR is what the name check refuses.
+    if (!entry.isDirectory()) continue;
     try {
-      if (entry.isDirectory()) {
-        pruneBgLogSessionDir(path, deadline);
-      } else if (entry.isFile() && entry.name.endsWith(".log")) {
-        // A flat log from before logs moved into per-session directories.
-        if (statSync(path).mtimeMs < deadline) unlinkSync(path);
-      }
-      // Anything else — a symlink, a socket, a foreign file — is not ours to touch,
-      // and following it out of BG_LOG_DIR is exactly what the name check refuses to.
+      pruneBgLogSessionDir(join(dir, entry.name), deadline);
     } catch {
       // Windows refuses an unlink while the writer still holds the file; the next sweep gets it.
     }
@@ -208,20 +176,52 @@ export function createBgTaskNotifier(deps: BgTaskNotifierDependencies, sink: Set
         session = await deps.reopenSession(sessionId, sessionFile);
       }
       await session.waitUntilReady();
+      const handle = bgTaskHandle(outcome.logPath);
+      // The parent already fetched this result through `get_result`; the report would repeat what
+      // it holds. `take` rather than `has`, so the mark lives exactly one report.
+      if (takeBgTaskResultConsumed(handle)) return;
       // The report joins the batch already in the parent's queue, so a run of tasks that finish
       // together reaches the model as one message rather than one message per task.
       await sink.deliver(sessionId, {
         kind: "bash",
-        id: basename(outcome.logPath),
+        id: handle,
         title: pendingTitleFrom(outcome.command),
         outcome: describeBgTaskOutcome(outcome),
         finishedAtMs: outcome.finishedAtMs,
         customType: BG_TASK_NOTIFICATION_CUSTOM_TYPE,
-        fetchHint: `read("${outcome.logPath}")`,
+        fetchHint: bgTaskFetchHint(handle),
+        lines: (await countBgTaskLogLines(outcome.logPath)) ?? undefined,
         text,
       });
     },
   };
+}
+
+/**
+ * Handles whose result the parent already collected, bounded so a long session's set stays small.
+ * A handle names one task, so the mark needs no run identity the way a resumed subagent does.
+ */
+function consumedBgTaskResults(): Map<string, true> {
+  const host = globalThis as { __piBgTaskConsumedResults?: Map<string, true> };
+  if (!(host.__piBgTaskConsumedResults instanceof Map)) host.__piBgTaskConsumedResults = new Map();
+  return host.__piBgTaskConsumedResults;
+}
+
+/** The parent fetched this task's result, so its report must not be delivered as well. */
+export function recordBgTaskResultConsumed(handle: string): void {
+  const marks = consumedBgTaskResults();
+  marks.delete(handle);
+  marks.set(handle, true);
+  while (marks.size > 500) {
+    const oldest = marks.keys().next().value;
+    if (oldest === undefined) break;
+    marks.delete(oldest);
+  }
+}
+
+/** Take the mark for this handle, if the parent left one. */
+export function takeBgTaskResultConsumed(handle: string): boolean {
+  return consumedBgTaskResults().delete(handle);
 }
 
 // The live-task registry lives on `globalThis` (lib/bg-task-registry.ts), because the routes that list

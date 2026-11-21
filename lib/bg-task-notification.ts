@@ -4,6 +4,9 @@
  * parse it back for display, without reformatting the session file.
  */
 
+import { bgTaskHandle } from "./bg-task-handle.ts";
+import { bgTaskFetchHint } from "./get-result-tool.ts";
+
 export interface BgTaskOutcome {
   command: string;
   logPath: string;
@@ -27,7 +30,11 @@ const GUARD =
 export const BG_TASK_NOTIFICATION_PREFIX = `${GUARD}\n\n`;
 
 const COMMAND_MARKER = "Command: ";
-const LOG_MARKER = "\nLog file: ";
+/**
+ * Where the fetch hint sits. It is not a path: a model handed a log's path reads the file itself
+ * and then still receives the report, so the same result would be paid for twice.
+ */
+const RESULT_MARKER = "\nResult: ";
 const TAIL_MARKER = "\n\nOutput tail:\n```\n";
 
 /** How the task ended, in the words both the report and the pending index use. */
@@ -41,18 +48,18 @@ export function describeBgTaskOutcome(outcome: BgTaskOutcome): string {
         : `exited with code ${outcome.exitCode}`;
 }
 
-/** What the model reads when a background task settles: status, timing, log location, output tail. */
+/** What the model reads when a background task settles: status, timing, how to fetch it, tail. */
 export function buildBgTaskNotification(outcome: BgTaskOutcome, tail: string): string {
   const duration = Math.max(0, Math.round((outcome.finishedAtMs - outcome.startedAtMs) / 100) / 10);
   const status = describeBgTaskOutcome(outcome);
   const command = outcome.command.length > 500 ? `${outcome.command.slice(0, 500)}…` : outcome.command;
-  return `${BG_TASK_NOTIFICATION_PREFIX}Background bash task ${status} in ${duration}s.\n${COMMAND_MARKER}${command}${LOG_MARKER}${outcome.logPath}${TAIL_MARKER}${tail || "(no output)"}\n\`\`\``;
+  return `${BG_TASK_NOTIFICATION_PREFIX}Background bash task ${status} in ${duration}s.\n${COMMAND_MARKER}${command}${RESULT_MARKER}${bgTaskFetchHint(bgTaskHandle(outcome.logPath))}${TAIL_MARKER}${tail || "(no output)"}\n\`\`\``;
 }
 
 /** What the model reads after the user stops a task; no guard, because a person did this. */
 export function buildBgTaskKilledNote(task: { command: string; logPath: string }): string {
   const command = task.command.length > 500 ? `${task.command.slice(0, 500)}…` : task.command;
-  return `The user stopped this background bash task.\nCommand: ${command}\nLog file: ${task.logPath}\nThe command is no longer running; do not wait for its result.`;
+  return `The user stopped this background bash task.\nCommand: ${command}${RESULT_MARKER}${bgTaskFetchHint(bgTaskHandle(task.logPath))}\nThe command is no longer running; do not wait for its result.`;
 }
 
 export interface BgTaskReport {
@@ -60,7 +67,8 @@ export interface BgTaskReport {
   outcome: string;
   duration: string;
   command: string;
-  logPath: string;
+  /** The fetch hint the report carries, e.g. `get_result("bash-3f2a9b1c")`. */
+  fetchHint: string;
   tail: string;
 }
 
@@ -81,14 +89,14 @@ export function parseBgTaskReport(text: string): BgTaskReport | null {
   const body = stripBgTaskNotificationPrefix(text);
   const header = /^Background bash task (.+?) in ([\d.]+)s\.\n/.exec(body);
   const commandStart = body.indexOf(COMMAND_MARKER);
-  const logStart = body.indexOf(LOG_MARKER);
+  const resultStart = body.indexOf(RESULT_MARKER);
   const tailStart = body.indexOf(TAIL_MARKER);
-  if (!header || commandStart === -1 || logStart === -1 || tailStart === -1) return null;
+  if (!header || commandStart === -1 || resultStart === -1 || tailStart === -1) return null;
   return {
     outcome: header[1],
     duration: header[2],
-    command: body.slice(commandStart + COMMAND_MARKER.length, logStart),
-    logPath: body.slice(logStart + LOG_MARKER.length, tailStart),
+    command: body.slice(commandStart + COMMAND_MARKER.length, resultStart),
+    fetchHint: body.slice(resultStart + RESULT_MARKER.length, tailStart),
     tail: body.slice(tailStart + TAIL_MARKER.length).replace(/\n```$/, ""),
   };
 }

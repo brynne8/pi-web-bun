@@ -50,6 +50,7 @@ import { createSubagentCompactionGuardExtension } from "./subagent-compaction-gu
 import { resolveShellTools } from "./powershell-settings";
 import { isBuiltInSubagentsEnabled, readSubagentSettings } from "./subagent-settings";
 import { pendingTitleFrom } from "./pending-notifications";
+import { subagentFetchHint } from "./get-result-tool";
 import type { SettledReportHandoff, SettledReportSink } from "./settled-report-note";
 import { SETTLED_REPORTS_CUSTOM_TYPE } from "./settled-report-note";
 import { SubagentQueue } from "./subagent-queue";
@@ -269,11 +270,11 @@ function getSubagentRuns(): Map<string, StoredSubagentExecution> {
   return globalThis.__piSubagentRuns;
 }
 
-/** How long a notification waits for an in-flight `get_subagent_result` of its own run. */
+/** How long a notification waits for an in-flight `get_result` of its own run. */
 const RESULT_COLLECTION_GRACE_MS = 2_000;
 
 /**
- * `get_subagent_result` calls currently in flight, by subagent session id. A background run that
+ * `get_result` calls currently in flight, by subagent session id. A background run that
  * settles while its parent sits inside that call must not also be announced: the parent is handed
  * the same text as a tool result within the poll interval, so the notification would only wake a
  * second turn to repeat it. This call is the one thing worth waiting for; waiting for the parent
@@ -284,10 +285,10 @@ function getResultCollectors(): Map<string, Set<ResultCollector>> {
   return globalThis.__piSubagentResultCollectors;
 }
 
-/** One in-flight `get_subagent_result`, with the handle that ends it. */
+/** One in-flight `get_result`, with the handle that ends it. */
 type ResultCollector = { done: Promise<void>; end: () => void };
 
-/** Announce that a `get_subagent_result` for `sessionId` is running; the returned fn ends it. */
+/** Announce that a `get_result` for `sessionId` is running; the returned fn ends it. */
 export function beginSubagentResultCollection(sessionId: string): () => void {
   const collectors = getResultCollectors();
   let finish = () => {};
@@ -342,7 +343,7 @@ function getParentNotifications(): Set<ParentNotification> {
 
 /**
  * Runs that can still start a turn in their parent: those in the run map, and notifications
- * not yet delivered whose result the parent has not collected with `get_subagent_result`
+ * not yet delivered whose result the parent has not collected with `get_result`
  * (`deliverParentNotification()` drops a collected one without a turn).
  */
 function unsettledSubagentRuns(): ParentNotification[] {
@@ -428,7 +429,7 @@ function getSubagentQueue(): SubagentQueue<SubagentRunInfo> {
 type SubagentRunIdentity = Pick<SubagentRunInfo, "sessionId" | "completedAt">;
 
 /**
- * Runs whose terminal result the parent already collected with `get_subagent_result`, keyed
+ * Runs whose terminal result the parent already collected with `get_result`, keyed
  * by subagent session ID and holding the collected run's `completedAt`. Each session holds at
  * most one entry.
  */
@@ -463,7 +464,7 @@ function takeResultConsumed(run: SubagentRunIdentity): boolean {
  * A run lives in `getSubagentRuns()` from dispatch until its result entry is written, so a
  * persisted `running` / `queued` status reaching `get()` without that entry (and without a running
  * wrapper) was left by a process that stopped mid-run and will never be finished. Report it as
- * `interrupted` so `get_subagent_result({ wait: true })` returns instead of polling forever, and
+ * `interrupted` so `get_result({ wait: true })` returns instead of polling forever, and
  * `resume` can pick the session up again.
  */
 function settleOrphanedRun(run: SubagentRunInfo): SubagentRunInfo {
@@ -516,7 +517,7 @@ function parentContextText(parent: HostSession): string {
  * pi creates a session file only once a user or assistant message exists, so a run that ended
  * before its prompt reached the model (stopped while queued or connecting MCP servers, a provider
  * without credentials) held its metadata and result in memory only: once its idle wrapper was
- * released, `get_subagent_result` and `resume` answered `Subagent not found` and the session left
+ * released, `get_result` and `resume` answered `Subagent not found` and the session left
  * the sidebar. Write the file at dispatch; `setSessionFile()` reloads it, so pi appends every entry.
  */
 function persistChildSession(sessionManager: SessionManager): void {
@@ -1499,7 +1500,7 @@ export function createSubagentController(
     }
     // Queued the moment the run settles, not held until the parent looks idle: a parent that runs
     // on for forty minutes delivered a burst of stale reports at the end of it. The one thing
-    // still worth waiting for is a `get_subagent_result` in flight for *this* run, which is about
+    // still worth waiting for is a `get_result` in flight for *this* run, which is about
     // to give the parent the same text as a tool result; that wait is bounded by the call.
     await awaitSubagentResultCollection(run.sessionId, RESULT_COLLECTION_GRACE_MS);
     if (takeResultConsumed(run)) return;
@@ -1514,7 +1515,7 @@ export function createSubagentController(
       outcome: run.status,
       finishedAtMs: run.completedAt ? Date.parse(run.completedAt) : Date.now(),
       customType: "pi-web:subagent-notification",
-      fetchHint: `get_subagent_result("${shortSessionId(run.sessionId)}")`,
+      fetchHint: subagentFetchHint(shortSessionId(run.sessionId)),
       text: subagentNotificationText(run),
       details: subagentToolDetails(run),
     // pi marks its run active inside the send, before the delivery's promise settles

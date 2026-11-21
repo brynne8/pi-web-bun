@@ -45,6 +45,7 @@ import { extensionUiTheme } from "./extension-ui-theme";
 import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS, type HeadlessCustomUiTui } from "./custom-ui-terminal";
 import { createSettledReportSink } from "./settled-report-note";
 import { createPendingNotificationsExtension } from "./pending-notifications-extension";
+import { createGetResultExtension } from "./get-result-extension";
 import {
   createSubagentExtension,
   preferPiWebSubagentExtension,
@@ -335,7 +336,7 @@ const CUSTOM_UI_KEYBINDINGS = new TuiKeybindingsManager(TUI_KEYBINDINGS);
 // Tools that belong to the session, not to a branch of it: the ones that reach other tools,
 // and pi-web's subagent tools, which the built-in subagent setting switches on for the whole
 // session. Navigation keeps them although the target branch was recorded without them.
-const SESSION_TOOL_NAMES = new Set<string>(["codemode", "tool_search", ...SUBAGENT_CONTROL_TOOL_NAMES]);
+const SESSION_TOOL_NAMES = new Set<string>(["codemode", "tool_search", "get_result", ...SUBAGENT_CONTROL_TOOL_NAMES]);
 
 /**
  * The active tools for a coding tool selection: it replaces only the coding tools,
@@ -1623,7 +1624,7 @@ export class AgentSessionWrapper {
             acceptPreflight = (disposition) => {
               preflightAccepted = true;
               // A prompt on a child's own chat starts no subagent run by itself. Adopt it here,
-              // before pi starts the turn, so `get_subagent_result` sees it running — but only
+              // before pi starts the turn, so `get_result` sees it running — but only
               // when pi says it started a run: a `queued` prompt (a steer or follow-up) joins the
               // one going on and must not start a second, and a `handled` one starts none. A
               // Stop's hand-over needs no mark: what it took back is sent as a prompt to an idle
@@ -3528,7 +3529,7 @@ function runtimeMessageActivityMs(entry: SessionMessageEntry): number | undefine
  * A subagent's status as the session list and viewer show it. Only this process can finish a
  * run, so a running wrapper or the live run map decides; a persisted `running` / `queued` with
  * neither was left by a process that stopped mid-run and reads as `interrupted`, as
- * `get_subagent_result` reports it. Applied per response, never to the cached scan.
+ * `get_result` reports it. Applied per response, never to the cached scan.
  */
 export function subagentDisplayStatus(sessionId: string, persisted: SubagentSessionStatus): SubagentSessionStatus {
   if (getRegistry().get(sessionId)?.isRunning()) return "running";
@@ -4007,6 +4008,11 @@ export async function startRpcSession(
                 () => listSubagentProfiles(sessionCwd),
                 isBuiltInSubagentsEnabled,
               ),
+              createGetResultExtension({
+                withdraw: (sessionId, kind, id) => SETTLED_REPORT_SINK.withdraw(sessionId, kind, id),
+                ...(isBuiltInSubagentsEnabled() ? { subagents: SUBAGENT_CONTROLLER.extensionRuntime } : {}),
+                bgTasks: isBgTasksEnabled,
+              }),
               createOmitEmptyToolsExtension(),
             ],
             extensionsOverride: (base) => preferUserPowerShellExtension(

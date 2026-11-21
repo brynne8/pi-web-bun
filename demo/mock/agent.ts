@@ -138,7 +138,7 @@ export async function agentState(session: MockSession) {
 
 // The subagent tools are one group: a session with subagents off hides all of them, and one
 // with no pinned selection has all of them active, as a real session registers them together.
-const SUBAGENT_TOOL_NAMES = ["Agent", "get_subagent_result", "steer_subagent", "abort_subagent", "list_subagent_runs"];
+const SUBAGENT_TOOL_NAMES = ["Agent", "get_result", "steer_subagent", "abort_subagent", "list_subagent_runs"];
 
 export function toolsFor(session: MockSession) {
   const pinned = readSessionToolSelectionFromEntries(session.entries);

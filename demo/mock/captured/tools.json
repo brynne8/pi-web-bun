@@ -311,7 +311,7 @@
      "type": "integer",
      "minimum": 1,
      "maximum": 2147483,
-     "description": "Seconds to wait for completion. Default: 1800 (30 minutes). Use a longer budget for long tasks. Applies only to a foreground Agent or get_subagent_result with wait: true; expiry returns status without cancelling the child."
+     "description": "Seconds to wait for completion. Default: 1800 (30 minutes). Use a longer budget for long tasks. Applies only to a foreground Agent or get_result with wait: true; expiry returns status without cancelling the child."
     },
     "model": {
      "type": "string",
@@ -337,17 +337,27 @@
   "active": true
  },
  {
-  "name": "get_subagent_result",
-  "description": "Fetch a subagent's report that is no longer in the conversation, or when the user asks for it. Never call this to check or wait for a run; its report arrives on its own.",
+  "name": "get_result",
+  "description": "Fetch a finished background result: a background command's output, or a subagent's report. Fetching counts as reading: the report you have not seen yet is withdrawn, so it will not arrive again. A background command's output reads like a file — the first lines by default, then `offset` and `limit` for the rest, and the head says where you are. Never call this to check or wait for a run; its report arrives on its own.",
   "parameters": {
    "type": "object",
    "required": [
-    "agent_id"
+    "id"
    ],
    "properties": {
-    "agent_id": {
+    "id": {
      "type": "string",
-     "description": "The subagent's 8-character id, as its report shows it (the full session id also works)."
+     "description": "The id the result shows, copied exactly: `bash-3f2a9b1c` for a background command; a subagent's 8-character id (its full session id also works)."
+    },
+    "offset": {
+     "type": "integer",
+     "minimum": 1,
+     "description": "First line of a background command's output (1-based). Default: 1."
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "description": "How many lines of a background command's output. Default: 2000."
     },
     "wait": {
      "type": "boolean",
@@ -357,12 +367,12 @@
      "type": "integer",
      "minimum": 1,
      "maximum": 2147483,
-     "description": "Seconds to wait for completion. Default: 1800 (30 minutes). Use a longer budget for long tasks. Applies only to a foreground Agent or get_subagent_result with wait: true; expiry returns status without cancelling the child."
+     "description": "Seconds to wait for completion. Default: 1800 (30 minutes). Use a longer budget for long tasks. Applies only to a foreground Agent or get_result with wait: true; expiry returns status without cancelling the child."
     }
    }
   },
   "sourceInfo": {
-   "path": "<inline:pi-web-subagents>",
+   "path": "<inline:pi-web-get-result>",
    "source": "inline",
    "scope": "temporary",
    "origin": "top-level"
