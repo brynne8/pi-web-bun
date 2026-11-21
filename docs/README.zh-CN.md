@@ -116,7 +116,9 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **长时间运行的命令转后台。** shell 命令跑过两分钟就移交成后台任务：agent 继续往下做，命令结束后以一张已完成的卡片回来。开关在**设置 → 常规 → 后台 bash 任务**，默认关闭；关着的时候就是原版那个 bash 工具，一模一样。原版的立场是：后台执行该由 pi 自己提供，而不是由网页包装层提供（[#1132](https://github.com/agegr/pi-web/pull/1132)）。（[移交是怎么发生的](./agents/background-bash.md#two-ways-into-the-background)）
 
-**这次会话在做的一切，收在右侧面板里。** 活动视图按你能动手的东西排序：看着不对的、这次对话委派出去的 subagent、后台跑完的结果、它的后台命令，以及服务器还为它留着 wrapper 或事件流的会话；而支撑这些说法的那些数字（这个页面的连接数和轮询往返、服务器的总计、哪些页面连着）单独收进一个折叠里，合上就把它们清出视线。一张任务的卡片打开它的输出；一个 subagent 的行可以把对话切到它，或者读它的 transcript——subagent 只在这里出现一次。原版只把正在跑的命令留在它自己的工具卡片里，也没有一份「跑完了什么」的清单。（[说明](./agents/background-bash.md#the-rails-activity-view)）
+**这次会话在做的一切，收在右侧面板里。** 活动视图按你能动手的东西排序：看着不对的、这次对话委派出去的 subagent、后台跑完的结果、它的后台命令，以及服务器还为它留着 wrapper 或事件流的会话；支撑这些说法的那些数字收进一个折叠里，合上就把它们清出视线。一张任务的卡片打开它的输出。原版只把正在跑的命令留在它自己的工具卡片里，也没有一份「跑完了什么」的清单。（[说明](./agents/background-bash.md#the-rails-activity-view)）
+
+**一个 subagent 在右栏里只出现一次。** 委派出去的那次运行占一行，切过去就是它的对话，或者读它的 transcript，三个子会话因此只是一份清单、一个地方；下面那份读数里的会话列表不再给一个 family 的子会话单列行，父会话的细节用一行把它们的运行合计起来。原版没有这份清单：subagent 只有启动它的那张工具卡片。（[说明](./agents/subagents.md#agents-in-the-activity-view)）
 
 **后台跑完的东西会自己说一声，然后让开。** 活动视图里的一行用命令自己报告里的那个 id 来称呼它（`bash-3f2a9b1c`），而不是把命令原文再念一遍；它说明这条是怎么结束的——退出就算跑完，不管退出码——以及模型有没有拿到：待送达、已送达、还是已被取走。结果抵达模型三十秒之后这一行就走了，于是这份清单永远只是「还没人取走的那些」，点一下则把对话滚到它那张卡片。原版没有一份「跑完了什么」的清单。（[说明](./agents/background-bash.md#notifications)）
 
@@ -148,7 +150,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **运行时按钮不挪位。** 「停止」放在输入框里，与「引导」和「后续消息」并排，输入框下方那一排在运行中和结束后只有一套摆法——你正要点的东西不会在这次运行结束的一瞬变成别的东西。原版在一次运行进行时把工具和压缩这两个控件从这一排里撤走，运行结束再放回「停止」自己的位置上，另外挡住一次运行刚结束时的误点（[#1131](https://github.com/agegr/pi-web/pull/1131)）。（[说明](./agents/sessions.md#composer-action-row-nothing-moves-under-the-pointer-at-a-run-boundary)）
 
-**「停止」会回答你排下的消息。** 按下「停止」结束这次运行，还在排队等引导的消息会送进属于它自己的那次运行：模型照着你写下的内容回答，而不是压在它下面一声不响。队列在运行停下之前清空，所以不会有消息被送进一个正在死去的运行、留在那里没有人回答。带着附件的那条消息会连图片一起回到输入框，而不是丢了附件被发出去。队列空了之后再按一次「停止」，结束一切。原版的「停止」只收回它自己的召回覆盖的那一段：挡在压缩后面的提示词（[#1426](https://github.com/agegr/pi-web/pull/1426)）和服务端根本没收到的发送（[#1457](https://github.com/agegr/pi-web/pull/1457)）；自 [#1576](https://github.com/agegr/pi-web/pull/1576) 起它也会清空 pi 的队列，把文字交回输入框，等着你再发一次。（[说明](./agents/sessions.md#stop-and-the-messages-still-queued-librpc-managerts-hooksuseagentsessionts)）
+**「停止」会回答你排下的消息。** 按下「停止」结束这次运行，还在排队等引导的消息会送进属于它自己的那次运行：模型照着你写下的内容回答，而不是压在它下面一声不响。队列在运行停下之前清空，所以不会有消息被送进一个正在死去的运行；召回的那条消息连附件一起保留。队列空了之后再按一次「停止」，结束一切。原版的「停止」只收回它自己的召回覆盖的那一段：挡在压缩后面的提示词（[#1426](https://github.com/agegr/pi-web/pull/1426)）和服务端根本没收到的发送（[#1457](https://github.com/agegr/pi-web/pull/1457)）；自 [#1576](https://github.com/agegr/pi-web/pull/1576) 起它也会清空 pi 的队列，把文字交回输入框，等着你再发一次。（[说明](./agents/sessions.md#stop-and-the-messages-still-queued-librpc-managerts-hooksuseagentsessionts)）
 
 **模型没回答的消息，「停止」把它还给你。** 在一次什么都没产出的运行上按「停止」——没有一个字、没有一段思考、没有启动过工具——那条消息就回到输入框里，对话也退回到它之前：记录里不会留着一条没有人回答的消息，再试一次也不需要开分支。已经开始思考的运行算已经有了回答，在那里按「停止」只是停下它。被放弃的提示词仍留在会话文件里，所以分支切换器还能把它显示出来。原版把那条消息连同一条空回复留在原处，而从那条消息编辑就会在你旁边另开一个分支。（[说明](./agents/sessions.md#stop-and-the-prompt-that-got-no-reply-librpc-managerts-hooksuseagentsessionts)）
 
@@ -163,8 +165,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 **一次子代理调用不带文件清单。** `Agent` 收的参数只有 `subagent_type`、`prompt`、`description`、`run_in_background`、`resume`、`model` 和 `isolation`：要让子代理看哪些文件，就写在 `prompt` 里，它用自己的 `read` 去打开。思考档位、轮次上限、是否继承这段对话都由 profile 决定，思考档位跟着模型引用一起写（写成 `x:high`）。原版在调用上保留 `input_files` 列表，和它从同一个 PR 拿到的 profile 参数并列（[#1138](https://github.com/agegr/pi-web/pull/1138)）。（[说明](./agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）
 
 **子代理默认在后台跑。** `Agent` 把任务交出去就返回，子代理干完再把报告送回来。写 `run_in_background: false` 就改成在前台等结果，最多等到 `wait_timeout`；profile 也可以把这个前台等待变成自己的默认。`explore` 和 `plan` 出厂就是前台，所以调研结果和计划都在要用它们的那件事之前到手。原版除非调用明确要后台，否则每次委派都在前台等。（[说明](./agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）
-**一份指令，子代理也读。** `APPEND_SYSTEM.md`——`~/.pi/agent/APPEND_SYSTEM.md`，或受信项目里的 `.pi/APPEND_SYSTEM.md`——会追加进主会话的系统提示，也会追加进它委派出去的每一个 subagent 的系统提示，独立 worktree 的那次运行也在内，位置在 profile 自己的提示词之前。项目目录受信时读项目那一份，否则由全局那一份回答。原版只把它追加进主会话：subagent 的提示里只有 pi 的那些段和 profile 的文字，这份文件一个字都不在。（[说明](./agents/subagents.md#instructions-a-child-shares-with-its-parent)）
-**子代理读项目自己的那一份说明。** 项目的上下文文件——`AGENTS.md`，项目写 `CLAUDE.md` 时就是它——会加载进子代理的提示词，而它上面那几层目录的一概不读：全局 agent 目录的那份和每一级祖先的都留在原处。独立 worktree 的那次运行读的是它 checkout 出来的那一份。原版一点上下文文件都不加载进子代理。（[说明](./agents/subagents.md#instructions-a-child-shares-with-its-parent)）
+**一份指令，子代理也读。** `APPEND_SYSTEM.md`——`~/.pi/agent/APPEND_SYSTEM.md`，或受信项目里的 `.pi/APPEND_SYSTEM.md`——会追加进主会话的系统提示，也会追加进它委派出去的每一个 subagent 的系统提示，独立 worktree 的那次运行也在内，位置在 profile 自己的提示词之前。项目目录受信时读项目那一份，否则由全局那一份回答。原版只把它追加进主会话，subagent 一个字都收不到。（[说明](./agents/subagents.md#instructions-a-child-shares-with-its-parent)）
 
 
 
@@ -198,7 +199,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **删除会带走会话在别处留下的东西。** 隔离运行的 subagent 在自己的 git worktree 里工作，它的会话文件因此记在那个 worktree 路径下，自成目录。删除父会话时会通读整个 sessions 根目录去找这样的子会话，连它一起删，并把留下来的重新挂到最近一个仍然存在的祖先。被删空的东西也跟着走：它清空的目录，还有你在应用外删掉某个项目目录之后侧栏仍替它保有的位置和名称。原版寻找子会话、也寻找该改挂谁，只看被删文件所在的那些目录。（[说明](./agents/sessions.md#session-sidebar-project-groups-pins-and-archive)）
 
-**worktree 认的是你给整个仓库的信任。** 隔离运行的 subagent 在 git worktree 里工作，从侧边栏打开的每一个检出也是：项目的 `.pi/` 文件跟着一起过去，但那个目录住在仓库旁边，顺着路径往上找不到任何决定，于是被当作受限模式——项目的扩展、skills、设置和 MCP server 一个也不加载。如今自己没有决定的检出会直接用主检出的那一个，拒绝也一样跟着；为这个 worktree 本身写过的决定仍然优先。原版只按路径认信任，所以同一个仓库的每个 worktree 都要重新问一遍；委派出去的子会话跑在父会话的信任决定上（[#1613](https://github.com/agegr/pi-web/pull/1613)），对你自己打开的检出什么也没说。（[说明](./agents/files-and-access.md#worktrees-and-project-grouping)）
+**worktree 认的是你给整个仓库的信任。** 隔离运行的 subagent 在 git worktree 里工作，从侧边栏打开的每一个检出也是：项目的 `.pi/` 文件跟着一起过去，但那个目录住在仓库旁边，顺着路径往上找不到任何决定，于是被当作受限模式——项目的扩展、skills、设置和 MCP server 一个也不加载。自己没有决定的检出用主检出的那一个，连拒绝也跟着；为这个 worktree 本身写过的决定仍然优先。原版只按路径认信任，所以同一个仓库的每个 worktree 都要重新问一遍；委派出去的子会话跑在父会话的信任决定上（[#1613](https://github.com/agegr/pi-web/pull/1613)），对你自己打开的检出什么也没说。（[说明](./agents/files-and-access.md#worktrees-and-project-grouping)）
 
 **你自己取的名字，撑得过「生成标题」。** 在侧边栏里、或者用 `/name` 给会话取过名字之后，再按「生成标题」，你的名字原样不动：按钮会说明它保留了你取的名字。应用归不到自己名下的名字同样保留——pi TUI 取的、扩展取的、旧版本取的，都一样。只有没有名字的会话，或者名字本来就是「生成标题」自己取的，才会得到一个新名字。原版用模型写下的标题盖掉这个会话原本被叫做什么。（[说明](./agents/sessions.md#auto-naming-never-replaces-a-name-a-person-set-post-apisessionsidauto-name)）
 
