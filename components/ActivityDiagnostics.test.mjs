@@ -108,16 +108,17 @@ function measure(html, key) {
 function sessionLines(html) {
   const list = sessionList(html);
   const lines = [];
-  for (const match of list.matchAll(/class="debug-group-name">([^<]*)<|class="(debug-row(?: [a-z-]+)*)"|class="debug-row-name">([^<]*)</g)) {
+  for (const match of list.matchAll(/class="debug-group-name">([^<]*)<|class="(debug-row(?: [a-z-]+)*)"|class="debug-row-name">([^<]*)<|class="debug-row-subagents"[^>]*>([^<]*)</g)) {
     if (match[1] !== undefined) lines.push(`# ${match[1]}`);
     else if (match[2] !== undefined) {
       if (!match[2].includes("debug-list-head")) lines.push({ classes: match[2] });
     }
-    else lines[lines.length - 1].name = match[3];
+    else if (match[3] !== undefined) lines[lines.length - 1].name = match[3];
+    else lines[lines.length - 1].subagents = match[4] ?? "";
   }
   return lines.map((line) => (typeof line === "string"
     ? line
-    : `${line.classes.includes("is-sub") ? "sub " : ""}${line.name}${line.classes.includes("is-current") ? " · this chat" : ""}`));
+    : `${line.name}${line.subagents ?? ""}${line.classes.includes("is-current") ? " · this chat" : ""}`));
 }
 
 // The browser's clock is far from the server's: only the time since the answer counts.
@@ -237,6 +238,7 @@ function reply() {
         { holder: "page-mine-123", address: "127.0.0.1", client: "Chrome · macOS", openedAt: SERVER - 5 * MINUTE, connectedAt: SERVER - 5 * MINUTE, lastWriteAt: SERVER - 3 * SECOND, droppedEvents: 0, queuedBytes: 0 },
       ],
       subagents: { active: false, runs: [], notifications: [] },
+      pendingReports: [],
       mcp: null,
     },
   };
@@ -473,11 +475,12 @@ test("the meter's slots say what holds them: SSE, File, Term; a connecting one d
   assert.deepEqual([...zhMeter.matchAll(/class="debug-badge[^"]*"[^>]*>([^<]*)</g)].map((match) => match[1]), ["SSE", "SSE", "文件", "终端"]);
 });
 
-test("sessions on the server: grouped by project, the chat's first and not repeated, subagents under their root", () => {
+test("sessions on the server: grouped by project, the chat's first, and a subagent none of them", () => {
+  // A subagent is listed once, in the rail's Agents section. Its family's row says how many the
+  // family holds; a row of its own here was the same child said twice, inches apart.
   assert.deepEqual(sessionLines(render()), [
     "# app",
-    "Current chat · this chat",
-    "sub explore the repo",
+    "Current chat+1 · this chat",
     "# notes",
     "Weekly plan",
     "# Not in the session list",
@@ -487,14 +490,16 @@ test("sessions on the server: grouped by project, the chat's first and not repea
   assert.match(list, /class="debug-row is-current has-detail" title="this chat · s1 · alive · 2 event streams · 1 liveness providers · reap countdown 8m · started 2×">/);
   // The chat's row: the sidebar's short bar beside its status, its badges with their holders, its
   // details below it on the same tint.
-  const current = list.slice(list.indexOf("debug-row is-current"), list.indexOf("debug-row is-sub"));
+  const current = list.slice(list.indexOf("debug-row is-current"));
   assert.match(current, /<span class="debug-row-status"><span class="debug-status" role="img" aria-label="alive"/);
   assert.match(current, /aria-label="SSE: 2 \(this page 1, other page 1\)"/);
   assert.match(current, /<\/div><div class="debug-detail"><div class="debug-detail-line"><span class="debug-detail-id">s1<\/span>/);
   assert.match(panelSource, /\.debug-row\.has-detail \{\s*border-radius: 4px 4px 0 0;/);
   assert.match(panelSource, /\.debug-row\.is-current::before \{\s*content: "";\s*position: absolute;\s*top: 5px;\s*left: 0;\s*width: 3px;\s*height: 14px;/);
   assert.match(list, /<span class="session-tree-awaiting" role="img" aria-label="awaiting input" title="awaiting input"><\/span>/, "the sidebar's awaiting dot");
-  assert.match(list, /<span class="debug-status is-accent" title="running"><svg[^>]*class="sidebar-spin"/, "the sidebar's spinner");
+  // A subagent's running spinner belonged to its own row, and that row is gone: what a family
+  // says now is how many subagents it holds.
+  assert.match(list, /<span class="debug-row-subagents" title="1 subagent sessions, listed in Agents">\+1<\/span>/);
   assert.match(list, /<span class="debug-status-ring is-closing"><\/span>/);
   assert.match(list, /title="1 event streams" role="img" aria-label="1 event streams"><span class="debug-badge is-muted" title="1 event streams">SSE<\/span><\/span>/);
   // 3 min left when the server answered, 10 s ago.
@@ -546,10 +551,12 @@ test("server states, run statuses and close reasons read as words, not codes", (
   assert.ok(stateTitle.split("\n").includes("Page wants it yes"));
   assert.ok(stateTitle.split("\n").includes("hidden 1× · last hidden 2m 00s ago"));
   const text = visibleText(html);
-  assert.ok(text.includes("general Queued · background · 12s ago"), text);
-  // A value newer than the panel's maps reads as it came.
-  assert.ok(text.includes("sub-newe paused abort requested"));
-  assert.ok(text.includes("notifying s1 · 11s ago"));
+  // The runs are summed up in one line, never named here: they are listed in Agents.
+  assert.ok(text.includes("2 runs · 1 running"), text);
+  assert.ok(text.includes("12s ago") || text.includes("11s ago") || text.includes("10s ago"), text);
+  assert.ok(text.includes("1 to deliver"), text);
+  assert.ok(text.includes("stop requested 1"), text);
+  assert.doesNotMatch(text, /general|sub-newe|notifying/);
   assert.ok(text.includes("a run is unsettled"));
   assert.ok(titles(html).includes("github (global) · Needs sign-in"));
   assert.ok(titles(html).includes("later (project) · warming"));

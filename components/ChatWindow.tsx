@@ -34,6 +34,7 @@ import { useI18n } from "@/hooks/useI18n";
 import type { Locale } from "@/lib/i18n/types";
 import { phaseLabel } from "@/lib/chat-phase-label";
 import { useAgentSession, type AgentEndInfo, type NewSessionChoices, type NoticeItem } from "@/hooks/useAgentSession";
+import { settledNotificationsFromMessages, type RailNotification } from "@/lib/background-notifications";
 import { selectHasStreamingContent, selectIsStreaming, selectStreamingMessage, useStreamingSelector } from "@/hooks/useStreamingSelector";
 import type { StreamingStore } from "@/lib/streaming-message";
 import { streamRateKey } from "@/lib/stream-token-rate";
@@ -98,6 +99,8 @@ interface Props {
   /** Registers the debug panel's read-only reader of this chat's stream and lease. */
   onDebugSnapshotReaderChange?: (reader: (() => DebugClientSession) | null) => void;
   onSessionStatsChange?: (stats: SessionStatsInfo | null) => void;
+  /** The background results this transcript holds, for the rail's Notifications section. */
+  onNotificationsChange?: (notifications: RailNotification[]) => void;
   onSessionStatsPanelOpen?: () => void;
   /** Opens Settings on a section: a bare `/mcp` that pi's built-in MCP extension owns opens Settings › MCP. */
   onOpenSettings?: (section: SettingsSection) => void;
@@ -276,7 +279,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, durationMs, cacheMis
   );
 }
 
-export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, newSessionContextBar, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd, onSessionEnded, onToolEnd, onAttentionNeeded, onSessionCreated, onSessionForked, panel = false, onSideSession, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onDebugSnapshotReaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onOpenSettings, onContextUsageChange, onOpenFile, onFilesUploaded, onOpenSubagent, onOpenReadSnapshot, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, holdAudio }: Props) {
+export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, newSessionContextBar, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd, onSessionEnded, onToolEnd, onAttentionNeeded, onSessionCreated, onSessionForked, panel = false, onSideSession, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onDebugSnapshotReaderChange, onSessionStatsChange, onNotificationsChange, onSessionStatsPanelOpen, onOpenSettings, onContextUsageChange, onOpenFile, onFilesUploaded, onOpenSubagent, onOpenReadSnapshot, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, holdAudio }: Props) {
   const { t, locale } = useI18n();
   const isMobile = useIsMobile();
   const completionNotificationsEnabled = !isHiddenRelation(session?.relation);
@@ -582,10 +585,15 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   useLayoutEffect(() => {
     if (!pendingSearchScroll || pendingSearchScroll !== searchTarget) return;
     const selector = `[data-entry-id="${CSS.escape(pendingSearchScroll.entryId)}"]`;
-    const element = scrollContainerRef.current?.querySelector<HTMLElement>(searchMessage?.role === "user" ? selector : `${selector} [data-search-target]`);
-    if (element) {
-      scrollToMessage(element);
-      element.animate([
+    const host = scrollContainerRef.current?.querySelector<HTMLElement>(selector);
+    // A user message highlights its own bubble, an assistant reply its target block, and a custom
+    // message — a settled report's card, which has no text block to point at — itself.
+    const inner = searchMessage?.role === "user" || !host?.querySelector("[data-search-target]")
+      ? host
+      : host.querySelector<HTMLElement>("[data-search-target]");
+    if (inner) {
+      scrollToMessage(inner);
+      inner.animate([
         { backgroundColor: "var(--bg-selected)" },
         { backgroundColor: "transparent" },
       ], { duration: 2500 });
@@ -692,6 +700,17 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     onSessionStatsChange?.(sessionStatsRef.current);
   }, [statsKey, onSessionStatsChange]);
   useEffect(() => () => { onSessionStatsChange?.(null); }, [onSessionStatsChange]);
+
+  // Push the rail's notifications up: the reports this transcript already holds. Compared by a
+  // key, so a reply streaming in does not hand a new array up on every chunk.
+  const notifications = settledNotificationsFromMessages(messages, entryIds);
+  const notificationsKey = notifications.map((entry) => `${entry.kind}:${entry.id}:${entry.entryId ?? ""}`).join("|");
+  const notificationsRef = useRef(notifications);
+  notificationsRef.current = notifications;
+  useEffect(() => {
+    onNotificationsChange?.(notificationsRef.current);
+  }, [notificationsKey, onNotificationsChange]);
+  useEffect(() => () => { onNotificationsChange?.([]); }, [onNotificationsChange]);
 
   // Push context usage up to AppShell as well.
   const ctxKey = contextUsage

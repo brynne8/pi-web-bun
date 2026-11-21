@@ -52,7 +52,7 @@ import { isBuiltInSubagentsEnabled, readSubagentSettings } from "./subagent-sett
 import { pendingTitleFrom } from "./pending-notifications";
 import { subagentFetchHint } from "./get-result-tool";
 import type { SettledReportHandoff, SettledReportSink } from "./settled-report-note";
-import { SETTLED_REPORTS_CUSTOM_TYPE } from "./settled-report-note";
+import { SETTLED_REPORTS_CUSTOM_TYPE } from "./settled-report";
 import { SubagentQueue } from "./subagent-queue";
 import { isShortSessionId, shortSessionId } from "./session-short-id";
 import { addWorktree, removeWorktree } from "./worktree";

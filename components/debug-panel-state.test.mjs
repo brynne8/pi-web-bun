@@ -549,11 +549,11 @@ function grouped(catalog, ids, currentId) {
   const byId = new Map(catalog.map((session) => [session.id, session]));
   return state.groupDebugSessions(ids.map((id) => summary(id)), byId, currentId).map((group) => ({
     name: group.name,
-    rows: group.rows.map((row) => `${row.depth ? "  " : ""}${row.id}${row.current ? " *" : ""}${row.placeholder ? " (placeholder)" : ""}`),
+    rows: group.rows.map((row) => `${row.id}${row.current ? " *" : ""}${row.placeholder ? " (placeholder)" : ""}${row.subagents > 0 ? ` +${row.subagents}` : ""}`),
   }));
 }
 
-test("sessions are grouped like the sidebar: the chat's project and family first, subagents under their root", () => {
+test("sessions are grouped like the sidebar: the chat's project and family first, a family's subagents counted", () => {
   const catalog = [
     info("a", { modified: "2026-10-05T00:00:00Z" }),
     info("a1", { ...sub("a"), modified: "2026-10-05T01:00:00Z" }),
@@ -566,16 +566,19 @@ test("sessions are grouped like the sidebar: the chat's project and family first
     info("e", { cwd: "/work/p4", projectRoot: undefined, projectKey: undefined, modified: "not a date" }),
   ];
   const ids = ["x-unlisted", "a1", "c", "a", "d1", "b", "a2", "a2x", "e"];
+  // A subagent gets no row of its own: it is listed once, in the rail's Agents section. The
+  // family's root says how many it holds, placeholder or not.
   assert.deepEqual(grouped(catalog, ids, "b"), [
-    { name: "p1", rows: ["b *", "a", "  a2x", "  a2", "  a1"] },
+    { name: "p1", rows: ["b *", "a +3"] },
     { name: "p2", rows: ["c"] },
-    { name: "p3", rows: ["d (placeholder)", "  d1"] },
+    { name: "p3", rows: ["d (placeholder) +1"] },
     { name: "p4", rows: ["e"] },
     { name: null, rows: ["x-unlisted"] },
   ]);
-  // The chat a subagent: its family leads, the subagent marked.
+  // The chat is a subagent: its family leads, and the root carries the count of the subagents the
+  // server holds something for — here only the chat itself.
   assert.deepEqual(grouped(catalog, ["c", "a1", "b"], "a1"), [
-    { name: "p1", rows: ["a (placeholder)", "  a1 *", "b"] },
+    { name: "p1", rows: ["a (placeholder) +1", "b"] },
     { name: "p2", rows: ["c"] },
   ]);
   // The chat unlisted (a fresh composer's session): that group first.

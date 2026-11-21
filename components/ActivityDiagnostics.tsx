@@ -2,8 +2,7 @@
 
 import { Component, Fragment, useMemo, type ReactNode } from "react";
 import type { DebugClientSession, DebugEventConnectionSnapshot, DebugSessionDetail, DebugSessionSummary, DebugSnapshotResponse } from "@/lib/debug-types";
-import type { SessionInfo, SubagentSessionStatus } from "@/lib/types";
-import { StatusIcon } from "./ActivityAgents";
+import type { SessionInfo } from "@/lib/types";
 import { MCP_SESSION_STATE_KEYS } from "./mcp-config-helpers";
 import { sessionRowTitle } from "./SessionTree";
 import { FolderIcon, SpinnerIcon } from "./SidebarIcons";
@@ -12,7 +11,6 @@ import {
   DEBUG_LEASE_OUTCOME_KEYS,
   DEBUG_POLL_MS,
   DEBUG_REATTACH_REASON_KEYS,
-  DEBUG_RUN_STATUS_KEYS,
   DEBUG_SOURCE_KIND_KEYS,
   DEBUG_SAMPLE_COUNT,
   DEBUG_STATUS_KEYS,
@@ -1134,58 +1132,36 @@ function RunChips({ detail, t }: { detail: DebugSessionDetail; t: Translate }) {
   );
 }
 
-const RUN_TONES: Partial<Record<string, DebugTone>> = {
-  completed: "ok",
-  failed: "error",
-  aborted: "warning",
-  interrupted: "warning",
-};
-
-/** A subagent run's mark: the sidebar's spinner while it runs, the agent switcher's shapes once settled. */
-function RunIcon({ status }: { status: string }) {
-  if (status === "running" || status === "starting") {
-    return <span className="debug-run-icon is-accent"><SpinnerIcon size={12} /></span>;
-  }
-  const tone = RUN_TONES[status];
-  if (tone) return <span className={`debug-run-icon is-${tone}`}><StatusIcon status={status as SubagentSessionStatus} /></span>;
-  return <span className="debug-run-icon"><span className="debug-status-ring is-alive" /></span>;
-}
-
 function CardSubagents({ detail, clock, ctx }: { detail: DebugSessionDetail; clock: DebugServerClock; ctx: Ctx }) {
-  const { t, titleOf } = ctx;
+  const { t } = ctx;
   const subagents = detail.subagents;
   if (!subagents.active && subagents.runs.length === 0 && subagents.notifications.length === 0) return null;
+  const runs = subagents.runs;
+  const running = runs.filter((run) => run.status === "running" || run.status === "starting" || run.status === "queued").length;
+  const waiting = runs.filter((run) => run.mcpWaiting).length;
+  const aborting = runs.filter((run) => run.abortRequested).length;
+  const delivering = subagents.notifications.length;
   const ago = (at: number) => formatAgo(clock.age(at), t);
+  const latest = runs.reduce<number | null>((newest, run) => (
+    run.dispatchedAt !== null && (newest === null || run.dispatchedAt > newest) ? run.dispatchedAt : newest
+  ), null);
   return (
     <div className="debug-block">
       <div className="debug-subhead">
         <span>{t("debug.server.subagents")}</span>
         {subagents.active && <Chip tone="accent">{t("debug.server.subagentsActive")}</Chip>}
       </div>
-      {subagents.runs.map((run, index) => (
-        <div key={`${run.sessionId}:${index}`} className="debug-run-line">
-          <RunIcon status={run.status} />
-          <span className="debug-run-name">{titleOf(run.sessionId) ?? run.profile ?? shortDebugId(run.sessionId)}</span>
-          <span className="debug-line">
-            {join([
-              translateDebugCode(run.status, DEBUG_RUN_STATUS_KEYS, t),
-              run.background && t("debug.server.background"),
-              run.resumed && t("debug.server.resumed"),
-              run.dispatchedAt !== null && ago(run.dispatchedAt),
-            ])}
-          </span>
-          {run.abortRequested && <Chip tone="warning">{t("debug.server.abortRequested")}</Chip>}
-          {run.mcpWaiting && <Chip tone="warning">{t("debug.run.waitingForMcp")}</Chip>}
-        </div>
-      ))}
-      {subagents.notifications.map((notification, index) => (
-        <div key={`${notification.sessionId}:${index}`} className="debug-line is-warning">
+      <div className="debug-run-line">
+        <span className="debug-line">
           {join([
-            t("debug.server.notifying", { parent: shortDebugId(notification.parentSessionId) }),
-            notification.since !== null && ago(notification.since),
+            runs.length > 0 && t("debug.server.subagentsSummary", { count: runs.length, running }),
+            latest !== null && ago(latest),
+            delivering > 0 && t("debug.server.subagentsDelivering", { count: delivering }),
           ])}
-        </div>
-      ))}
+        </span>
+        {waiting > 0 && <Chip tone="warning">{`${t("debug.server.subagentsWaiting")} ${waiting}`}</Chip>}
+        {aborting > 0 && <Chip tone="warning">{`${t("debug.server.subagentsAborting")} ${aborting}`}</Chip>}
+      </div>
     </div>
   );
 }
@@ -1247,7 +1223,7 @@ function SessionRow({ row, sources, idleTimeoutMs, clock, ctx, current }: {
   const remaining = summary && summary.nextIdleCheckAt !== null ? clock.remaining(summary.nextIdleCheckAt) : null;
   const state = summary ? debugStatusState(summary) : null;
   // The chat's row with its details: they follow on the same tint.
-  const className = ["debug-row", row.depth === 1 && "is-sub", row.current && "is-current", current && "has-detail", row.placeholder && "is-placeholder"]
+  const className = ["debug-row", row.current && "is-current", current && "has-detail", row.placeholder && "is-placeholder"]
     .filter(Boolean)
     .join(" ");
   return (
@@ -1257,8 +1233,10 @@ function SessionRow({ row, sources, idleTimeoutMs, clock, ctx, current }: {
     >
       <span className="debug-row-status">{state && <StatusSlot state={state} label={t(DEBUG_STATUS_KEYS[state])} />}</span>
       <span className="debug-row-title">
-        {row.depth === 1 && <span className="debug-row-branch" aria-hidden="true" />}
         <span className="debug-row-name">{name}</span>
+        {row.subagents > 0 && (
+          <span className="debug-row-subagents" title={t("debug.server.subagentsTitle", { count: row.subagents })}>{`+${row.subagents}`}</span>
+        )}
         {summary && summary.starts > 1 && <span className="debug-row-starts" title={current?.startsTitle}>{`↻${summary.starts}`}</span>}
       </span>
       {summary && (
@@ -1910,18 +1888,6 @@ export const DIAGNOSTICS_CSS = `
     align-items: center;
     gap: 4px;
   }
-  .debug-row.is-sub .debug-row-title {
-    padding-left: 16px;
-  }
-  .debug-row-branch {
-    position: absolute;
-    top: calc(50% - 8px);
-    left: 4px;
-    width: 8px;
-    height: 8px;
-    border-bottom: 1px solid var(--border);
-    border-left: 1px solid var(--border);
-  }
   .debug-row-name {
     min-width: 0;
     overflow: hidden;
@@ -1930,16 +1896,14 @@ export const DIAGNOSTICS_CSS = `
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .debug-row.is-sub .debug-row-name {
-    color: var(--text-muted);
-  }
   .debug-row.is-current .debug-row-name {
     font-weight: 600;
   }
   .debug-row.is-placeholder .debug-row-name {
     color: var(--text-dim);
   }
-  .debug-row-starts {
+  .debug-row-starts,
+  .debug-row-subagents {
     flex-shrink: 0;
     color: var(--text-dim);
     font-family: var(--font-mono);
@@ -2016,9 +1980,6 @@ export const DIAGNOSTICS_CSS = `
       flex-wrap: wrap;
       justify-content: flex-start;
       padding-bottom: 4px;
-    }
-    .debug-row.is-sub .debug-row-badges {
-      padding-left: 16px;
     }
     .debug-row-badges:empty,
     .debug-list-head-holders,

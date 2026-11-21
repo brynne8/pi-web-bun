@@ -902,14 +902,18 @@ export function debugIssues({ page, server, detail, t, titleOf }: DebugIssueInpu
 
 export interface DebugSessionRow {
   id: string;
-  /** 1: a subagent under its family's root. */
-  depth: 0 | 1;
   info: SessionInfo | null;
   /** Null for a placeholder: a root the server holds nothing for, shown for its subagents. */
   summary: DebugSessionSummary | null;
   /** The session the panel shows (its card has the details). */
   current: boolean;
   placeholder: boolean;
+  /**
+   * Subagent sessions of this family the server holds something for. They get no rows of their
+   * own: a subagent is listed once, in the rail's Agents section, so a row here would be the same
+   * child said twice.
+   */
+  subagents: number;
 }
 
 export interface DebugSessionGroup {
@@ -1009,16 +1013,12 @@ export function groupDebugSessions(
     for (const family of [...project.families].sort(byNewest).sort(currentFirst)) {
       rows.push({
         id: family.root.id,
-        depth: 0,
         info: family.root,
         summary: family.summary,
         current: family.root.id === currentId,
         placeholder: family.summary === null,
+        subagents: family.subagents.length,
       });
-      const subagents = [...family.subagents].sort((a, b) => newestFirst(modifiedAt(a.info), modifiedAt(b.info)));
-      for (const { info, summary } of subagents) {
-        rows.push({ id: info.id, depth: 1, info, summary, current: info.id === currentId, placeholder: false });
-      }
     }
     return { key: project.key, name: project.name, rows };
   });
@@ -1034,11 +1034,11 @@ export function groupDebugSessions(
         || compareIds(a.sessionId, b.sessionId))
       .map((summary): DebugSessionRow => ({
         id: summary.sessionId,
-        depth: 0,
         info: null,
         summary,
         current: summary.sessionId === currentId,
         placeholder: false,
+        subagents: 0,
       }));
     const group = { key: UNLISTED_GROUP_KEY, name: null, rows };
     if (currentUnlisted) groups.unshift(group);

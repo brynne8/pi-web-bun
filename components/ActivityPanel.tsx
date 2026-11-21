@@ -4,10 +4,12 @@ import { useCallback, useEffect, useMemo, useState, type RefObject } from "react
 import { useI18n } from "@/hooks/useI18n";
 import { bgTaskState } from "@/lib/bg-task-status";
 import { formatActiveDuration, formatCompactCount } from "@/lib/session-stats-format";
+import { arrivingNotifications, mergeRailNotifications, type RailNotification } from "@/lib/background-notifications";
 import type { BgTaskSummary } from "@/lib/bg-task-types";
 import type { DebugClientSession } from "@/lib/debug-types";
 import type { SessionInfo } from "@/lib/types";
 import { ActivityAgents, type ActivityAgentsProps } from "./ActivityAgents";
+import { ActivityNotifications } from "./ActivityNotifications";
 import {
   DIAGNOSTICS_CSS,
   DiagnosticsNumbers,
@@ -40,6 +42,10 @@ interface Props {
   sessions: readonly SessionInfo[];
   /** The session on screen and what it delegated; null while no chat is shown. */
   agents: ActivityAgentsProps | null;
+  /** Background results this session finished, and the ones still on their way to it. */
+  notifications: readonly RailNotification[];
+  /** Scrolls the chat to a report's card. */
+  onOpenNotification(entryId: string): void;
 }
 
 function firstLine(command: string): string {
@@ -74,6 +80,8 @@ export function ActivityPanel({
   selectedSessionId,
   sessions,
   agents,
+  notifications,
+  onOpenNotification,
 }: Props) {
   const { t, locale } = useI18n();
   const [now, setNow] = useState(() => Date.now());
@@ -85,6 +93,12 @@ export function ActivityPanel({
   const readout = useDebugReadout({ readerRef, selectedSessionId, pollingMs: detailsOpen ? DEBUG_POLL_MS : SLOW_POLL_MS });
   const { page, server, shown } = readout;
   const runningCount = tasks.filter((task) => task.finishedAtMs === null).length;
+  // Delivered results come from the transcript (no request); the ones still on their way ride the
+  // read-out's poll, so the section never asks the server anything of its own.
+  const allNotifications = mergeRailNotifications(
+    notifications,
+    arrivingNotifications(shown.server.reply?.session?.pendingReports ?? []),
+  );
   const titleOf = useMemo(() => {
     const byId = new Map(sessions.map((session) => [session.id, session]));
     return (id: string) => {
@@ -161,6 +175,10 @@ export function ActivityPanel({
 
         {agents && (
           <ActivityAgents {...agents} />
+        )}
+
+        {selectedSessionId !== null && (
+          <ActivityNotifications notifications={allNotifications} now={now} onOpenNotification={onOpenNotification} />
         )}
 
         <section className="activity-section">

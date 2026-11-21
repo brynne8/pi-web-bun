@@ -100,6 +100,7 @@ import type { BlockingExtensionUiRequest, SessionInfo, SessionTreeNode } from "@
 import type { McpErrorResponse, ProjectTrustStatus } from "@/lib/api-types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { AgentEndInfo, NewSessionChoices } from "@/hooks/useAgentSession";
+import type { RailNotification } from "@/lib/background-notifications";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { formatActiveDuration, formatCompactCount, formatCostShort } from "@/lib/session-stats-format";
 import type { FileViewerState } from "@/lib/file-viewer-state";
@@ -454,6 +455,17 @@ export function AppShell() {
   activeSessionIdRef.current = selectedSession?.id ?? null;
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
+  }, []);
+
+  // The rail's Notifications section: what this chat's transcript already holds, pushed up by
+  // ChatWindow. The ones still on their way come with the read-out's own poll.
+  const [notifications, setNotifications] = useState<RailNotification[]>([]);
+  const handleNotificationsChange = useCallback((next: RailNotification[]) => {
+    setNotifications(next);
+  }, []);
+  const handleOpenNotification = useCallback((entryId: string) => {
+    const sessionId = activeSessionIdRef.current;
+    if (sessionId) setSearchTarget({ sessionId, entryId });
   }, []);
   const [copiedSessionField, setCopiedSessionField] = useState<SessionCopyField | null>(null);
   const sessionCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2901,6 +2913,7 @@ export function AppShell() {
               onSystemInfoLoaderChange={handleSystemInfoLoaderChange}
               onDebugSnapshotReaderChange={handleDebugSnapshotReaderChange}
               onSessionStatsChange={handleSessionStatsChange}
+              onNotificationsChange={handleNotificationsChange}
               onSessionStatsPanelOpen={openSessionStatsPanel}
               onOpenSettings={openSettingsSection}
               onContextUsageChange={handleContextUsageChange}
@@ -3088,6 +3101,8 @@ export function AppShell() {
                 readerRef={debugSnapshotReaderRef}
                 selectedSessionId={selectedSession?.id ?? null}
                 sessions={sessionsWithSelection}
+                notifications={notifications}
+                onOpenNotification={handleOpenNotification}
                 agents={activeSessionFamily && activeSessionFamily.subagents.length > 0 && selectedSession ? {
                   rootSession: activeSessionFamily.root,
                   subagents: activeSessionFamily.subagents,

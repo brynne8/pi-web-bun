@@ -152,6 +152,15 @@ export interface DebugMcpHost {
   problems: number;
 }
 
+/** One settled report the server still holds for a session: the model's next `await_results` entry. */
+export interface DebugPendingReport {
+  kind: "bash" | "subagent";
+  id: string;
+  title: string;
+  outcome: string;
+  finishedAtMs: number;
+}
+
 export interface DebugSessionDetail {
   sessionId: string;
   wrapper: DebugWrapperSnapshot | null;
@@ -167,6 +176,8 @@ export interface DebugSessionDetail {
     runs: DebugSubagentRun[];
     notifications: DebugParentNotification[];
   };
+  /** Reports settled and not yet delivered: what the rail lists as arriving. */
+  pendingReports: DebugPendingReport[];
   /** Null: no wrapper, or a session without an MCP host (Chat only, MCP unavailable). */
   mcp: DebugMcpHost | null;
 }

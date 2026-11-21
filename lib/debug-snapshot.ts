@@ -80,6 +80,7 @@ function buildDetail(
       runs: subagents.runs,
       notifications: subagents.notifications,
     },
+    pendingReports: entry ? read(() => entry.readPendingReports(), []) : [],
     mcp: entry ? read(() => entry.readMcp(), null) : null,
   };
 }

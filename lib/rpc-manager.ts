@@ -45,6 +45,7 @@ import { extensionUiTheme } from "./extension-ui-theme";
 import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS, type HeadlessCustomUiTui } from "./custom-ui-terminal";
 import { createSettledReportSink } from "./settled-report-note";
 import { createPendingNotificationsExtension } from "./pending-notifications-extension";
+import { pendingNotificationsFor } from "./pending-notifications";
 import { createGetResultExtension } from "./get-result-extension";
 import {
   createSubagentExtension,
@@ -77,7 +78,7 @@ import { createPlatformInfoExtension } from "./platform-info";
 import { computeForcedSystemPrompt } from "./effective-system-prompt";
 import { createPiWebBuiltinExtensions, createSubagentCodemodeExtension, createSubagentMcpExtensions } from "./builtin-extensions";
 import type { McpHost } from "./mcp-host";
-import type { DebugMcpHost, DebugSessionLifecycle, DebugWrapperSnapshot } from "./debug-types";
+import type { DebugMcpHost, DebugPendingReport, DebugSessionLifecycle, DebugWrapperSnapshot } from "./debug-types";
 import { mcpPromptPreparation, type McpCommandCandidate } from "./mcp-command";
 import { createReadOnlyMcpPolicyExtension, createSubagentMcpPolicyExtension } from "./mcp-read-only-policy";
 import { createOmitEmptyToolsExtension } from "./omit-empty-tools";
@@ -683,6 +684,16 @@ export class AgentSessionWrapper {
   /** The MCP host's state for the debug panel; null without a host (Chat only, MCP unavailable). */
   getMcpDebugSnapshot(): DebugMcpHost | null {
     return this.mcpHost?.debugSnapshot?.() ?? null;
+  }
+
+  /**
+   * Reports that settled and have not reached this session yet: the model can already fetch them
+   * with `get_result`, and the rail's Notifications section lists them as arriving.
+   */
+  getPendingReportsDebug(): DebugPendingReport[] {
+    const manager = this.inner.sessionManager;
+    const pending = pendingNotificationsFor(manager.getSessionId(), manager.getEntries() as unknown as unknown[]);
+    return pending.map(({ kind, id, title, outcome, finishedAtMs }) => ({ kind, id, title, outcome, finishedAtMs }));
   }
 
   start(): void {
@@ -3659,9 +3670,11 @@ export interface RpcSessionDebugEntry {
   sessionFile: string | null;
   /** The MCP host's state; read for the session the panel shows only. */
   readMcp(): DebugMcpHost | null;
+  /** Reports settled and not yet delivered; read for the session the panel shows only. */
+  readPendingReports(): DebugPendingReport[];
 }
 
-type MaybeStaleWrapper = Partial<Pick<AgentSessionWrapper, "isAlive" | "isRunning" | "getDebugSnapshot" | "getMcpDebugSnapshot">>;
+type MaybeStaleWrapper = Partial<Pick<AgentSessionWrapper, "isAlive" | "isRunning" | "getDebugSnapshot" | "getMcpDebugSnapshot" | "getPendingReportsDebug">>;
 
 /** A wrapper built before a hot reload has no getDebugSnapshot(): only state and running are known. */
 function staleWrapperSnapshot(sessionId: string, wrapper: MaybeStaleWrapper): DebugWrapperSnapshot {
@@ -3731,6 +3744,7 @@ export function getRpcSessionDebugSnapshots(): RpcSessionDebugEntry[] {
       snapshot,
       sessionFile,
       readMcp: () => typeof wrapper.getMcpDebugSnapshot === "function" ? wrapper.getMcpDebugSnapshot() : null,
+      readPendingReports: () => typeof wrapper.getPendingReportsDebug === "function" ? wrapper.getPendingReportsDebug() : [],
     });
   }
   return entries;

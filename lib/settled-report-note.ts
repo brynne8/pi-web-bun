@@ -4,38 +4,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TextContent } from "./types.ts";
-import { recordPendingNotification, removePendingNotification, type PendingNotification, type PendingNotificationKind } from "./pending-notifications.ts";
-
-/**
- * One settled background report: what the model reads, and what its card renders.
- *
- * `text` is the report in the shape it has always had — the background-bash report, or the
- * subagent notification — because that text is both the model's input and the card's source.
- * Nothing here is a second copy of it.
- */
-export interface SettledReport {
-  kind: PendingNotification["kind"];
-  /** The run's own id: the subagent session id, or the background task's log id. */
-  id: string;
-  title: string;
-  outcome: string;
-  finishedAtMs: number;
-  /** The report's own custom type, which decides the card that renders it. */
-  customType: string;
-  fetchHint: string;
-  /** How many lines the result holds, when it has that shape (a background command's log). */
-  lines?: number;
-  /** What the model reads for this report, and what its card renders. */
-  text: string;
-  /** Whatever that report's card used to carry in `details`, kept per report. */
-  details?: unknown;
-}
-
-/** The custom message type a batch of settled reports is delivered under. */
-export const SETTLED_REPORTS_CUSTOM_TYPE = "pi-web:settled-reports";
-
-/** The `details.kind` that marks a message as one of these batches. */
-export const SETTLED_REPORTS_DETAILS_KIND = "pi-web-settled-reports";
+import { recordPendingNotification, removePendingNotification, type PendingNotificationKind } from "./pending-notifications.ts";
+import { SETTLED_REPORTS_CUSTOM_TYPE, SETTLED_REPORTS_DETAILS_KIND, type SettledReport } from "./settled-report.ts";
 
 /**
  * How many times a batch is put back before the sink gives up on it. One retry covers the ordinary
