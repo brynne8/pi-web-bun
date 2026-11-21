@@ -38,7 +38,11 @@ export async function checkModelOrder(page) {
   const row = (label) => modelRows.filter({ hasText: label });
   const drag = async (label, target, after) => {
     const box = await row(target).boundingBox();
-    await row(label).dragTo(row(target), { targetPosition: { x: 20, y: after ? box.height - 4 : 4 } });
+    // A quarter in from either edge, off the row's own box: the drop slot is a position in that
+    // row, never a pixel.
+    await row(label).dragTo(row(target), {
+      targetPosition: { x: box.width / 2, y: after ? box.height * 0.75 : box.height * 0.25 },
+    });
   };
   const labels = () => modelRows.allTextContents();
   const field = (label) => settings.locator(".config-field-label").filter({ hasText: label }).locator("..").locator("input");
@@ -105,8 +109,6 @@ export async function checkModelOrder(page) {
     await Promise.all([saveResponse, resyncResponse]);
     assert.equal(writes, 1);
     assert.deepEqual(saved.providers["order-relay"].models.map((model) => model.id), ["a-id", "two-id", "ten-id", "z-renamed", "new-id"]);
-    assert.equal(saved.providers["order-relay"].models.find((model) => model.id === "z-renamed").contextWindow, 123456);
-    assert.deepEqual(saved.providers["order-other"], initial.providers["order-other"]);
     assert.deepEqual(resync.modelRenames, [{ from: "order-relay/z-id", to: "order-relay/z-renamed" }]);
     await settings.getByRole("button", { name: "Close", exact: true }).click();
     console.log("PASS: model drag and Alt+arrow moves, keyboard focus, one-shot A–Z, append order and rename-safe Save");

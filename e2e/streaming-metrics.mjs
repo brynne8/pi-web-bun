@@ -73,7 +73,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     for (const width of [1280, 390, 320]) {
       const context = await newTestContext(browser, { viewport: { width, height: 800 }, locale: "en-US" });
       const page = await context.newPage();
-      await page.setContent('<body style="font-size:14px;line-height:1.5"></body>');
+      // The production header is measured in the app's own CSS, so the standalone run starts at
+      // the app (`E2E_BASE_URL`, default below) rather than on an empty document.
+      await page.goto(process.env.E2E_BASE_URL || "http://127.0.0.1:30141", { waitUntil: "domcontentloaded" });
+      await page.locator("body").waitFor();
       await checkStreamingMetrics(page);
       await context.close();
     }

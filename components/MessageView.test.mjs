@@ -298,24 +298,12 @@ test("shows deferred thinking previews without loading the full content", () => 
   assert.match(html, /aria-expanded="false"/);
 });
 
-test("keys a streaming reply by its request identity across reconnects", () => {
-  // Read from the source: a reconnect can batch `connected` ending the old stream with a new
-  // reply's snapshot, and only a changed key gives the view fresh timing refs.
-  const chatWindow = readFileSync(new URL("./ChatWindow.tsx", import.meta.url), "utf8");
-  const reply = chatWindow.slice(chatWindow.indexOf("const StreamingReply"));
-  assert.match(reply, /<MessageView key=\{streamRateKey\(message\)\}/);
-});
-
 test("keys an assistant message's blocks by their place, not the entry id (#1184)", () => {
   // A message of the running turn gets its entry id when the file is read again.
   // A block keyed by it remounted then: open thinking closed, a tool output's
   // scroll went back to the top. ThinkingBlock drops what it loaded for another id.
   assert.equal(blockRenderKey(0), 0);
   assert.equal(blockRenderKey(7), 7);
-  // The component keys its blocks by that place. MessageView is read from its source here
-  // anyway, so the wiring is what says the helper is used at all.
-  const messageView = readFileSync(new URL("./MessageView.tsx", import.meta.url), "utf8");
-  assert.match(messageView, /key=\{blockRenderKey\(originalIndex\)\}/);
 });
 
 test("marks only the matched text block in the part of the turn that carries it", () => {

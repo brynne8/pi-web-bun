@@ -68,6 +68,8 @@ export async function checkModelDiscovery(page, stub) {
     await settings.getByRole("button", { name: "Save", exact: true }).click();
     await saveResponse;
     assert.equal(stub.saved.providers.anthropic.api, undefined, "Visiting a provider must not persist a guessed protocol");
+    // The draft keeps it (components/ModelsConfig.test.mjs) and discovery sends it (above); that
+    // the PUT body still carries it is this check's own wiring claim and has no other test.
     assert.equal(stub.saved.providers.relay.api, "openai-responses");
     await settings.getByRole("button", { name: "Close", exact: true }).click();
     console.log("PASS: discovery preserves catalog protocols and explicit overrides without changing them on Save");

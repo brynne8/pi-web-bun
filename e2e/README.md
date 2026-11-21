@@ -12,6 +12,18 @@ npm run test:e2e
 These tests drive Apple WebKit (`playwright`'s `webkit` build) through `launchBrowser`
 in `e2e/browser.mjs`; Chromium is not used and must not be reintroduced.
 
+Three entry points share that browser, and only one of them is a gate:
+
+- `npm run test:e2e` (`e2e/run.mjs`) is what CI runs, once per pull request and push
+  to `main`/`dev`.
+- `npm run test:e2e:themes` (`e2e/themes.mjs`) and `npm run test:terminal`
+  (`e2e/terminal.mjs`) are manual: they drive a dev server the developer already has
+  running (themes) or start their own (terminal), and neither is in CI. Themes carries
+  the palette's contrast floors, which no unit test can take over; terminal's
+  monospace-font assertion stays red on WebKit on purpose (see `docs/agents/tests.md`).
+- `e2e/pdf-page-fragment.mjs` is history: nothing runs it, and its `#page=` path was
+  measured against a Chromium PDF viewer this suite does not use.
+
 On Linux the browser needs system libraries too, so run
 `sudo npx playwright install --with-deps webkit` once. Windows (win64), WSL and the
 Ubuntu x64/arm64 builds all exist; nothing here is macOS-only.
@@ -74,8 +86,8 @@ Coverage:
   through reloads; pinned and archived rows link the same way; nothing
   creates, copies or prompts a session; a missing session's link selects none
   in a fresh profile; a keyboard Fork puts focus on the copy row's link.
-- Project groups offer Open in new tab (`project-navigation.mjs`, desktop
-  and mobile Chromium): the current linked worktree, another project's root,
+- Project groups offer Open in new tab (`project-navigation.mjs`, desktop and
+  mobile WebKit): the current linked worktree, another project's root,
   and a pinned project without sessions open as fresh composers. Reload keeps
   that destination, not a remembered session. The original tab keeps its
   session, directory, draft, files and group expansion; + still opens in the

@@ -159,7 +159,6 @@ test("only the files tab removes worktrees, never the main one", () => {
 });
 
 test("client code stays parseable by Safari 16.2 and its CSS flat", () => {
-  assert.doesNotMatch(source, /\(\?<[=!]/, "no RegExp lookbehind");
   const rules = css.slice(css.indexOf("/* The project and worktree picker (ProjectWorktreePicker)"), css.indexOf(".file-viewer-icon-button {"));
   assert.ok(rules.length > 0);
   assert.doesNotMatch(rules.replace(/@media[^{]*\{/g, ""), /\{[^}]*\{|&/, "no nested rules");

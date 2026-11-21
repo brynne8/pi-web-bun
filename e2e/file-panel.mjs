@@ -61,10 +61,12 @@ export async function checkFilePanel(page, filePath) {
   let frame = await (await iframe.elementHandle()).contentFrame();
   await frame.locator("#notes").waitFor();
   assert.equal(await iframe.getAttribute("sandbox"), "allow-scripts");
-  assert.deepEqual(JSON.parse(await frame.locator("html").getAttribute("data-storage-result")), {
-    local: "42", session: "true", separate: null, removed: null, length: 1, key: "number",
-    named: "property value", parentDenied: true, origin: "null",
-  }, "the preview's first script can use both isolated storage objects without accessing its parent");
+  // What only a real sandbox shows: an opaque origin, a denied parent, and a first script that
+  // writes without an exception. The shim's own semantics are `lib/html-sandbox-polyfill.test.mjs`.
+  const storage = JSON.parse(await frame.locator("html").getAttribute("data-storage-result"));
+  assert.deepEqual({ local: storage.local, parentDenied: storage.parentDenied, origin: storage.origin },
+    { local: "42", parentDenied: true, origin: "null" },
+    "the preview's first script must use both isolated storage objects without reaching its parent");
   await frame.evaluate(() => localStorage.setItem("ephemeral", "preview only"));
   await panel.getByRole("button", { name: "Source", exact: true }).click();
   const source = await panel.locator(".file-viewer-content").innerText();

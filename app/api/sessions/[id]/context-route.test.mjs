@@ -41,6 +41,8 @@ function message(id, parentId, role, content) {
   return { type: "message", id, parentId, timestamp, message: { role, content } };
 }
 
+const ids = (start, end) => Array.from({ length: end - start }, (_, index) => `e${start + index}`);
+
 async function writeSession(id, entries) {
   const sessionDir = join(agentDir, "sessions", "fixture");
   await mkdir(sessionDir, { recursive: true });
@@ -111,4 +113,24 @@ test("the first page of a compacted session starts at the divider and holds no p
   const compacted = await read(id);
   assert.equal(compacted.entryIds[0], "compact");
   assert.equal(compacted.messages.some((entry) => entry.role === "user"), false);
+});
+
+test("the page above the window holds the entries under the cursor and names where it ends", async () => {
+  const id = "long-session";
+  const entries = [];
+  for (let i = 0; i < 60; i++) {
+    entries.push(message(`e${i}`, i === 0 ? null : `e${i - 1}`, i % 2 === 0 ? "user" : "assistant", `Message ${i}`));
+  }
+  await writeSession(id, entries);
+
+  const first = await read(id);
+  assert.deepEqual(first.entryIds, ids(10, 60));
+  assert.equal(first.oldestEntryId, "e10");
+  assert.equal(first.hasMore, true);
+
+  const older = await read(id, "?before=e10");
+  assert.deepEqual(older.entryIds, ids(0, 10));
+  assert.equal(older.messages.length, 10);
+  assert.equal(older.oldestEntryId, "e0");
+  assert.equal(older.hasMore, false);
 });

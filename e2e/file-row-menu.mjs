@@ -169,7 +169,12 @@ export async function checkFileRowMenu(page, filePath, name, fixtureText) {
   await composer.fill("");
   await rightClickRow(page, fileRow);
   await page.getByRole("menu").getByRole("menuitem", { name: LABEL.mention }).first().click();
-  await page.waitForTimeout(400);
+  // The composer is cleared above, so its first non-empty value is the mention's writing:
+  // waiting for that is the state this reads, not a moment after the click.
+  await page.waitForFunction((expected) => {
+    const input = document.querySelector(".chat-input-textarea");
+    return Boolean(input && input.value.includes(expected));
+  }, name);
   const typed = await composer.inputValue();
   assert.ok(typed.includes("@") && typed.includes(name),
     `the menu wrote the row's path into the composer: ${JSON.stringify(typed)}`);

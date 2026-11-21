@@ -132,7 +132,7 @@ try {
       await page.getByRole("slider", { name: "Monospace font weight", exact: true }).fill("600");
       await page.keyboard.press("Escape");
       if (viewport.width <= 640) {
-        await page.locator(".sidebar-overlay-backdrop").click({ position: { x: viewport.width - 5, y: 100 } });
+        await page.locator(".sidebar-overlay-backdrop").click({ position: { x: viewport.width / 2, y: viewport.height / 2 } });
       }
       await showPanel();
       await ready();
@@ -216,7 +216,7 @@ try {
       await page.getByRole("slider", { name: "Chat & terminal font size", exact: true }).fill("18");
       await page.keyboard.press("Escape");
       if (viewport.width <= 640) {
-        await page.locator(".sidebar-overlay-backdrop").click({ position: { x: viewport.width - 5, y: 100 } });
+        await page.locator(".sidebar-overlay-backdrop").click({ position: { x: viewport.width / 2, y: viewport.height / 2 } });
       }
       await showPanel();
       await ready();

@@ -1,13 +1,13 @@
-// Focused e2e check for PDF `#page=` markdown links.
+// Focused e2e check for PDF `#page=` markdown links, kept for history and run
+// by nothing: it predates this suite's WebKit rule and its `#page=` path was
+// measured against a Chromium PDF viewer.
 //
 //   node e2e/pdf-page-fragment.mjs
 //
 // Seeds a session whose cwd holds a generated multi-page PDF, then clicks
 // markdown links and inspects the file-viewer iframe URL. Screenshots land in
-// test-results/e2e/.
-//
-// Note: the full Chromium build is required. The Chromium headless shell has no
-// PDF viewer and downloads the file instead, so nothing renders in the iframe.
+// test-results/e2e/. It launches through `launchBrowser`, so it drives the same
+// WebKit the suite does.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";

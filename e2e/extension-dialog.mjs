@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { EXTENSION_DIALOG_BASE_WIDTH } from "../lib/extension-dialog-fit.ts";
 
 export const extensionSource = `export default function (pi) {
   pi.registerCommand("e2e-dialog", {
@@ -143,23 +144,34 @@ export async function checkExtensionDialogs(page, artifacts, width) {
 
 /** The dialog's width once its content has stopped asking for more room. */
 async function settledWidth(page, dialog) {
-  return dialog.evaluate(element => new Promise(resolve => {
+  // Five frames of one width says "settled"; a dialog that never settles says so instead of
+  // polling for the rest of the run.
+  const result = await dialog.evaluate(element => new Promise(resolve => {
     let last = -1;
     let steady = 0;
+    let frames = 0;
     const check = () => {
       const width = element.getBoundingClientRect().width;
       steady = width === last ? steady + 1 : 0;
       last = width;
-      if (steady >= 5) resolve(width);
+      frames++;
+      if (steady >= 5) resolve({ width });
+      else if (frames > 180) resolve({ width: null });
       else requestAnimationFrame(check);
     };
     check();
   }));
+  assert.ok(result.width !== null, "the dialog must stop resizing");
+  return result.width;
 }
 
-/** Width the dialog may use: the content region minus the overlay's own 20px padding. */
+/** Width the dialog may use: the content region minus the overlay's own padding. */
 function availableWidth(dialog) {
-  return dialog.evaluate(element => element.parentElement.clientWidth - 40);
+  return dialog.evaluate(element => {
+    const region = element.parentElement;
+    const style = getComputedStyle(region);
+    return region.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  });
 }
 
 function scrollsSideways(dialog) {
@@ -169,8 +181,8 @@ function scrollsSideways(dialog) {
 
 /**
  * Dialogs fit their code blocks without any hint from the extension (#947): prose keeps
- * the 560px default, code that does not fit makes the dialog just wide enough (or as
- * wide as the screen allows, the code wrapping past that, #1360), and maximize/restore
+ * the source's own default width, code that does not fit makes the dialog just wide
+ * enough (or as wide as the screen allows, the code wrapping past that, #1360), and maximize/restore
  * is a per-dialog override.
  */
 export async function checkExtensionDialogSizing(page, width) {
@@ -193,14 +205,15 @@ export async function checkExtensionDialogSizing(page, width) {
   const prose = await start("prose");
   const proseWidth = await settledWidth(page, prose);
   const available = await availableWidth(prose);
-  assert.ok(Math.abs(proseWidth - Math.min(560, available)) <= 1, `Prose keeps the default width, got ${proseWidth}px of ${available}px`);
+  assert.ok(Math.abs(proseWidth - Math.min(EXTENSION_DIALOG_BASE_WIDTH, available)) <= 1, `Prose keeps the default width, got ${proseWidth}px of ${available}px`);
   await close(prose, "prose", "false");
 
   const code = await start("code");
   const codeWidth = await settledWidth(page, code);
   assert.ok(codeWidth >= proseWidth, "A code block never makes the dialog narrower");
   assert.ok(codeWidth <= available + 1, "The dialog stays inside the content region");
-  if (width > 600) assert.ok(codeWidth > 560, `Code that cannot fit in 560px widens the dialog, got ${codeWidth}px`);
+  if (width > 600) assert.ok(codeWidth > EXTENSION_DIALOG_BASE_WIDTH,
+    `Code that cannot fit in ${EXTENSION_DIALOG_BASE_WIDTH}px widens the dialog, got ${codeWidth}px`);
   assert.equal(await scrollsSideways(code), false, "The code block shows whole, or wraps where the screen is the limit");
 
   // Maximize is a per-dialog override: full width, and restore goes back to the fitted width.

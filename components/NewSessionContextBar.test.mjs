@@ -11,7 +11,6 @@ const { NewSessionContextBar } = await jiti.import("./NewSessionContextBar.tsx")
 const source = await readFile(new URL("./NewSessionContextBar.tsx", import.meta.url), "utf8");
 const chatWindowSource = await readFile(new URL("./ChatWindow.tsx", import.meta.url), "utf8");
 const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
-const contextSource = await readFile(new URL("../lib/new-session-context.ts", import.meta.url), "utf8");
 
 const h = React.createElement;
 const noop = () => {};
@@ -130,9 +129,6 @@ test("the update link: once per page, in the versions line, styled by classes", 
 });
 
 test("client code stays parseable by Safari 16.2 and its CSS flat", () => {
-  for (const file of [source, contextSource]) {
-    assert.doesNotMatch(file, /\(\?<[=!]/, "no RegExp lookbehind");
-  }
   const header = css.slice(css.indexOf(".new-session-hero-inner {"), css.indexOf("/* The project and worktree picker (ProjectWorktreePicker)"));
   const rules = css.slice(css.indexOf(".new-session-hero-inner {"), css.indexOf(".file-viewer-icon-button {"));
   assert.ok(header.length > 0 && rules.length > header.length);

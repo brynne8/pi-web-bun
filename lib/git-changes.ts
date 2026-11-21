@@ -118,7 +118,7 @@ const NEWLINE = 0x0a;
  * A file whose size, times and inode a quiet previous scan counted is not read
  * again while they still say the same.
  */
-async function countUntrackedTextLines(filePath: string, buffer: Buffer): Promise<number> {
+async function countUntrackedTextLines(filePath: string, buffer: Buffer, recentFileMs: number): Promise<number> {
   try {
     const stat = await fs.promises.lstat(filePath);
     if (!stat.isFile() || stat.size > TEXT_PREVIEW_MAX_BYTES || stat.size === 0) return 0;
@@ -157,7 +157,7 @@ async function countUntrackedTextLines(filePath: string, buffer: Buffer): Promis
     }
     // Only a file that has been quiet for a while is remembered: a change to it
     // after this point carries a later stamp, and is therefore seen.
-    if (Date.now() - stat.ctimeMs >= RECENT_FILE_MS) {
+    if (Date.now() - stat.ctimeMs >= recentFileMs) {
       untrackedLineCounts.set(filePath, {
         size: stat.size,
         mtimeMs: stat.mtimeMs,
@@ -204,13 +204,13 @@ const RECENT_FILE_MS = 2_000;
 // synchronously held the server's event loop, every stream and request, for
 // seconds (#1584). Same counts, and a file nothing has touched since is not read
 // again. Stops when the request is gone.
-async function countUntrackedLines(filePaths: readonly string[], signal?: AbortSignal): Promise<number> {
+async function countUntrackedLines(filePaths: readonly string[], signal: AbortSignal | undefined, recentFileMs: number): Promise<number> {
   let next = 0;
   let total = 0;
   const worker = async () => {
     const buffer = Buffer.allocUnsafe(UNTRACKED_READ_CHUNK_BYTES);
     while (next < filePaths.length && !signal?.aborted) {
-      const lines = await countUntrackedTextLines(filePaths[next++], buffer);
+      const lines = await countUntrackedTextLines(filePaths[next++], buffer, recentFileMs);
       total += lines;
     }
   };
@@ -218,8 +218,12 @@ async function countUntrackedLines(filePaths: readonly string[], signal?: AbortS
   return total;
 }
 
-/** `signal`: the request's; once it aborts the scan stops and this throws. */
-export async function getGitStatus(cwd: string, signal?: AbortSignal): Promise<GitStatusResponse> {
+/**
+ * `signal`: the request's; once it aborts the scan stops and this throws.
+ * `recentFileMs`: the quiet window before an untracked file's line count is remembered. A test
+ * shortens it rather than sleeping it out; a route leaves it alone.
+ */
+export async function getGitStatus(cwd: string, signal?: AbortSignal, recentFileMs: number = RECENT_FILE_MS): Promise<GitStatusResponse> {
   // The three Git commands do not depend on each other, so they run at once:
   // the repository root, the status listing and the line stats of the tracked
   // changes. Git names its paths by the repository root however it is asked, so
@@ -269,6 +273,7 @@ export async function getGitStatus(cwd: string, signal?: AbortSignal): Promise<G
   const untrackedAdditions = await countUntrackedLines(
     files.flatMap((file) => (file.status === "untracked" ? [file.filePath] : [])),
     signal,
+    recentFileMs,
   );
   signal?.throwIfAborted();
 

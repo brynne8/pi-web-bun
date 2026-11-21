@@ -233,14 +233,16 @@ export async function checkSessionNavigation({ browser, base, artifacts, a, b, a
     const freshContext = await newTestContext(browser, { viewport: { width: 1280, height: 800 }, locale: "en-US" });
     try {
       const missing = await freshContext.newPage();
-      // Uncaught errors only: the 404 for the missing session is logged as a console error by design.
+      // Uncaught errors only: a refused read is logged as a console error by design.
       missing.on("pageerror", (error) => noteBrowserError(errors, error.message));
       await missing.goto(`${base}/?session=e2e-does-not-exist`, { waitUntil: "domcontentloaded" });
       await panel(missing).locator(".session-tree-session").first().waitFor();
-      await missing.waitForTimeout(1500);
+      // Nothing is fetched for an id the list does not hold — the only thing this page does about
+      // it is drop the parameter, so that is the event to wait for instead of a fixed window.
+      await missing.waitForFunction(() => !new URL(location.href).searchParams.get("session"));
       assert.equal(await panel(missing).locator('.session-tree-main[aria-current="true"]').count(), 0, "no row selected for a missing session");
       const shown = new URL(missing.url()).searchParams.get("session");
-      assert.ok(shown === null || shown === "e2e-does-not-exist", `URL moved to session ${shown}`);
+      assert.equal(shown, null, "a missing link's id leaves the URL");
       for (const id of [a.id, b.id]) assert.equal(await content[id](missing).count(), 0, `missing link shows ${id}`);
     } finally {
       await freshContext.close();

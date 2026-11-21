@@ -9,12 +9,24 @@ import { createJiti } from "jiti";
 
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-files-route-")));
 fs.writeFileSync(path.join(root, "gitconfig"), "");
+// The suite is one process under Bun: these are the machine's settings to hand back when the
+// file is done, or every later test's git runs inside this fixture.
+const previousEnv = Object.fromEntries(
+  ["PI_CODING_AGENT_DIR", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "XDG_CONFIG_HOME", "GIT_CEILING_DIRECTORIES"]
+    .map((key) => [key, process.env[key]]),
+);
 process.env.PI_CODING_AGENT_DIR = path.join(root, "agent");
 process.env.GIT_CONFIG_NOSYSTEM = "1";
 process.env.GIT_CONFIG_GLOBAL = path.join(root, "gitconfig");
 process.env.XDG_CONFIG_HOME = path.join(root, "xdg");
 process.env.GIT_CEILING_DIRECTORIES = root;
-test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+test.after(() => {
+  for (const [key, value] of Object.entries(previousEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  fs.rmSync(root, { recursive: true, force: true });
+});
 
 const jiti = createJiti(import.meta.url, {
   alias: { "@": process.cwd() },

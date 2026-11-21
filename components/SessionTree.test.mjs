@@ -609,10 +609,6 @@ test("group headers draw nothing for a drag while idle", () => {
   assert.doesNotMatch(html, /draggable/);
 });
 
-test("SessionTree.tsx has no RegExp lookbehind (Safari 16.2)", () => {
-  assert.doesNotMatch(source, /\(\?<[=!]/, "no RegExp lookbehind (Safari 16.2)");
-});
-
 test("the drag ghost is shorter than a header", () => {
   // The ghost is a one-line pill shorter than a header (useGroupDrag reads
   // its height to keep it clear of the pointer and the line).

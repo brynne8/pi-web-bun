@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 /** The fixture has one ordinary fence and one Mermaid diagram. */
 export async function checkCodeBackground(page) {
   const warnings = [];
+  // React prints these in a development build only; CI runs `E2E_SERVER_MODE=start`, so this
+  // collector proves something in a local dev-mode run and nothing there.
   const onConsole = (message) => {
     if (/conflicting property|style property during rerender/.test(message.text())) {
       warnings.push(message.text());
