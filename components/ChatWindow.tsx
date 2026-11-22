@@ -8,7 +8,7 @@ import { normalizeCustomPanelLines, stripAnsi } from "@/lib/ansi";
 import { splitNoticeLinks, splitNoticeText } from "@/lib/notice-text";
 import { EXTENSION_DIALOG_BASE_WIDTH, fitExtensionDialogWidth } from "@/lib/extension-dialog-fit";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
-import { getAssistantErrorMessage, getTurnAnchors, hasAssistantAnswer, hasTurnRef, isAssistantAborted, isAssistantTruncated, isHiddenCustomMessage, liveOutputPreview, LIVE_OUTPUT_PREVIEW_LINES } from "@/lib/message-display";
+import { getAssistantErrorMessage, getTurnAnchors, hasAssistantAnswer, hasTurnRef, isAssistantAborted, isAssistantTruncated, isHiddenCustomMessage, liveOutputPreview, LIVE_OUTPUT_PREVIEW_LINES, sumCost } from "@/lib/message-display";
 import { extractTurnWrittenFiles } from "@/lib/turn-written-files";
 import { planTurnRender, splitTurnSegments, turnHasAnswer, unsegmentedTurnMessages } from "@/lib/turn-segments";
 import { getTurnPart, type TurnPartCache } from "@/lib/turn-views";
@@ -223,7 +223,7 @@ function getUserInputText(message: AgentMessage): string | null {
   return text.length > 0 ? text : null;
 }
 
-function ProcessDetailsGroup({ messageCount, toolCallCount, durationMs, cacheMisses, reveal = false, children, t, locale }: { messageCount: number; toolCallCount: number; durationMs?: number; cacheMisses?: CacheMissSummary; reveal?: boolean; children: ReactNode; t: (key: string, params?: Record<string, string | number>) => string; locale: Locale }) {
+function ProcessDetailsGroup({ messageCount, toolCallCount, durationMs, cost, cacheMisses, reveal = false, children, t, locale }: { messageCount: number; toolCallCount: number; durationMs?: number; cost?: number; cacheMisses?: CacheMissSummary; reveal?: boolean; children: ReactNode; t: (key: string, params?: Record<string, string | number>) => string; locale: Locale }) {
   // Always collapsed: what is inside a group is how the turn got there, and what it
   // wrote and how it failed both render outside it. A group the user opened by hand
   // keeps its state across the turn's updates, since nothing re-keys it.
@@ -235,6 +235,8 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, durationMs, cacheMis
   const parts = [`${messageCount} ${t(messageCount === 1 ? "chat.message" : "chat.messages")}`];
   if (toolCallCount > 0) parts.push(`${toolCallCount} ${t(toolCallCount === 1 ? "chat.toolCall" : "chat.toolCalls")}`);
   if (durationMs !== undefined) parts.push(t("chat.turnDuration", { time: formatTurnDuration(durationMs, locale) }));
+  // Folded, the cost of the steps inside is added up here (#1768); open, each shows under its step.
+  if (cost !== undefined && !(expanded || reveal)) parts.push(`$${cost.toFixed(4)}`);
   // Folded, the cache misses inside are added up here (#1265); open, each shows under its step.
   const cacheMissText = cacheMisses && !(expanded || reveal) ? cacheMissSummaryText(t, cacheMisses) : undefined;
 
@@ -1080,6 +1082,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                     messageCount={segment.messageCount}
                     toolCallCount={segment.toolCallCount}
                     durationMs={getTurnDurationMs(messages, firstIdx, lastIdx + 1)}
+                    cost={sumCost(segmentMessages)}
                     cacheMisses={summarizeCacheMisses(segmentMessages)}
                     reveal={revealSegment}
                     t={t}
@@ -1185,6 +1188,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 messageCount={segment.messageCount}
                 toolCallCount={segment.toolCallCount}
                 durationMs={getTurnDurationMs(messages, firstIdx, lastIdx + 1)}
+                cost={sumCost(segmentMessages)}
                 cacheMisses={summarizeCacheMisses(segmentMessages)}
                 reveal={revealSegment}
                 t={t}

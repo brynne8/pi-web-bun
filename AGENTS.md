@@ -186,6 +186,7 @@ lib/
   session-tree.ts           sidebar row model: pinned section, project groups and their order, archived predicate, virtual rows, drop targets
   session-ui-state.ts       pi-web-session-state.json (pins, archive, project order and names, read times): lock, atomic write, revision, corrupt backup
   session-ui-state-shared.ts client-safe types and rules of that state: request parsing, apply, undo snapshot
+  session-ids-request.ts    readSessionIdsRequest(): the ids of a POST { ids } acting on sessions (delete, stats), refusals included
   unread-markers.ts         client-safe: this browser's unread markers dated on the server's clock, cleared by shared reads (readAt), the server-clock estimate
   user-attention.ts         client: whether someone is at the page (visible, focused, an input within 2 min; no pointer moves), and when that starts again
   sidebar-prefs.ts          per-browser sidebar tab, group expand choices, archive folds, pinned-section collapse, files-section fold, changed files as list or tree, folders found outside git
@@ -224,6 +225,7 @@ lib/
   subagent-notification.ts  client-safe constant and screen-side strip of a background subagent's report guard
   global-settings-file.ts   locked read-modify-write of global settings.json (SettingsManager's lock)
   regular-file.ts           readRegularFileText(): non-blocking read of a regular file only, optional size cap
+  content-disposition.ts    one Content-Disposition header for a file sent inline or as a download (files, export)
   default-preferences.ts    write defaultModel/defaultThinkingLevel; detect project shadowing
   deferred-provider-models.ts models of providers an extension registers only at session_start, re-added to listings
   enabled-models.ts         pure minimal-edit engine for the enabledModels pattern list
@@ -274,7 +276,9 @@ lib/
   npx.ts                    npx runner for skill install
   terminal-bun-pty.ts       node-pty-compatible PTY over Bun.spawn({ terminal }), loaded instead of node-pty on Bun
   plugin-updates.ts         npm view update checks for /api/plugins/check
+  refreshing-cache.ts       createRefreshingCache(): one shared fetch per key with its TTL, the last value when a refresh fails
   jsonc.ts                  JSON with comments and trailing commas (models.json is read through it)
+  fetch-json.ts             readJsonOrThrow(): a route's error, or its JSON, for the settings panels
   shell-words.ts            split a pasted command line into words without a shell; refuses | && ; redirects $(…)
   key-serializer.ts         serializeByKey(): one globalThis promise chain per key
   stacked-dialog.ts         Escape and focus handling for Settings and dialogs stacked above it
@@ -371,6 +375,7 @@ hooks/
   usePageHidden.ts         HIDDEN_PAGE_GRACE_MS; true once the page has been hidden that long (file watches pause)
   useSessionUiState.ts     sidebar pins, archive, project order: optimistic writes in order, refetch on revision change
   useSidebarMotion.ts      the sidebar's fold and archive-view motion: phase, end fallback, reduced motion, what shows meanwhile
+  useStoredChoice.ts       one localStorage-backed choice, shared across components and tabs (Enter to send, files placement, terminal theme)
   useKeyboardShortcuts.ts  Esc stops the running agent unless a field or nearer handler took it; Ctrl+Alt+N
   useResizablePanel.ts     drag/keyboard panel size kept per key; persistClamp: false never saves a short window's clamp
   usePrismLanguages.ts     true once the Prism languages are loaded; starts the load for a highlighter

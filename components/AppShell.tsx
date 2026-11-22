@@ -110,6 +110,7 @@ import { getLastSettingsSection, settingsSectionRequiresProject, type SettingsSe
 import { sideChatHit } from "@/lib/session-search-hit";
 import { loadAgentStripLocked, saveAgentStripLocked } from "@/lib/agent-strip-lock";
 import { claimDoneChime } from "@/lib/done-chime";
+import { readJsonOrThrow } from "@/lib/fetch-json";
 
 type SessionCopyField = "file" | "id" | "projectDir" | "gitBranch" | "gitWorktree";
 type AutoNameStatus =
@@ -1671,8 +1672,7 @@ export function AppShell() {
       signal: controller.signal,
     })
       .then(async (response) => {
-        const data = await response.json() as ProjectTrustStatus & { error?: string };
-        if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+        const data = await readJsonOrThrow<ProjectTrustStatus>(response);
         setProjectTrust(data);
       })
       .catch((error) => {

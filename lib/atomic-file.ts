@@ -21,10 +21,13 @@ function writeFileAtomicSync(
   let operationFailed = false;
 
   try {
+    // `wx`: nothing already at the temporary path is written through. An exact mode is set
+    // by chmod after the bytes are written at 0600, so text that may hold secrets is never
+    // readable by others meanwhile; otherwise `mode` passes through the umask.
     writeFileSync(tempPath, contents, {
       encoding: "utf8",
       flag: "wx",
-      mode,
+      mode: options.exactMode ? 0o600 : mode,
       flush: true,
     });
     if (options.exactMode) chmodSync(tempPath, mode);
@@ -77,4 +80,12 @@ export function writeSessionFileAtomicSync(
     exclusive: options.exclusive === true,
     exactMode: existingMode !== undefined,
   });
+}
+
+/**
+ * Replace a file atomically and give it exactly `mode`, whatever the umask.
+ * The caller must create the parent directory first.
+ */
+export function writeFileExactModeAtomicSync(path: string, contents: string, mode: number): void {
+  writeFileAtomicSync(path, contents, mode, { exactMode: true });
 }
