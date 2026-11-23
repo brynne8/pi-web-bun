@@ -172,9 +172,6 @@ function SafeMarkdownBody({ children, className, ...props }: React.ComponentProp
 // push the conversation off screen; overflow scrolls inside the bubble.
 const USER_BUBBLE_MAX_HEIGHT = 300;
 
-/** Characters of a tool's input the collapsed header line shows. */
-const TOOL_PREVIEW_LENGTH = 120;
-
 function loadThinkingContent(sessionId: string, entryId: string, blockIndex: number): Promise<string> {
   const key = `${sessionId}:${entryId}:${blockIndex}`;
   const cached = thinkingContentCache.get(key);
@@ -1396,7 +1393,8 @@ function ToolCallBlock({ block, result, notRun, duration, clock, cwd, onOpenFile
       <div style={{ display: "flex", alignItems: "stretch", minWidth: 0 }}>
         <button
           onClick={readSnapshot ? () => onOpenReadSnapshot?.(block.toolCallId, readSnapshot) : toggleExpanded}
-          title={readSnapshot ? t("readPanel.open") : undefined}
+          title={shellCommand ?? (readSnapshot ? t("readPanel.open") : undefined)}
+          aria-label={shellCommand !== null ? `${block.toolName}: ${shellCommand}` : undefined}
           style={{
             display: "flex",
             alignItems: "center",
@@ -1424,10 +1422,15 @@ function ToolCallBlock({ block, result, notRun, duration, clock, cwd, onOpenFile
             ) : block.toolName}
           </span>
           <span style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+            {/* A shell command is the one preview that runs to six colours and a
+                hundred characters, and it is what makes a run's tool rows read as
+                noise. The folded row keeps the tool name and its duration; the
+                command moves to the header's title (hover) and to the expanded
+                card, where it is the thing you opened the card to read. */}
             {isStreamingInput
               ? t("chat.generatingToolInput")
               : shellCommand !== null
-                ? <BashCommand command={shellCommand} limit={TOOL_PREVIEW_LENGTH} />
+                ? null
                 : (patchLabel ?? (codemode ? codemodeScriptPreview(codemode.code) : toolInputPreview(block.input, resultPatchPath, block.toolName, cwd)))}
           </span>
           {shellBackground && (

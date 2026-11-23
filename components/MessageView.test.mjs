@@ -1285,22 +1285,29 @@ test("labels an MCP call server/tool and indents a JSON result", (t) => {
   assert.match(text, /\{\n {2}"hits": \[\n {4}\{\n {6}"title": "Code mode"/);
 });
 
-test("colors a shell command in place, without a pre or code element", (t) => {
+test("keeps a shell command out of the folded header, and in reach of it", (t) => {
   const block = {
     type: "toolCall",
     toolCallId: "call-bash-1",
     toolName: "bash",
     input: { command: 'git commit -m "fix: $HOME" --amend', timeout: 30 },
   };
-  const collapsed = textOf(renderMessage({
+  const collapsedHtml = renderMessage({
     role: "assistant",
     provider: "anthropic",
     model: "claude-test",
     content: [block],
-  }, { toolResults: new Map() }));
+  }, { toolResults: new Map() });
+  const collapsed = textOf(collapsedHtml);
 
-  // The header line carries the tokens themselves, not a code block.
-  assert.match(collapsed, /git commit -m "fix: \$HOME" --amend/);
+  // The folded row carries the tool name and its duration only: a shell command
+  // is the one preview that runs to six colours and a hundred characters, and it
+  // is what makes a run's tool rows read as noise.
+  assert.match(collapsed, /bash/);
+  assert.doesNotMatch(collapsed, /git commit/);
+  // Nothing is lost: hover gets the whole command, and so does a screen reader.
+  assert.match(collapsedHtml, /title="git commit -m &quot;fix: \$HOME&quot; --amend"/);
+  assert.match(collapsedHtml, /aria-label="bash: git commit -m &quot;fix: \$HOME&quot; --amend"/);
 
   setToolCallExpanded(block.toolCallId, true);
   t.after(() => setToolCallExpanded(block.toolCallId, false));
@@ -1311,8 +1318,10 @@ test("colors a shell command in place, without a pre or code element", (t) => {
     content: [block],
   }, { toolResults: new Map() });
 
+  // Expanded, the command is coloured in place — the tokens themselves, not a
+  // code block.
   assert.match(html, /<span style="color:var\(--syntax-command\);font-weight:600">git<\/span>/);
-  assert.match(html, /<span style="color:var\(--syntax-string\)">&quot;fix: <\/span><span style="color:var\(--syntax-variable\)">\$HOME<\/span><span style="color:var\(--syntax-string\)">\&quot;<\/span>/);
+  assert.match(html, /<span style="color:var\(--syntax-string\)">&quot;fix: <\/span><span style="color:var\(--syntax-variable\)">\$HOME<\/span><span style="color:var\(--syntax-string\)">&quot;<\/span>/);
   assert.match(html, /<span style="color:var\(--syntax-flag\)">--amend<\/span>/);
   // Expanded: the command itself, not the input JSON, and its timeout kept.
   assert.equal(textOf(html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/)[1]), 'git commit -m "fix: $HOME" --amend (timeout 30s)');

@@ -437,7 +437,9 @@ try {
     // where upstream keeps one per turn) and is asserted nowhere here.
     const processDetails = page.getByRole("button", { name: /^Process details/ });
     for (const group of await processDetails.all()) await group.click();
-    await page.getByText("echo E2E tool output", { exact: true }).waitFor();
+    // A shell command is no longer the folded card's text: it lives in the header's
+    // title and accessible name, so the card is reached by name rather than by text.
+    assert.equal(await page.getByText("echo E2E tool output", { exact: true }).count(), 0);
     await page.getByRole("button", { name: /bash.*echo E2E tool output/ }).click();
     await page.getByText("E2E tool output", { exact: true }).waitFor();
     await page.goto(`${base}/?session=${COMPACTED}`, { waitUntil: "domcontentloaded" });
