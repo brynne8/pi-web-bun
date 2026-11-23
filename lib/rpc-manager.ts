@@ -74,6 +74,7 @@ import { withCodemodeDefault } from "./codemode-settings";
 import { withShellDefault } from "./shell-settings";
 import { CHAT_ONLY_RESOURCE_LOADER_OPTIONS, contextFilesSystemPrompt } from "./chat-only";
 import { appendSystemPromptSources } from "./append-system-prompt";
+import { refreshLoaderPromptText, type PromptSourcesLoader } from "./prompt-sources";
 import { createExactSystemPromptExtension } from "./exact-system-prompt";
 import { createPlatformInfoExtension } from "./platform-info";
 import { computeForcedSystemPrompt } from "./effective-system-prompt";
@@ -728,6 +729,11 @@ export class AgentSessionWrapper {
       if (event.type === "compaction_end") {
         // Prompts parked while compaction ran go out now, FIFO, whatever its outcome (as the TUI).
         this.flushParkedPrompts();
+        // A compaction carries the prompt the session started with, so an APPEND_SYSTEM.md or
+        // AGENTS.md file edited while it ran would reach the model only after a /reload. Re-read
+        // the prompt text instead: the extensions, the settings and the MCP servers stay as they
+        // are. A compaction that failed or was stopped changed no prompt.
+        if (event.result) this.refreshPromptTextSources();
       }
       const liveEvent = event.type === "tool_execution_end"
         ? liveToolExecutionEvent(event, this.activeToolEvents.size > 0
@@ -918,6 +924,21 @@ export class AgentSessionWrapper {
       entry.delivering = true;
       void this.deliverParkedPrompt(entry);
     }
+  }
+
+  /**
+   * A finished compaction re-reads the prompt text files: pi keeps the prompt a session started
+   * with through a compaction, so an `APPEND_SYSTEM.md` or `AGENTS.md` file edited while it ran
+   * reached the model only after a `/reload`. `setActiveToolsByName()` is the public way to have
+   * pi render the base prompt from the loader again (the SDK documents it as rebuilding the
+   * system prompt) and, with the tools unchanged, it reloads no extension, setting or MCP server.
+   */
+  private refreshPromptTextSources(): void {
+    // The loader's data fields are public at runtime and private in the SDK's types.
+    const loader = this.inner.resourceLoader as unknown as PromptSourcesLoader | undefined;
+    if (!loader?.cwd) return;
+    refreshLoaderPromptText(loader);
+    this.inner.setActiveToolsByName(this.inner.getActiveToolNames());
   }
 
   private async deliverParkedPrompt(entry: ParkedPrompt): Promise<void> {
