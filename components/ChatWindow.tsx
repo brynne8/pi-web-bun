@@ -704,11 +704,10 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   useEffect(() => () => { onSessionStatsChange?.(null); }, [onSessionStatsChange]);
 
   // Push the rail's notifications up: the reports this transcript already holds, the ones the
-  // server pushed as they settled (those have no message yet, so nothing in the transcript can name
-  // them), and the results the model took instead of receiving them — the fallback for a page that
-  // was not connected when its report settled, which knows nothing but the id. The pushed row wins
-  // over that fallback: it carries the command's own first line and outcome word. Compared by a
-  // key, so a reply streaming in does not hand a new array up on every chunk.
+  // server pushed as they settled (no message yet, so nothing in the transcript can name them), and
+  // the results the model took instead of receiving them — a fallback that knows nothing but the id,
+  // which the pushed row wins over: it carries the command's first line and outcome word. Compared
+  // by a key, so a reply streaming in does not hand a new array up on every chunk.
   const delivered = settledNotificationsFromMessages(messages, entryIds);
   const notifications = mergeRailNotifications(delivered, [...railReports, ...fetchedNotifications(messages, delivered)]);
   const notificationsKey = notifications

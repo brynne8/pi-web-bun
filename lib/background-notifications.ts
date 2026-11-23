@@ -140,11 +140,9 @@ export function fetchedNotifications(
     if (candidate?.role !== "assistant" || !Array.isArray(candidate.content)) continue;
     const at = recordedMs(candidate.timestamp);
     for (const part of candidate.content) {
-      const call = part as { type?: unknown; name?: unknown; id?: unknown; arguments?: unknown } | undefined;
-      if (call?.type !== "toolCall" || call.name !== GET_RESULT_TOOL_NAME) continue;
-      if (typeof call.id === "string" && failed.has(call.id)) continue;
-      const id = (call.arguments as { id?: unknown } | undefined)?.id;
-      if (typeof id !== "string" || !id) continue;
+      const call = readGetResultCall(part);
+      if (!call || failed.has(call.callId)) continue;
+      const id = call.id;
       const kind = id.startsWith("bash-") ? "bash" : "subagent";
       // A result that also arrived as a batch already has a row, with the card to open; the same
       // subagent answers to its full session id there and to its 8-character prefix here.
@@ -162,6 +160,22 @@ export function fetchedNotifications(
     }
   }
   return rows;
+}
+
+/**
+ * One `get_result` call as the page holds it: the id it asked for, and the call's own id.
+ *
+ * The rail reads the same messages the transcript renders, and `lib/normalize.ts` has spelled every
+ * tool call `toolCallId` / `toolName` / `input` on the way in — from the session file and from a live
+ * `message_end` alike. Reading `name` / `arguments` here matched nothing at all: a delivered result
+ * never read as taken, and a fetched one had no row.
+ */
+function readGetResultCall(part: unknown): { callId: string; id: string } | null {
+  const call = part as { type?: unknown; toolCallId?: unknown; toolName?: unknown; input?: unknown } | undefined;
+  if (call?.type !== "toolCall" || call.toolName !== GET_RESULT_TOOL_NAME) return null;
+  const asked = (call.input as { id?: unknown } | undefined)?.id;
+  if (typeof asked !== "string" || !asked) return null;
+  return { callId: typeof call.toolCallId === "string" ? call.toolCallId : "", id: asked };
 }
 
 function isRailKind(kind: unknown): kind is RailNotification["kind"] {
@@ -182,10 +196,8 @@ export function consumedResults(messages: readonly unknown[]): Map<string, numbe
     if (candidate?.role !== "assistant" || !Array.isArray(candidate.content)) continue;
     const at = recordedMs(candidate.timestamp);
     for (const part of candidate.content) {
-      const call = part as { type?: unknown; name?: unknown; arguments?: unknown } | undefined;
-      if (call?.type !== "toolCall" || call.name !== GET_RESULT_TOOL_NAME) continue;
-      const id = (call.arguments as { id?: unknown } | undefined)?.id;
-      if (typeof id === "string" && id) calls.set(id, at);
+      const call = readGetResultCall(part);
+      if (call) calls.set(call.id, at);
     }
   }
   return calls;
