@@ -1739,3 +1739,34 @@ test("a powershell card draws its output's colours; every other card prints it r
     assert.ok(!html.includes("var(--ansi-"), toolName);
   }
 });
+
+test("releases a streamed thought a paragraph at a time", () => {
+  // The gate is on ThinkingBlock, so these assert the wiring, not just the
+  // pure function in lib/thinking-flush.ts.
+  const growing = (text) => renderMessage({
+    role: "assistant",
+    content: [{ type: "thinking", thinking: text }],
+  }, { isStreaming: true });
+
+  // nothing before the first paragraph is complete
+  assert.match(growing("still typing the first line"), /<span[^>]*>\.\.\.<\/span>/);
+  // the finished paragraph shows whole; the one still arriving does not
+  const partial = growing("one\n\ntwo\n\nthree is still arriving");
+  assert.match(partial, />one<\/span>/);
+  assert.doesNotMatch(partial, /three is still arriving/);
+  // a settled message releases all of it
+  assert.match(renderMessage({
+    role: "assistant",
+    content: [{ type: "thinking", thinking: "one\n\ntwo\n\nthree" }],
+  }), />one<\/span>/);
+});
+
+test("keeps a deferred thought's preview out of the paragraph gate", () => {
+  // A deferred block is history: its `thinking` is the preview the session file
+  // kept, and its body arrives separately, so nothing is held back.
+  const html = renderMessage({
+    role: "assistant",
+    content: [{ type: "thinking", thinking: "Historical first line", deferred: true }],
+  });
+  assert.match(html, />Historical first line<\/span>/);
+});

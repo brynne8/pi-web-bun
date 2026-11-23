@@ -20,6 +20,7 @@ import { isApplyPatchToolName, isEditToolName, isPowerShellToolName, isShellTool
 import { readSnapshotOfCall, type ReadSnapshot } from "@/lib/read-snapshot";
 import { isToolCallExpanded, setToolCallExpanded } from "@/lib/tool-call-expansion";
 import { isThinkingExpandedByDefault, THINKING_EXPANDED_EVENT } from "@/lib/thinking-expansion-preference";
+import { resolveThinkingVisibleText, type ThinkingFlushCheckpoint } from "@/lib/thinking-flush";
 import { skillExpansionContent, skillExpansionToCommand } from "@/lib/slash-display";
 import type { SubagentToolDetails } from "@/lib/subagent-extension";
 import { CODEMODE_TOOL_NAME, codemodeCalls, codemodeScript, codemodeScriptPreview, stripCodemodeHeader } from "@/lib/codemode-view";
@@ -1112,7 +1113,18 @@ export function ThinkingBlock({ block, duration, isStreaming, cwd, onOpenFile, s
   }
   const tRef = useRef(t);
   tRef.current = t;
-  const preview = getThinkingPreview(block.thinking);
+  // A streaming thought is released a paragraph at a time instead of a chunk at
+  // a time: a half-written paragraph never renders as markdown, and the row
+  // stops re-parsing on every chunk. The checkpoint lives outside React so a
+  // re-render from elsewhere cannot reset what this block has already shown.
+  //
+  // The gate reads `block.thinking`, which is the preview text a deferred block
+  // kept in the session file; its full body arrives separately as `content`, and
+  // a block that is no longer streaming releases everything either way.
+  const flushRef = useRef<ThinkingFlushCheckpoint | null>(null);
+  const flushed = resolveThinkingVisibleText(block.thinking, isStreaming === true, flushRef.current);
+  flushRef.current = flushed.checkpoint;
+  const preview = getThinkingPreview(flushed.text);
 
   // Keep already-mounted blocks in sync when the preference changes.
   useEffect(() => {
@@ -1212,7 +1224,7 @@ export function ThinkingBlock({ block, duration, isStreaming, cwd, onOpenFile, s
               onOpenFile={onOpenFile}
             >
               {/* Escapes stripped, as in TextBlock (#1753). */}
-              {stripAnsi(block.deferred ? content ?? "" : block.thinking)}
+              {stripAnsi(block.deferred ? content ?? "" : flushed.text)}
             </SafeMarkdownBody>
           )}
         </div>
