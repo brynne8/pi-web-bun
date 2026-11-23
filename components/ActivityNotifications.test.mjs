@@ -79,6 +79,15 @@ test("a row says whether the model has the result yet", () => {
   assert.doesNotMatch(taken, /delivered|arriving/);
 });
 
+test("a result the model took says it was taken, though it has no card to open", () => {
+  // A fetched report is withdrawn before it is delivered, so no message ever carries its card:
+  // the row has nothing to scroll to, and is still not on its way.
+  const taken = visibleText(render([row({ entryId: undefined, consumed: true, consumedAtMs: NOW - 1_000 })]));
+  assert.match(taken, /taken/);
+  assert.doesNotMatch(taken, /arriving|delivered/);
+  assert.doesNotMatch(render([row({ entryId: undefined, consumed: true, consumedAtMs: NOW - 1_000 })]), /<button/);
+});
+
 test("a result leaves a buffer after it reached the model, delivered or taken", () => {
   const delivered = [row({ deliveredAtMs: NOW - 1_000 })];
   assert.match(visibleText(render(delivered, NOW)), /bash-3f2a9b1c/, "still there just after it landed");

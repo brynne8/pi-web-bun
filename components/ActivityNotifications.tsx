@@ -82,7 +82,9 @@ export function ActivityNotifications({ notifications, now, onOpenNotification }
  */
 function NotificationRow({ entry, onOpen }: { entry: RailNotification; onOpen(): void }) {
   const { t } = useI18n();
-  const arriving = entry.entryId === undefined;
+  // A result the model took has no card either — its report was withdrawn before it ever arrived —
+  // but it is not on its way any more, so it says it was taken.
+  const arriving = entry.entryId === undefined && !entry.consumed;
   const label = entry.kind === "bash" ? entry.id || entry.title : entry.title || entry.id;
   const ended = statusWord(entry.status, t);
   const tip = [entry.kind === "bash" ? entry.title : "", ended, clockTime(entry.finishedAtMs)].filter(Boolean).join("\n");
@@ -103,7 +105,8 @@ function NotificationRow({ entry, onOpen }: { entry: RailNotification; onOpen():
   );
   return (
     <div className={`agent-row${arriving ? " is-arriving" : ""}${entry.consumed ? " is-consumed" : ""}`}>
-      {arriving
+      {/* A row without a card is not a button: there is nothing to scroll to, taken or arriving. */}
+      {entry.entryId === undefined
         ? <span className="agent-open" title={tip}>{body}</span>
         : <button type="button" className="agent-open" onClick={onOpen} title={tip}>{body}</button>}
     </div>
