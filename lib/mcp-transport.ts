@@ -2,7 +2,7 @@ import type { McpServerConfig, McpTransportFactory } from "@earendil-works/pi-co
 import type { McpConfigFieldRef } from "./api-types.ts";
 import { findWebPasswordField, resolvedConfigValues, WEB_PASSWORD_VARIABLE, type McpResolvedConfigValue } from "./mcp-config-values.ts";
 import type { PiSdkInternals } from "./pi-sdk-internals.ts";
-import { sanitizeProjectCommandEnvironment } from "./project-command-env.ts";
+import { sanitizeProjectCommandEnvironment } from "./project-environment.ts";
 
 // The resolved-value walk and the PI_WEB_PASSWORD rule are client-safe (`lib/mcp-config-values.ts`).
 export { findWebPasswordField, resolvedConfigValues, WEB_PASSWORD_VARIABLE, type McpResolvedConfigValue };

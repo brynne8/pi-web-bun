@@ -11,7 +11,7 @@ import { gt, maxSatisfying, rcompare, valid, validRange } from "semver";
 import type { PluginScope, PluginUpdateResult } from "@/lib/api-types";
 import { nodeCliInvocation } from "./node-cli.ts";
 import { parseNpmSource } from "./npm-source.ts";
-import { sanitizeProjectCommandEnvironment } from "./project-command-env.ts";
+import { sanitizeProjectCommandEnvironment } from "./project-environment.ts";
 import { getProjectTrustStatus } from "./project-trust.ts";
 
 const execFileAsync = promisify(execFile);

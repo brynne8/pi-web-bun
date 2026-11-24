@@ -26,6 +26,7 @@ import {
   wasBgTaskKilled,
 } from "./bash-bg-tasks.ts";
 import { buildBgTaskNotification, type BgTaskOutcome } from "./bg-task-notification.ts";
+import { sanitizeProjectCommandEnvironment } from "./project-environment.ts";
 
 const HOST_EXTENSION_NAME = "pi-web-project-command-environment";
 const HOST_EXTENSION_PATH = `<inline:${HOST_EXTENSION_NAME}>`;
@@ -68,27 +69,6 @@ type ProjectCommandBashOperationsOptions = {
 };
 
 type BashExecResult = Awaited<ReturnType<BashOperations["exec"]>>;
-
-function isHostRuntimeVariable(name: string, platform: NodeJS.Platform): boolean {
-  const comparableName = platform === "win32" ? name.toUpperCase() : name;
-  return comparableName === "PORT"
-    || comparableName === "NODE_ENV"
-    || comparableName.startsWith("NEXT_")
-    // The browser login password guards this server; commands run on behalf of
-    // a project (and the model reading their output) have no use for it.
-    || comparableName === "PI_WEB_PASSWORD";
-}
-
-export function sanitizeProjectCommandEnvironment(
-  baseEnvironment: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform = process.platform,
-): NodeJS.ProcessEnv {
-  const environment = { ...baseEnvironment };
-  for (const name of Object.keys(environment)) {
-    if (isHostRuntimeVariable(name, platform)) delete environment[name];
-  }
-  return environment;
-}
 
 function withAgentBinDirectory(
   environment: NodeJS.ProcessEnv,
