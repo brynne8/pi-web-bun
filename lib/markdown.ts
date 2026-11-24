@@ -726,6 +726,36 @@ export const markdownRemarkPlugins: ReactMarkdownOptions["remarkPlugins"] = [
   remarkWindowsFileLinks,
 ];
 
+// A renderer that shows math as written needs nothing that makes a formula: with
+// `remarkNotMathPairs` (the plugin registering remark-math) and the display-fence
+// pass out of its remark list, `$…$` stays text; with the KaTeX transform and the
+// LaTeX-source wrapper out of its rehype list, nothing typesets what never became
+// a formula. Both cached per list: a parse is keyed on the array's identity.
+const noMathRemarkVariants = new Map<ReactMarkdownOptions["remarkPlugins"], ReactMarkdownOptions["remarkPlugins"]>();
+const noMathRehypeVariants = new Map<ReactMarkdownOptions["rehypePlugins"], ReactMarkdownOptions["rehypePlugins"]>();
+
+/** `plugins` with the two that parse math taken out. */
+export function markdownRemarkPluginsWithoutMath(plugins: ReactMarkdownOptions["remarkPlugins"]): ReactMarkdownOptions["remarkPlugins"] {
+  if (!plugins) return plugins;
+  let without = noMathRemarkVariants.get(plugins);
+  if (!without) {
+    without = plugins.filter((plugin) => plugin !== remarkNotMathPairs && plugin !== remarkProseDisplayMath);
+    noMathRemarkVariants.set(plugins, without);
+  }
+  return without;
+}
+
+/** `plugins` with the two that draw a formula taken out. */
+export function markdownRehypePluginsWithoutMath(plugins: ReactMarkdownOptions["rehypePlugins"]): ReactMarkdownOptions["rehypePlugins"] {
+  if (!plugins) return plugins;
+  let without = noMathRehypeVariants.get(plugins);
+  if (!without) {
+    without = plugins.filter((plugin) => plugin !== rehypeKatexWhenLoaded && plugin !== rehypeDisplayMathSource);
+    noMathRehypeVariants.set(plugins, without);
+  }
+  return without;
+}
+
 // User messages keep every typed line break, as the TUI shows them (#680). The
 // `.markdown-user-message p` pre-wrap rule only reaches paragraphs, so a soft
 // break in a tight list item ("1. question\nA. option") or a heading collapsed

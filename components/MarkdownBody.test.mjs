@@ -268,6 +268,26 @@ test("demotes a CJK sentence inside one dollar pair", () => {
   }
 });
 
+test("keepMathAsText renders no formula, as a thinking card does", () => {
+  // What the model wrote is what shows: dollars, backslashes and all.
+  for (const markdown of [
+    "Compute $x + y$ first, then $$x + y$$.",
+    "$E=mc^2$ and $PV=nRT$",
+    "先算 $x + 1$ 再算 $y$",
+    "输出 $HOME 与 $\\alpha$ 两值",
+  ]) {
+    const html = renderMarkdown(markdown, { keepMathAsText: true });
+    assert.doesNotMatch(html, /class="katex|markdown-math-display/, markdown);
+    assert.equal((html.match(/\$/g) ?? []).length, (markdown.match(/\$/g) ?? []).length, markdown);
+  }
+  // The same text through the pipeline a reply uses is typeset.
+  assert.match(renderMarkdown("Compute $x + y$ first."), /class="katex"/);
+  // A ```math fence is the one math form carrying no dollar: an ordinary fence here.
+  const fence = renderMarkdown("```math\nx + y\n```", { keepMathAsText: true });
+  assert.match(fence, /markdown-code-lang">math</);
+  assert.doesNotMatch(fence, /class="katex|markdown-math-display/);
+});
+
 test("file previews and minimap Markdown use the same prose and currency math rules", () => {
   const preview = (markdown) => renderToStaticMarkup(React.createElement(ReactMarkdown, {
     remarkPlugins: markdownPreviewRemarkPlugins,

@@ -7,7 +7,7 @@ import { copyText } from "@/lib/clipboard";
 import { parsePdfPageFragment, resolveLocalFileHref, shouldOpenLocalFileInApp } from "@/lib/file-links";
 import { encodeFilePathForApi } from "@/lib/file-paths";
 import { isAudioPath, isVideoPath } from "@/lib/file-types";
-import { isExternalMarkdownHref, jumpToMarkdownFragment, markdownAppUrlTransform, markdownDocumentRehypePlugins, markdownRehypePlugins, markdownRemarkPlugins, markdownTextLayoutRemarkPlugins, markdownUrlTransform, markdownUserRemarkPlugins, normalizeDisplayMathIncremental, type DisplayMathCheckpoint } from "@/lib/markdown";
+import { isExternalMarkdownHref, jumpToMarkdownFragment, markdownAppUrlTransform, markdownDocumentRehypePlugins, markdownRehypePlugins, markdownRehypePluginsWithoutMath, markdownRemarkPlugins, markdownRemarkPluginsWithoutMath, markdownTextLayoutRemarkPlugins, markdownUrlTransform, markdownUserRemarkPlugins, normalizeDisplayMathIncremental, type DisplayMathCheckpoint } from "@/lib/markdown";
 import { hasMathDelimiter, katexPluginReady, loadKatexPlugin, markdownRehypePluginsWithKatex } from "@/lib/markdown-katex";
 import { parseFenceBlock, splitMarkdownBlocksIncremental, type BlockSplitCheckpoint } from "@/lib/markdown-blocks";
 import { isPlantUmlLang } from "@/lib/plantuml";
@@ -30,6 +30,8 @@ interface MarkdownBodyProps {
   keepLineBreaks?: boolean;
   /** An extension's custom message: keepLineBreaks, plus each paragraph line's indent, as in pi's TUI. */
   keepTextLayout?: boolean;
+  /** Math is never parsed or typeset: `$…$`, `$$…$$` and a ```math fence read as written. */
+  keepMathAsText?: boolean;
 }
 
 function MarkdownImage({
@@ -122,13 +124,19 @@ function renderFence(lang: string, code: string, isStreaming: boolean | undefine
   return <CodeBlock code={code} lang={lang} isStreaming={isStreaming} />;
 }
 
-export const MarkdownBody = memo(function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile, onNavigateLink, keepLineBreaks, keepTextLayout }: MarkdownBodyProps) {
+export const MarkdownBody = memo(function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile, onNavigateLink, keepLineBreaks, keepTextLayout, keepMathAsText }: MarkdownBodyProps) {
   const normalizeCheckpoint = useRef<DisplayMathCheckpoint | null>(null);
   const normalizedMarkdown = useMemo(() => {
+    // `\(…\)` and `\[…\]` become `$…$` for the parser; with no parser there is
+    // nothing to prepare, and rewriting would show dollars nobody typed.
+    if (keepMathAsText) {
+      normalizeCheckpoint.current = null;
+      return children;
+    }
     const normalized = normalizeDisplayMathIncremental(children, normalizeCheckpoint.current);
     normalizeCheckpoint.current = normalized.checkpoint;
     return normalized.text;
-  }, [children]);
+  }, [children, keepMathAsText]);
   const splitCheckpoint = useRef<BlockSplitCheckpoint | null>(null);
   // A streaming reply grows by a few characters per chunk; parsing all of it
   // each time made a long reply quadratic. Its finished blocks keep their
@@ -143,7 +151,7 @@ export const MarkdownBody = memo(function MarkdownBody({ children, className, is
   // it, and one that can shows the math as its source until the chunk lands and the
   // plugin list is swapped for the one carrying the transform, which re-parses
   // every block (the memoized block sees a new array, so it renders again).
-  const needsKatex = useMemo(() => blocks.some(hasMathDelimiter), [blocks]);
+  const needsKatex = useMemo(() => !keepMathAsText && blocks.some(hasMathDelimiter), [blocks, keepMathAsText]);
   const [katexReady, setKatexReady] = useState(katexPluginReady);
   useEffect(() => {
     if (katexReady || !needsKatex) return;
@@ -153,8 +161,13 @@ export const MarkdownBody = memo(function MarkdownBody({ children, className, is
   }, [needsKatex, katexReady]);
   const rehypePlugins = useMemo(() => {
     const plugins = onNavigateLink ? markdownDocumentRehypePlugins : markdownRehypePlugins;
+    if (keepMathAsText) return markdownRehypePluginsWithoutMath(plugins);
     return katexReady && needsKatex ? markdownRehypePluginsWithKatex(plugins) : plugins;
-  }, [onNavigateLink, katexReady, needsKatex]);
+  }, [onNavigateLink, katexReady, needsKatex, keepMathAsText]);
+  const remarkPlugins = useMemo(() => {
+    const plugins = keepTextLayout ? markdownTextLayoutRemarkPlugins : keepLineBreaks ? markdownUserRemarkPlugins : markdownRemarkPlugins;
+    return keepMathAsText ? markdownRemarkPluginsWithoutMath(plugins) : plugins;
+  }, [keepLineBreaks, keepTextLayout, keepMathAsText]);
   // Stable renderer identities keep stateful blocks mounted across message hover updates.
   const components = useMemo<Components>(() => ({
     code({ className, children, ...props }) {
@@ -266,7 +279,7 @@ export const MarkdownBody = memo(function MarkdownBody({ children, className, is
         <MarkdownBlock
           key={index}
           markdown={block}
-          remarkPlugins={keepTextLayout ? markdownTextLayoutRemarkPlugins : keepLineBreaks ? markdownUserRemarkPlugins : markdownRemarkPlugins}
+          remarkPlugins={remarkPlugins}
           urlTransform={onOpenFile ? markdownUrlTransform : markdownAppUrlTransform}
           rehypePlugins={rehypePlugins}
           components={components}

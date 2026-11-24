@@ -164,7 +164,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **子代理的报告按 Markdown 渲染。** `Agent` 或 `get_result` 的结果会把标题、列表、表格和围栏代码真的渲染出来，字号仍是这张卡片自己那一号，不再把子代理写下的标记符号直接摆给你看。其他工具的输出仍是原始文本——在那里 `*` 和 `#` 只是字符，不是标题。后台运行的通知和子代理自己的标签页本来就已经按 Markdown 渲染，这一份报告在两处读起来是同一个样子。原版是把报告原样打印。（[说明](./agents/subagents.md#the-report-on-screen)）
 
-**思考过程按 Markdown 渲染。** 展开的思考块走的是和回复同一套 Markdown 流水线：标题、列表、表格和围栏代码都渲染出来，不再把标记符号直接摆给你看，写成链接的路径也能在应用里打开。字号仍是这张卡片一贯的那一号。原版的处理是把整段思考当成一串保留换行的纯文本，长了就切成好几段（[#1196](https://github.com/agegr/pi-web/pull/1196)）。（[说明](./agents/sessions.md#thinking-renders-as-markdown-at-the-cards-own-size-thinkingblock-componentsmessageviewtsx)）
+**思考过程按 Markdown 渲染。** 展开的思考块走的是和回复同一套 Markdown 流水线：标题、列表、表格和围栏代码都渲染出来，不再把标记符号直接摆给你看，写成链接的路径也能在应用里打开。字号仍是这张卡片一贯的那一号。公式是唯一的例外：`$…$`、`$$…$$` 和 `` ```math `` 围栏都原样留着模型写下的样子。原版的处理是把整段思考当成一串保留换行的纯文本，长了就切成好几段（[#1196](https://github.com/agegr/pi-web/pull/1196)）。（[说明](./agents/sessions.md#thinking-renders-as-markdown-at-the-cards-own-size-thinkingblock-componentsmessageviewtsx)）
 
 **一次子代理调用不带文件清单。** `Agent` 收的参数只有 `subagent_type`、`prompt`、`description`、`run_in_background`、`resume`、`model` 和 `isolation`：要让子代理看哪些文件，就写在 `prompt` 里，它用自己的 `read` 去打开。思考档位、轮次上限、是否继承这段对话都由 profile 决定，思考档位跟着模型引用一起写（写成 `x:high`）。原版在调用上保留 `input_files` 列表，和它从同一个 PR 拿到的 profile 参数并列（[#1138](https://github.com/agegr/pi-web/pull/1138)）。（[说明](./agents/subagents.md#what-the-model-may-choose-when-spawning-a-subagent)）
 

@@ -1557,8 +1557,6 @@ pre, code {
 .markdown-body.markdown-thinking table { font-size: inherit; }
 .markdown-body.markdown-thinking .markdown-table-wrap,
 .markdown-body.markdown-thinking .markdown-code-block { margin: 5px 0; }
-.markdown-body.markdown-thinking .katex { font-size: 1em; }
-.markdown-body.markdown-thinking .katex-display { margin: 0.4em 0; }
 /* CodeBlock sizes its <pre> inline, so only an important override keeps a
    fenced snippet from reading larger than the thinking around it. */
 .markdown-body.markdown-thinking .markdown-code-block :is(pre, code) {

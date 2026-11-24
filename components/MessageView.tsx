@@ -1231,6 +1231,7 @@ export function ThinkingBlock({ block, duration, isStreaming, cwd, onOpenFile, s
               isStreaming={isStreaming}
               cwd={cwd}
               onOpenFile={onOpenFile}
+              keepMathAsText
             >
               {/* Escapes stripped, as in TextBlock (#1753). */}
               {stripAnsi(block.deferred ? content ?? "" : flushed.text)}
