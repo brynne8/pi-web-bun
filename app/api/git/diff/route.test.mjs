@@ -259,24 +259,33 @@ test("an ignored file is no one's change and has no diff", async () => {
 
 test("a conflicted file is reported as a conflict, with the markers Git left in it", async () => {
   const root = fixture();
-  fs.writeFileSync(path.join(root, "a.txt"), "base\n");
+  const filePath = path.join(root, "a.txt");
+  // A name and an address for every command that writes one, the runner's Git having none.
+  const identity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid"];
+  const commit = (...args) => git(root, ...identity, "commit", ...args);
+  fs.writeFileSync(filePath, "base\n");
   git(root, "add", ".");
-  const commit = (...args) => git(root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", ...args);
   commit("--quiet", "-m", "fixture");
-  const main = git(root, "rev-parse", "--abbrev-ref", "HEAD").trim();
-  fs.writeFileSync(path.join(root, "a.txt"), "branch a\n");
-  commit("--quiet", "-am", "a");
-  git(root, "checkout", "--quiet", "-b", "other", "HEAD~1");
-  fs.writeFileSync(path.join(root, "a.txt"), "branch b\n");
+  // Branch names spelled by nobody: `git checkout -` is the branch just left, whatever a
+  // runner named the one `git init` started on.
+  git(root, "checkout", "--quiet", "-b", "side");
+  fs.writeFileSync(filePath, "branch b\n");
   commit("--quiet", "-am", "b");
-  git(root, "checkout", "--quiet", main);
+  git(root, "checkout", "--quiet", "-");
+  fs.writeFileSync(filePath, "branch a\n");
+  commit("--quiet", "-am", "a");
+  // The merge is what makes the conflict, so its own failure is not a result: a `catch` that
+  // swallows it leaves a clean tree and an answer of "no diff", which reads as the route's.
+  let merged;
   try {
-    git(root, "merge", "other");
-  } catch {
-    // The conflict is the fixture.
+    merged = { ok: true, output: git(root, ...identity, "merge", "--no-commit", "side") };
+  } catch (error) {
+    merged = { ok: false, output: String(error.stderr || error.message) };
   }
+  const listing = git(root, "status", "--porcelain=v1");
+  assert.ok(listing.includes("UU"), `the merge made no conflict to report: ${JSON.stringify(listing)} from ${JSON.stringify(merged.output)}`);
 
-  const result = await (await request(root, path.join(root, "a.txt"))).json();
+  const result = await (await request(root, filePath)).json();
   assert.equal(result.supported, true);
   assert.equal(result.status, "conflict");
   assert.ok(result.patch.includes("+<<<<<<< HEAD"), result.patch);

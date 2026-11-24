@@ -53,6 +53,8 @@ One `*.test.mjs` per area beside its file, the `.ts` under test loaded through j
 
 A file that arrives from upstream is written for Node's isolation — one process, one module registry, `tryNative` off — so it lands red here until it takes that same treatment: `tryNative: false`, the modules it stubs dropped from the require cache before jiti loads it and again in `after()`, and whatever it leaves on `globalThis` taken back afterwards. A `fetch` or `EventSource` stub that outlives its own file answers the next file's real request, and the failure surfaces there: `url.startsWith is not a function`, or a request the harness never made.
 
+**A fixture that runs Git gives each command that writes one a name and an address, and never swallows the command's own failure.** GitHub's runner carries no `user.name` and no `user.email`, so a write answers `fatal: empty ident name … not allowed`; a repository fixture passes `-c user.name=… -c user.email=…` on every commit — the merge that produces a conflict included, since a merge commits. And the state a fixture builds is asserted before the product is: `try { git merge } catch {}` reads "the merge conflicted" and "Git refused to merge" as one outcome, so the assertion two lines later reports the route's answer — `supported: false` — when what happened is that no conflict was ever made. Read what the fixture left (`git status --porcelain` names the `UU` the case is about) and put the command's own output in that guard's message.
+
 ## Reading a failure
 
 - Red when the file runs alone (`bun test path/to/x.test.mjs`) → that file is not Bun-ready: a `node:module` export that is not there, or real React because an alias was bypassed.
