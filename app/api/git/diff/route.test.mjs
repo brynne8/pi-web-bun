@@ -206,3 +206,78 @@ test("rejects parent traversal and keeps an absent untracked path unsupported", 
   assert.equal(missing.status, 200);
   assert.deepEqual(await missing.json(), { supported: false });
 });
+
+test("a staged rename is shown with the name the file had", async () => {
+  const root = fixture();
+  fs.writeFileSync(path.join(root, "old.txt"), "one\ntwo\n");
+  git(root, "add", ".");
+  git(root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "fixture");
+  git(root, "mv", "old.txt", "new.txt");
+  fs.writeFileSync(path.join(root, "new.txt"), "one\ntwo\nthree\n");
+
+  const result = await (await request(root, path.join(root, "new.txt"))).json();
+  assert.equal(result.supported, true);
+  assert.equal(result.status, "renamed");
+  // The name it came from comes with it, which is why Git's index is asked as well as the
+  // file: a pathspec of the new name alone cannot see the change to the old one.
+  assert.ok(result.patch.includes("rename from old.txt"), result.patch);
+  assert.ok(result.patch.includes("+three"), result.patch);
+});
+
+test("a rename that moved no content shows nothing, and its missing destination is a deletion", async () => {
+  const root = fixture();
+  fs.writeFileSync(path.join(root, "old.txt"), "one\ntwo\n");
+  git(root, "add", ".");
+  git(root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "fixture");
+  git(root, "mv", "old.txt", "new.txt");
+
+  // A rename alone is no lines moved, and a diff of nothing is not a diff.
+  assert.deepEqual(await (await request(root, path.join(root, "new.txt"))).json(), { supported: false });
+
+  fs.unlinkSync(path.join(root, "new.txt"));
+  const result = await (await request(root, path.join(root, "new.txt"))).json();
+  assert.equal(result.supported, true);
+  assert.equal(result.status, "deleted");
+  assert.ok(result.patch.includes("-two"), result.patch);
+});
+
+test("an ignored file is no one's change and has no diff", async () => {
+  const root = fixture();
+  fs.writeFileSync(path.join(root, "a.txt"), "one\n");
+  fs.writeFileSync(path.join(root, ".gitignore"), "build/\n");
+  git(root, "add", ".");
+  git(root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "fixture");
+  fs.mkdirSync(path.join(root, "build"));
+  const ignored = path.join(root, "build", "out.js");
+  fs.writeFileSync(ignored, "compiled\n");
+
+  assert.deepEqual(await (await request(root, ignored)).json(), { supported: false });
+  // The rule is the ignore rules', not the folder's: a tracked file beside them still answers.
+  fs.writeFileSync(path.join(root, "a.txt"), "two\n");
+  assert.equal((await (await request(root, path.join(root, "a.txt"))).json()).status, "modified");
+});
+
+test("a conflicted file is reported as a conflict, with the markers Git left in it", async () => {
+  const root = fixture();
+  fs.writeFileSync(path.join(root, "a.txt"), "base\n");
+  git(root, "add", ".");
+  const commit = (...args) => git(root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", ...args);
+  commit("--quiet", "-m", "fixture");
+  const main = git(root, "rev-parse", "--abbrev-ref", "HEAD").trim();
+  fs.writeFileSync(path.join(root, "a.txt"), "branch a\n");
+  commit("--quiet", "-am", "a");
+  git(root, "checkout", "--quiet", "-b", "other", "HEAD~1");
+  fs.writeFileSync(path.join(root, "a.txt"), "branch b\n");
+  commit("--quiet", "-am", "b");
+  git(root, "checkout", "--quiet", main);
+  try {
+    git(root, "merge", "other");
+  } catch {
+    // The conflict is the fixture.
+  }
+
+  const result = await (await request(root, path.join(root, "a.txt"))).json();
+  assert.equal(result.supported, true);
+  assert.equal(result.status, "conflict");
+  assert.ok(result.patch.includes("+<<<<<<< HEAD"), result.patch);
+});

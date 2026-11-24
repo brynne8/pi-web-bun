@@ -1548,6 +1548,9 @@ function TextFileViewer({
   // keeps what is loaded (Load more chunks, scroll, highlighting).
   const shownVersionRef = useRef<string | null>(null);
   const gitDiffRequestRef = useRef(0);
+  // The path whose diff is on its way, so the same question is not asked twice: opening a
+  // tab and the watcher's `connected` synchronize run within a few frames of each other.
+  const gitDiffInFlightRef = useRef<string | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const autoDiffAppliedRef = useRef(false);
   const defaultPreviewEligibleRef = useRef(
@@ -1633,14 +1636,17 @@ function TextFileViewer({
   }, [sourceSessionId]);
 
   const fetchGitDiff = useCallback(async (targetPath: string) => {
-    const requestId = ++gitDiffRequestRef.current;
-    setGitDiffLoading(true);
     if (!cwd) {
       setGitDiff(null);
       setGitDiffLoading(false);
       setGitDiffResolved(true);
       return;
     }
+    const requested = `${cwd}\u0000${targetPath}`;
+    if (gitDiffInFlightRef.current === requested) return;
+    gitDiffInFlightRef.current = requested;
+    const requestId = ++gitDiffRequestRef.current;
+    setGitDiffLoading(true);
 
     try {
       const params = new URLSearchParams({ cwd, path: targetPath });
@@ -1651,6 +1657,7 @@ function TextFileViewer({
     } catch {
       if (requestId === gitDiffRequestRef.current) setGitDiff(null);
     } finally {
+      if (gitDiffInFlightRef.current === requested) gitDiffInFlightRef.current = null;
       if (requestId === gitDiffRequestRef.current) {
         setGitDiffLoading(false);
         setGitDiffResolved(true);

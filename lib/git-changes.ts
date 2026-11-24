@@ -9,9 +9,12 @@ import type {
   GitStatusResponse,
 } from "./git-types.ts";
 import {
+  classifyFileDiff,
   classifyGitStatus,
   parseGitPorcelainV1,
+  parseNameStatusZ,
   type GitPorcelainEntry,
+  type IndexChange,
 } from "./git-status.ts";
 import { projectGitEnvironment } from "./git-environment.ts";
 import { resolveExistingPath } from "./paths.ts";
@@ -325,6 +328,10 @@ async function createTrackedFilePatch(
       "diff",
       "--no-color",
       "--no-ext-diff",
+      // A conversion filter a repository configures (`*.pdf diff=pdf`) would run on the file
+      // behind the click and print something that is not the file. The raw bytes decide, and
+      // Git calls a binary file's diff binary, which this route answers with nothing.
+      "--no-textconv",
       "--unified=3",
       "HEAD",
       "--",
@@ -333,6 +340,89 @@ async function createTrackedFilePatch(
   } catch {
     return null;
   }
+}
+
+/**
+ * What the index holds for every path against HEAD, so a rename can be named with the path
+ * it came from. This reads the index and the trees, never the work tree: a whole `git status`
+ * stats every file in the repository, which is the cost one file's diff must not pay.
+ */
+async function readIndexChanges(
+  repositoryRoot: string,
+  gitConfig: readonly string[],
+): Promise<Map<string, IndexChange> | null> {
+  try {
+    const output = await git(repositoryRoot, [
+      ...gitConfig,
+      "diff",
+      "--cached",
+      "-M",
+      "--name-status",
+      "-z",
+      "HEAD",
+    ]);
+    return parseNameStatusZ(output);
+  } catch {
+    // A repository without commits has no HEAD, and a git that failed answers nothing.
+    return null;
+  }
+}
+
+/** Whether Git's index holds the path; an unmerged path answers with one line per stage. */
+async function readPathInIndex(
+  repositoryRoot: string,
+  relativePath: string,
+  gitConfig: readonly string[],
+): Promise<boolean | null> {
+  try {
+    const output = await git(repositoryRoot, [
+      ...gitConfig,
+      "--literal-pathspecs",
+      "ls-files",
+      "-z",
+      "--",
+      relativePath,
+    ]);
+    return output.length > 0;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether Git's ignore rules cover the path, which is what no changed listing shows and so
+ * nothing shows here either. `check-ignore` exits 1 for "not ignored", which is an answer
+ * rather than a failure; it consults the index, so a tracked path is never called ignored.
+ */
+async function readPathIgnored(
+  repositoryRoot: string,
+  relativePath: string,
+  gitConfig: readonly string[],
+): Promise<boolean | null> {
+  try {
+    await git(repositoryRoot, [...gitConfig, "check-ignore", "-q", "--", relativePath]);
+    return true;
+  } catch (error) {
+    return gitExitCode(error) === 1 ? false : null;
+  }
+}
+
+/** The exit code of a git run that ended non-zero; undefined when it never ran or was killed. */
+function gitExitCode(error: unknown): number | undefined {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === "number" ? code : undefined;
+}
+
+/**
+ * The text of the file a diff is asked for, or null when it cannot be read or holds a NUL
+ * anywhere: content no source view shows. Git calls a file binary by its first bytes alone,
+ * so reading the file is the wider rule, and it is what kept a configured conversion filter
+ * from running behind a click before this route stopped reading files at all.
+ */
+async function readDiffableFileText(filePath: string): Promise<string | null> {
+  const buffer = await fs.promises.readFile(filePath).catch(() => null);
+  if (!buffer || hasNullByte(buffer)) return null;
+  return buffer.toString("utf8");
 }
 
 // The file's own repository, not the cwd's: a session may start in a plain folder
@@ -365,42 +455,54 @@ export async function getGitFileDiff(cwd: string, filePath: string): Promise<Git
 
   const resolvedFilePath = path.resolve(filePath);
   const relativePath = toGitPath(path.relative(realRoot, realFilePath));
-  const entries = await readStatusEntries(repositoryRoot, gitConfig);
-  const entry = entries.find((candidate) => candidate.path === relativePath);
-  if (!entry) return { supported: false };
+  // A path that is not a file, or one past the preview's cap, has no diff to show. A
+  // deleted file has no stat at all and is answered from its patch, as it always was.
+  const onDisk = await fs.promises.lstat(resolvedFilePath).catch(() => null);
+  if (onDisk && (!onDisk.isFile() || onDisk.size > TEXT_PREVIEW_MAX_BYTES)) return { supported: false };
 
-  const { status } = classifyGitStatus(entry);
-  if (status === "deleted") {
-    const patch = await createTrackedFilePatch(repositoryRoot, relativePath, entry.originalPath, gitConfig);
-    if (!patch?.includes("\n@@ ")) return { supported: false };
-    return { supported: true, status, patch };
-  }
+  // Five questions about this one path, asked at once, none of which reads the rest of the
+  // work tree. The listing that covers the whole repository instead — `git status` — stats
+  // every file in it, which for one file's answer is the whole cost of the request.
+  const [headDiff, indexChanges, inIndex, ignored, fileText] = await Promise.all([
+    createTrackedFilePatch(repositoryRoot, relativePath, undefined, gitConfig),
+    readIndexChanges(repositoryRoot, gitConfig),
+    readPathInIndex(repositoryRoot, relativePath, gitConfig),
+    readPathIgnored(repositoryRoot, relativePath, gitConfig),
+    // A NUL anywhere in a file is content no source view shows, and Git calls a file binary
+    // by its first bytes alone, so the file answers for itself here, once.
+    onDisk && onDisk.isFile() ? readDiffableFileText(resolvedFilePath) : Promise.resolve(null),
+  ]);
+  const indexChange = indexChanges?.get(relativePath);
+  const decision = classifyFileDiff({
+    headDiff,
+    indexChange,
+    comparedWithHead: indexChanges !== null,
+    inIndex,
+    ignored,
+    onDisk: onDisk !== null,
+  });
+  if (!decision) return { supported: false };
+  // The bytes of a file that is there have to be showable; a path the reader is told was
+  // deleted is answered from its patch, as it always was.
+  if (onDisk && fileText === null && decision.status !== "deleted") return { supported: false };
 
-  let stat: fs.Stats;
-  try {
-    stat = fs.lstatSync(resolvedFilePath);
-  } catch {
-    return { supported: false };
-  }
-  if (!stat.isFile() || stat.size > TEXT_PREVIEW_MAX_BYTES) return { supported: false };
-
-  const currentBuffer = fs.readFileSync(resolvedFilePath);
-  if (hasNullByte(currentBuffer)) return { supported: false };
-  const newContent = currentBuffer.toString("utf8");
-
-  let patch: string;
-  if (status === "untracked") {
-    patch = createAddedFilePatch(relativePath, newContent);
+  let patch: string | null;
+  if (decision.source === "content") {
+    if (fileText === null) return { supported: false };
+    patch = createAddedFilePatch(relativePath, fileText);
   } else {
-    const trackedPatch = await createTrackedFilePatch(repositoryRoot, relativePath, entry.originalPath, gitConfig);
-    if (trackedPatch === null) {
-      if (status !== "added") return { supported: false };
-      patch = createAddedFilePatch(relativePath, newContent);
-    } else {
-      patch = trackedPatch;
+    patch = decision.source === "rename-patch"
+      ? await createTrackedFilePatch(repositoryRoot, relativePath, indexChange?.originalPath, gitConfig)
+      : headDiff;
+    if (patch === null) {
+      // Git compared the path with nothing at all. Only a file HEAD never held has an answer
+      // in its own bytes, under the same size and binary rules as anywhere else here.
+      if (decision.status !== "added" || fileText === null) return { supported: false };
+      patch = createAddedFilePatch(relativePath, fileText);
     }
   }
 
-  if (!patch.includes("\n@@ ")) return { supported: false };
-  return { supported: true, status, patch };
+  // A hunk's removed side comes from HEAD, where the bytes can be anything.
+  if (!patch.includes("\n@@ ") || patch.includes("\0")) return { supported: false };
+  return { supported: true, status: decision.status, patch };
 }

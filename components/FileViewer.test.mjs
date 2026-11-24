@@ -103,6 +103,22 @@ test("the diff view wraps when the viewer wraps, and the key reaches the diff", 
   assert.match(source, /export function SourceCodeRenderer/);
 });
 
+test("one diff request runs per path at a time", () => {
+  const start = source.indexOf("const fetchGitDiff = useCallback");
+  assert.notEqual(start, -1);
+  const fetchDiff = source.slice(start, source.indexOf("// Reset and load the file itself", start));
+
+  // Opening a tab and the watcher's `connected` synchronize ask the same question a few
+  // frames apart, and the route would do the same work twice.
+  assert.match(fetchDiff, /const requested = `\$\{cwd\}\\u0000\$\{targetPath\}`;/);
+  assert.match(fetchDiff, /if \(gitDiffInFlightRef\.current === requested\) return;/);
+  // A call let go of leaves the request counter alone, so the one still running answers.
+  assert.ok(fetchDiff.indexOf("=== requested) return") < fetchDiff.indexOf("++gitDiffRequestRef.current"),
+    "the in-flight check runs before the request is counted");
+  // The path is let go when its request lands, whatever the answer was.
+  assert.match(fetchDiff, /finally \{[\s\S]{0,140}gitDiffInFlightRef\.current = null/);
+});
+
 test("a highlighted diff line keeps the row's line box, wrap and background", () => {
   const lineCode = source.slice(source.indexOf("function DiffLineCode"), source.indexOf("function DiffView"));
   assert.notEqual(source.indexOf("function DiffLineCode"), -1);
