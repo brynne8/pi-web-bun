@@ -23,7 +23,10 @@ test("renders a turn as its segments, so nothing the model wrote is filed away",
   assert.match(source, /const segments = splitTurnSegments\(messages, userIdx \+ 1, endIdx\)/);
   assert.match(source, /for \(const \[segmentIdx, segment\] of segments\.entries\(\)\)/);
   assert.match(source, /if \(segment\.kind === "process"\) \{/);
-  assert.match(source, /rendered\.push\(\.\.\.views\)/, "an answer segment renders directly");
+  // An answer segment's views render directly: mergeSegmentViews is the identity for
+  // them, because a part holding text or an image carries no tool family and every
+  // one of its views comes back a singleton, in order.
+  assert.match(source, /rendered\.push\(\.\.\.mergeSegmentViews\(views, t, revealSegment(?:, [a-zA-Z.]+)?\)\)/, "an answer segment renders directly");
   assert.match(source, /key=\{`process-group-\$\{entryIds\[groupStartIdx\] \?\? groupStartIdx\}-\$\{segmentIdx\}`\}/);
 });
 
@@ -33,7 +36,8 @@ test("a ! command no segment covers still renders in the turn", () => {
   // vanished the moment the session was read back: a session whose only entry is one
   // showed an empty chat, and every command run after a reply disappeared on reload.
   assert.match(source, /for \(const tailIdx of unsegmentedTurnMessages\(messages, segments, userIdx, endIdx\)\)/);
-  assert.match(source, /rendered\.push\(\{ node: renderMessage\(tailIdx\), messageIdx: tailIdx \}\)/);
+  // A settled turn's thoughts are finished, so this path hides them like the rest.
+  assert.match(source, /rendered\.push\(\{ node: renderMessage\(tailIdx, \{ hideFinishedThinking: !thinkingVisible \}\), messageIdx: tailIdx \}\)/);
 });
 
 test("a group starts collapsed even when the turn wrote nothing", () => {

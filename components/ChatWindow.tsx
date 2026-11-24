@@ -11,6 +11,8 @@ import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { getAssistantErrorMessage, getTurnAnchors, hasAssistantAnswer, hasTurnRef, isAssistantAborted, isAssistantTruncated, isHiddenCustomMessage, liveOutputPreview, LIVE_OUTPUT_PREVIEW_LINES, sumCost } from "@/lib/message-display";
 import { extractTurnWrittenFiles } from "@/lib/turn-written-files";
 import { planTurnRender, splitTurnSegments, turnHasAnswer, unsegmentedTurnMessages } from "@/lib/turn-segments";
+import { groupAdjacentToolCalls, toolCallFamily, type ToolFamily, type ToolRunMembership } from "@/lib/tool-call-runs";
+import { useThinkingVisible } from "@/hooks/useThinkingVisible";
 import { getTurnPart, type TurnPartCache } from "@/lib/turn-views";
 import { getTurnUsage } from "@/lib/turn-usage";
 import { formatTurnDuration, getTurnDurationMs } from "@/lib/turn-duration";
@@ -281,6 +283,112 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, durationMs, cost, ca
   );
 }
 
+/**
+ * The family a part's calls could merge into, or null when they cannot.
+ *
+ * A response may ask for several calls at once, so a part can stand for more than
+ * one: they all have to be of one family, and nothing else may share the part —
+ * a thought (hidden or not) and a note beside the calls do not count, because
+ * they are commentary on the calls rather than blocks of their own.
+ */
+function partToolFamily(blocks: readonly AssistantContentBlock[]): { family: ToolFamily | null; toolName?: string; callCount: number } {
+  const calls = blocks.filter((block) => block.type === "toolCall");
+  if (calls.length === 0) return { family: null, callCount: 0 };
+  if (blocks.length !== calls.length) return { family: null, callCount: 0 };
+  const family = toolCallFamily(calls[0].toolName);
+  if (family === "other") return { family: null, callCount: 0 };
+  if (!calls.every((call) => toolCallFamily(call.toolName) === family)) return { family: null, callCount: 0 };
+  return { family, toolName: calls[0].toolName, callCount: calls.length };
+}
+
+/** A view of a turn's stretch, tagged with the tool family it could merge into. */
+interface SegmentView {
+  node: ReactNode;
+  messageIdx: number;
+  /** Null when this view cannot join a run: no calls of one family, or a family
+   *  whose members read differently every time. */
+  family: ToolFamily | null;
+  /** How many calls the view stands for; one response may ask for several. */
+  callCount: number;
+  toolName?: string;
+}
+
+/**
+ * Adjacent tool calls of one family, as one row.
+ *
+ * Five reads in a row say more as `read ×5` than as five near-identical lines,
+ * and the five are one click away. Collapsed by default, so what it buys is
+ * quiet rather than space; a run that a search revealed stays open, because a
+ * hit the reader cannot see is worse than the row it cost.
+ */
+function ToolRunRow({ count, toolName, forceOpen, children, t }: { count: number; toolName: string; forceOpen?: boolean; children: ReactNode; t: (key: string) => string }) {
+  const [open, setOpen] = useState(Boolean(forceOpen));
+  const label = `${toolName} ×${count}`;
+  return (
+    <div style={{ marginBottom: 2 }}>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label={label}
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 7,
+          minHeight: 24,
+          padding: "2px 0",
+          border: "none",
+          background: "transparent",
+          color: "var(--text-muted)",
+          cursor: "pointer",
+          fontSize: 12,
+          textAlign: "left",
+        }}
+        title={open ? t("chat.collapseProcess") : t("chat.expandProcess")}
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, transform: open ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>
+          <polyline points="4 2.5 7.5 6 4 9.5" />
+        </svg>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>{label}</span>
+      </button>
+      {open && <div style={{ marginTop: 4 }}>{children}</div>}
+    </div>
+  );
+}
+
+/**
+ * A stretch's views with its adjacent same-family tool calls merged. A revealed
+ * stretch is left alone: what the search hit is inside must stay on screen.
+ */
+function mergeSegmentViews(views: SegmentView[], t: (key: string) => string, revealed: boolean): { node: ReactNode; messageIdx: number }[] {
+  if (revealed) return views;
+  const out: { node: ReactNode; messageIdx: number }[] = [];
+  for (const group of groupAdjacentToolCalls(views, (view): ToolRunMembership => ({
+    family: view.family,
+    callCount: view.callCount,
+  }))) {
+    if (group.kind === "single") {
+      out.push(group.items[0]!);
+      continue;
+    }
+    const first = group.items[0]!;
+    out.push({
+      node: (
+        <ToolRunRow
+          key={`tool-run-${first.messageIdx}`}
+          count={group.callCount}
+          toolName={first.toolName ?? ""}
+          t={t}
+        >
+          {group.items.map((entry) => entry.node)}
+        </ToolRunRow>
+      ),
+      messageIdx: first.messageIdx,
+    });
+  }
+  return out;
+}
+
 export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, newSessionContextBar, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd, onSessionEnded, onToolEnd, onAttentionNeeded, onSessionCreated, onSessionForked, panel = false, onSideSession, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onDebugSnapshotReaderChange, onSessionStatsChange, onNotificationsChange, onSessionStatsPanelOpen, onOpenSettings, onContextUsageChange, onOpenFile, onFilesUploaded, onOpenSubagent, onOpenReadSnapshot, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, holdAudio }: Props) {
   const { t, locale } = useI18n();
   const isMobile = useIsMobile();
@@ -347,6 +455,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   // Only whether a reply is streaming and has content yet: the chunks themselves
   // re-render StreamingReply alone.
   const isStreaming = useStreamingSelector(streamingStore, selectIsStreaming);
+  const [thinkingVisible] = useThinkingVisible();
   const hasStreamingContent = useStreamingSelector(streamingStore, selectHasStreamingContent);
   const getStreamingMessage = useCallback(() => streamingStore.getState().streamingMessage, [streamingStore]);
   const sessionBusy = agentRunning || bashRunning;
@@ -942,7 +1051,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       if (idx === lastUserIdx) { (lastUserMsgRef as { current: HTMLDivElement | null }).current = el; }
     };
 
-    const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; blockIndexOffset?: number; isTurnPart?: boolean; isTurnTail?: boolean; withNotices?: boolean } = {}): ReactNode => {
+    const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; blockIndexOffset?: number; isTurnPart?: boolean; isTurnTail?: boolean; withNotices?: boolean; hideFinishedThinking?: boolean } = {}): ReactNode => {
       const msg = options.messageOverride ?? messages[idx];
       if (msg.role === "custom" && msg.customType === SIDE_BOUNDARY_MESSAGE_TYPE) return <SideChatDivider key="side-chat-divider" />;
       if (isHiddenCustomMessage(msg)) return null;
@@ -993,6 +1102,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           blockIndexOffset={options.blockIndexOffset}
           isTurnPart={options.isTurnPart}
           isTurnTail={options.isTurnTail}
+          hideFinishedThinking={options.hideFinishedThinking}
         />
       );
       const noticeLines = notices.length > 0 ? <TranscriptNoticeLines key={`${keyPrefix}-notices-${messageKey}`} notices={notices} /> : null;
@@ -1012,7 +1122,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     for (let idx = 0; idx < messages.length;) {
       const hasAnchor = turnAnchors[idx];
       if (!hasAnchor && idx !== 0) {
-        rendered.push({ node: renderMessage(idx), messageIdx: idx });
+        rendered.push({ node: renderMessage(idx, { hideFinishedThinking: !thinkingVisible }), messageIdx: idx });
         idx += 1;
         continue;
       }
@@ -1042,19 +1152,28 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             continue;
           }
           const { segment, segmentIndex: liveSegmentIdx } = item;
-          const views: { node: ReactNode; messageIdx: number }[] = [];
+          const views: SegmentView[] = [];
           let revealSegment = false;
           let segmentRefIdx: number | undefined;
-          for (const part of segment.parts) {
+          for (const [partIdx, part] of segment.parts.entries()) {
             const stored = messages[part.index] as AssistantMessage;
             if (part.custom) {
               revealSegment ||= Boolean(pendingSearchScroll && pendingSearchScroll.entryId === entryIds[part.index]);
-              views.push({ node: renderMessage(part.index, { attachRef: false, keyPrefix: `segment-${liveSegmentIdx}` }), messageIdx: part.index });
+              views.push({ node: renderMessage(part.index, { attachRef: false, keyPrefix: `segment-${liveSegmentIdx}` }), messageIdx: part.index, family: null, callCount: 0 });
               continue;
             }
             const view = getTurnPart(turnPartCache, stored, part.start, part.end);
             const partBlocks = view.content ?? [];
             revealSegment ||= Boolean(pendingSearchScroll && entryIds[part.index] === pendingSearchScroll.entryId && (!searchBlock || partBlocks.includes(searchBlock)));
+            // The thought in progress is the last part of the stretch being written; every
+            // other one has been said and moved on from, and a part that is nothing but a
+            // finished thought renders nothing at all — so it is dropped rather than
+            // pushed, because an empty view would still end a run.
+            const thoughtInProgress = liveSegmentIdx === lastLiveSegmentIdx && partIdx === segment.parts.length - 1;
+            if (partBlocks.length > 0 && partBlocks.every((block) => block.type === "thinking")
+                && !thinkingVisible && !thoughtInProgress) {
+              continue;
+            }
             segmentRefIdx ??= visibleRefIndexByMessage.get(part.index);
             views.push({
               node: renderMessage(part.index, {
@@ -1063,8 +1182,10 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 messageOverride: view,
                 blockIndexOffset: part.start,
                 isTurnPart: true,
+                hideFinishedThinking: !thinkingVisible,
               }),
               messageIdx: part.index,
+              ...partToolFamily(thinkingVisible ? partBlocks : partBlocks.filter((block) => block.type !== "thinking")),
             });
           }
           // The step in progress (the last segment) stays open; every earlier
@@ -1089,14 +1210,14 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                     t={t}
                     locale={locale}
                   >
-                    {views.map((entry) => entry.node)}
+                    {mergeSegmentViews(views, t, revealSegment).map((entry) => entry.node)}
                   </ProcessDetailsGroup>
                 </div>
               ),
               messageIdx: groupStartIdx,
             });
           } else {
-            rendered.push(...views);
+            rendered.push(...mergeSegmentViews(views, t, revealSegment));
           }
         }
         idx = endIdx;
@@ -1141,7 +1262,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       const lastSegmentIdx = segments.length - 1;
       const lastPartIdx = (segments[lastSegmentIdx]?.parts.length ?? 1) - 1;
       for (const [segmentIdx, segment] of segments.entries()) {
-        const views: { node: ReactNode; messageIdx: number }[] = [];
+        const views: SegmentView[] = [];
         let revealSegment = false;
         let segmentRefIdx: number | undefined;
 
@@ -1149,12 +1270,17 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           const stored = messages[part.index] as AssistantMessage;
           if (part.custom) {
             revealSegment ||= Boolean(pendingSearchScroll && pendingSearchScroll.entryId === entryIds[part.index]);
-            views.push({ node: renderMessage(part.index, { attachRef: false, keyPrefix: `segment-${segmentIdx}` }), messageIdx: part.index });
+            views.push({ node: renderMessage(part.index, { attachRef: false, keyPrefix: `segment-${segmentIdx}` }), messageIdx: part.index, family: null, callCount: 0 });
             continue;
           }
           const view = getTurnPart(turnPartCache, stored, part.start, part.end);
           const partBlocks = view.content ?? [];
           revealSegment ||= Boolean(pendingSearchScroll && entryIds[part.index] === pendingSearchScroll.entryId && (!searchBlock || partBlocks.includes(searchBlock)));
+          // A settled stretch has no thought in progress, so every one of them has been
+          // said and moved on from.
+          if (partBlocks.length > 0 && partBlocks.every((block) => block.type === "thinking") && !thinkingVisible) {
+            continue;
+          }
           segmentRefIdx ??= visibleRefIndexByMessage.get(part.index);
           views.push({
             node: renderMessage(part.index, {
@@ -1167,8 +1293,10 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
               // Copy all come after the last segment, where the turn ends.
               isTurnPart: true,
               isTurnTail: segmentIdx === lastSegmentIdx && partIdx === lastPartIdx,
+              hideFinishedThinking: !thinkingVisible,
             }),
             messageIdx: part.index,
+            ...partToolFamily(thinkingVisible ? partBlocks : partBlocks.filter((block) => block.type !== "thinking")),
           });
         }
 
@@ -1195,7 +1323,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 t={t}
                 locale={locale}
               >
-                {views.map((entry) => entry.node)}
+                {mergeSegmentViews(views, t, revealSegment).map((entry) => entry.node)}
               </ProcessDetailsGroup>
             </div>
             ),
@@ -1203,7 +1331,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           });
           continue;
         }
-        rendered.push(...views);
+        rendered.push(...mergeSegmentViews(views, t, revealSegment));
       }
 
       // What no segment covers, in its own place in the turn: a `!` command pi ran
@@ -1212,7 +1340,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       // branch and its loop past the last reply); the segment rewrite dropped them,
       // which hid a command's card as soon as the session was read back.
       for (const tailIdx of unsegmentedTurnMessages(messages, segments, userIdx, endIdx)) {
-        rendered.push({ node: renderMessage(tailIdx), messageIdx: tailIdx });
+        rendered.push({ node: renderMessage(tailIdx, { hideFinishedThinking: !thinkingVisible }), messageIdx: tailIdx });
       }
 
       // A turn's failure is its outcome, not one of its workings, so it shows
@@ -1294,7 +1422,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     forkingEntryId, editEntryId, sessionBusy, isStreaming, bashRunning, isNew, turnAnchors,
     isCompacting, compactError, forkFromMessage, handleEditContent, cancelEdit, handleCompact,
     onOpenFile, onOpenSubagent, onOpenReadSnapshot, t, locale, messageRefs, lastUserMsgRef,
-    liveUserEntryIds,
+    liveUserEntryIds, thinkingVisible,
   ]);
 
   const availableThinkingLevels = displayModelValue

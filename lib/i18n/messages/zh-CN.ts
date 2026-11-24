@@ -52,6 +52,8 @@ export const zhCNLocale: LocalePlugin = {
     "settings.themeZenburn": "Zenburn",
     "settings.themeSystem": "跟随系统",
     "settings.thinkingExpandedDefault": "默认展开思考块",
+    "settings.showFinishedThinking": "保留已完成的思考",
+    "settings.showFinishedThinkingCost": "代价：界面会明显变长，而且工具调用不再合并——两个调用之间的思考会打断连续。",
     "settings.chat": "对话",
     "settings.enterSendMode": "发送按键",
     "settings.enterSendModeEnter": "Enter",

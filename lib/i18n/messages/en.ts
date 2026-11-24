@@ -52,6 +52,8 @@ export const enLocale: LocalePlugin = {
     "settings.themeZenburn": "Zenburn",
     "settings.themeSystem": "System",
     "settings.thinkingExpandedDefault": "Expand thinking blocks by default",
+    "settings.showFinishedThinking": "Keep finished thoughts on screen",
+    "settings.showFinishedThinkingCost": "Cost: the transcript gets much longer, and a run's tool calls stop merging, because a thought between two of them ends the run.",
     "settings.chat": "Chat",
     "settings.enterSendMode": "Send key",
     "settings.enterSendModeEnter": "Enter",

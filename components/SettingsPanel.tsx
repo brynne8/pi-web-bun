@@ -30,6 +30,7 @@ import {
   isThinkingExpandedByDefault,
   setThinkingExpandedByDefault,
 } from "@/lib/thinking-expansion-preference";
+import { isThinkingVisible, setThinkingVisible } from "@/lib/thinking-visibility";
 // A settings section's panel is not on the first page: each loads when the
 // section is opened, so the page does not carry the editors' code.
 import { setupPushSubscription } from "@/lib/push-client";
@@ -101,6 +102,7 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
   const [builtinToolsSaving, setBuiltinToolsSaving] = useState(false);
   const [builtinToolsError, setBuiltinToolsError] = useState<string | null>(null);
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
+  const [thinkingShown, setThinkingShown] = useState(false);
   const [cacheMissNotices, setCacheMissNotices] = useState<boolean | null>(null);
   const [cacheMissNoticesSaving, setCacheMissNoticesSaving] = useState(false);
   const [cacheMissNoticesError, setCacheMissNoticesError] = useState<string | null>(null);
@@ -112,6 +114,7 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
 
   useEffect(() => {
     setThinkingExpanded(isThinkingExpandedByDefault());
+    setThinkingShown(isThinkingVisible());
     void fetch("/api/web-auth")
       .then((response) => response.ok ? response.json() : null)
       .then((data: { enabled?: boolean } | null) => setWebAuthEnabled(data?.enabled === true))
@@ -390,6 +393,20 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
               }}
             />
           </div>
+          <div className="settings-chat-option settings-chat-switch-option">
+            <span>{t("settings.showFinishedThinking")}</span>
+            <ConfigSwitch
+              checked={thinkingShown}
+              label={t("settings.showFinishedThinking")}
+              onChange={(enabled) => {
+                setThinkingVisible(enabled);
+                setThinkingShown(enabled);
+              }}
+            />
+          </div>
+          {thinkingShown && (
+            <p className="settings-general-description">{t("settings.showFinishedThinkingCost")}</p>
+          )}
           <div className="settings-chat-option settings-chat-switch-option">
             <span>{t("settings.quoteSelection")}</span>
             <ConfigSwitch

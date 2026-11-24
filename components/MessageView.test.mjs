@@ -312,10 +312,10 @@ test("marks only the matched text block in the part of the turn that carries it"
     content: [
       { type: "thinking", thinking: "" },
       { type: "thinking", thinking: "Thinking about the result" },
-      { type: "text", text: "Process text" },
+      { type: "text", text: "A real answer, long enough to be one and not a note beside a call. A real answer, long enough to be one and not a note beside a call. A real answer, long enough to be one and not a note beside a call. A real answer, long enough to be one and not a note beside a call. A real answer, long enough to be one and not a note beside a call." },
       { type: "toolCall", toolCallId: "read-1", toolName: "read", input: {} },
-      { type: "text", text: "First answer" },
-      { type: "text", text: "Matched pi-cwd-spark answer" },
+      { type: "text", text: "A real answer, long enough to be one and not a note beside a call. A real answer, long enough to be one and not a note beside a call. A real answer, long enough to be one and not a note beside a call. A real answer, long enough to be one and not a note beside a call. A real answer, long enough to be one and not a note beside a call." },
+      { type: "text", text: "Matched pi-cwd-spark " + "A real answer, long enough to be one and not a note beside a call. A real answer, long enough to be one and not a note beside a call. A real answer, long enough to be one and not a note beside a call. A real answer, long enough to be one and not a note beside a call. A real answer, long enough to be one and not a note beside a call." },
     ],
   };
   // A turn renders as the segments the chat shows: two text parts here, with the

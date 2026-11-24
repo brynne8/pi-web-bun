@@ -204,6 +204,8 @@ function loadThinkingContent(sessionId: string, entryId: string, blockIndex: num
 interface Props {
   message: AgentMessage;
   isStreaming?: boolean;
+  /** A thought that has been said and moved on from is not rendered. */
+  hideFinishedThinking?: boolean;
   toolResults?: Map<string, ToolResultMessage>;
   modelNames?: Record<string, string>;
   cwd?: string;
@@ -313,12 +315,12 @@ function haveSameRelevantToolEntries<T>(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, toolClocks, modelNames, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, entryId, searchBlock, onFork, forkEntryId, forking, onEditContent, onCancelEdit, isEditing, showTimestamp, prevTimestamp, sessionId, blockIndexOffset, isTurnPart, isTurnTail, onCompact, isCompacting, compactError }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, hideFinishedThinking, toolResults, toolClocks, modelNames, cwd, onOpenFile, onOpenSubagent, onOpenReadSnapshot, entryId, searchBlock, onFork, forkEntryId, forking, onEditContent, onCancelEdit, isEditing, showTimestamp, prevTimestamp, sessionId, blockIndexOffset, isTurnPart, isTurnTail, onCompact, isCompacting, compactError }: Props) {
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forkEntryId={entryId ?? forkEntryId} forking={forking} onEditContent={onEditContent} onCancelEdit={onCancelEdit} isEditing={isEditing} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} toolClocks={toolClocks} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} blockIndexOffset={blockIndexOffset} isTurnPart={isTurnPart} isTurnTail={isTurnTail} onCompact={onCompact} isCompacting={isCompacting} compactError={compactError} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} hideFinishedThinking={hideFinishedThinking} toolResults={toolResults} toolClocks={toolClocks} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSubagent={onOpenSubagent} onOpenReadSnapshot={onOpenReadSnapshot} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} blockIndexOffset={blockIndexOffset} isTurnPart={isTurnPart} isTurnTail={isTurnTail} onCompact={onCompact} isCompacting={isCompacting} compactError={compactError} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -778,6 +780,7 @@ export function AssistantMessageHeader({ modelName, estimatedTokens = 0, tps = n
 function AssistantMessageView({
   message,
   isStreaming,
+  hideFinishedThinking,
   toolResults,
   toolClocks,
   modelNames,
@@ -799,6 +802,7 @@ function AssistantMessageView({
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
+  hideFinishedThinking?: boolean;
   toolResults?: Map<string, ToolResultMessage>;
   toolClocks?: ToolClocks;
   modelNames?: Record<string, string>;
@@ -825,9 +829,17 @@ function AssistantMessageView({
   // a lone stamp that moves down the turn as the run goes on and disappears when the
   // turn folds, exactly like the token counts did.
   const time = showTimestamp && !isTurnPart ? formatTime(message.timestamp) : null;
-  const blockItems = useMemo(() => (message.content ?? [])
-    .map((block, index) => ({ block, originalIndex: index + (blockIndexOffset ?? 0) }))
-    .filter(({ block }) => !isEmptyThinkingBlock(block, { isStreaming })), [message.content, isStreaming, blockIndexOffset]);
+  const blockItems = useMemo(() => {
+    const content = message.content ?? [];
+    return content
+      .map((block, index) => ({ block, originalIndex: index + (blockIndexOffset ?? 0), isLast: index === content.length - 1 }))
+      .filter(({ block, isLast }) => !(hideFinishedThinking && block.type === "thinking" && !isLast)
+        // A thought is shown only while it is the last thing being written. The moment
+        // anything follows it in the same response — a call, even one whose parameters
+        // are still arriving — it has been said and moved on from, and it goes. A run's
+        // steps are therefore never separated by a thought that is already over.
+        && !isEmptyThinkingBlock(block, { isStreaming }));
+  }, [message.content, isStreaming, blockIndexOffset, hideFinishedThinking]);
   const blocks = useMemo(() => blockItems.map(({ block }) => block), [blockItems]);
   const providerError = getAssistantErrorMessage(message, { isStreaming });
   const aborted = isAssistantAborted(message, { isStreaming });
