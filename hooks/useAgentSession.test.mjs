@@ -758,11 +758,58 @@ test("keeps live following cancellable when the user scrolls away from the tail"
   assert.match(scrollToBottomSource, /container\.scrollTo\(\{ top: container\.scrollHeight, behavior \}\);\s*previousScrollTopRef\.current = container\.scrollTop;/);
   assert.doesNotMatch(scrollToBottomSource, /scrollIntoView/);
   assert.match(streamUpdateSource, /liveFollowFrameRef\.current === null/);
-  assert.match(streamUpdateSource, /requestAnimationFrame\(\(\) => \{[\s\S]*?liveFollowFrameRef\.current = null;[\s\S]*?if \(isNearBottomRef\.current\) scrollToBottom\("auto"\)/);
-  assert.match(scrollHandlerSource, /!wasAttached && isAttached && isAgentRunning[\s\S]*?scrollToBottom\("auto"\)/);
+  assert.match(streamUpdateSource, /requestAnimationFrame\(\(\) => \{[\s\S]*?liveFollowFrameRef\.current = null;[\s\S]*?if \(isNearBottomRef\.current\) followTail\(\)/);
+  assert.match(scrollHandlerSource, /!wasAttached && isAttached && isAgentRunning[\s\S]*?followTail\(\)/);
   assert.match(scrollHandlerSource, /cancelAnimationFrame\(liveFollowFrameRef\.current\)/);
   assert.match(source, /previousScrollTopRef\.current = container\.scrollTop;\s*container\.addEventListener\("scroll", handleScrollPositionChange/);
   assert.doesNotMatch(source, /SCROLL_BOTTOM_THRESHOLD|completionScrollAllowedRef|ignoreProgrammaticScrollUntilRef/);
+});
+
+test("follows the tail with a slide instead of a jump", () => {
+  const followTailSource = source.slice(
+    source.indexOf("const followTail = useCallback"),
+    source.indexOf("const currentModel"),
+  );
+  const scrollHandlerSource = source.slice(
+    source.indexOf("const handleScrollPositionChange"),
+    source.indexOf("// Load session on mount"),
+  );
+
+  // The chase runs on the follow's own frame handle, so the places that place the
+  // viewport themselves cancel it exactly the way they always did.
+  assert.match(source, /const tailFollowAtRef = useRef\(0\)/);
+  assert.match(followTailSource, /liveFollowFrameRef\.current = requestAnimationFrame\(step\)/);
+  // The tail is re-read every frame: a run keeps writing while the slide is under way.
+  assert.match(followTailSource, /container\.scrollHeight - container\.clientHeight/);
+  assert.match(followTailSource, /getTailFollowScrollTop\(/);
+  // The commanded position decides the landing, never the read-back: a browser that rounds
+  // scrollTop would otherwise never report that it arrived and hand the frame back.
+  assert.match(
+    followTailSource,
+    /if \(nextTop >= targetTop\) \{\s*tailFollowAtRef\.current = 0;\s*liveFollowFrameRef\.current = null;/,
+  );
+  // The chase names its own behavior every frame, so nothing else's smooth stacks under it.
+  assert.match(followTailSource, /behavior: "instant"/);
+  // A browser that asked for less movement gets the jump back.
+  assert.match(followTailSource, /if \(prefersReducedMotion\(\)\) \{\s*scrollToBottom\("instant"\);/);
+  // A chase already owns the frame: a second one would overwrite the handle those places
+  // cancel, and go on chasing after they cancelled it.
+  assert.match(followTailSource, /if \(liveFollowFrameRef\.current !== null\) return;/);
+  // One that finds no viewport gives the frame back, so no handle outlives its chase.
+  assert.match(
+    followTailSource,
+    /if \(!container\) \{\s*tailFollowAtRef\.current = 0;\s*liveFollowFrameRef\.current = null;\s*return;/,
+  );
+  assert.match(
+    source,
+    /window\.matchMedia\?\.\("\(prefers-reduced-motion: reduce\)"\)\.matches === true/,
+  );
+  // While the chase owns the frame the viewport is on its way to the tail, so the button
+  // that jumps there does not blink on for those frames.
+  assert.match(
+    scrollHandlerSource,
+    /const shouldShow = liveFollowFrameRef\.current === null\s*&& shouldShowScrollToLatest\(/,
+  );
 });
 
 test("restores an in-page session viewport without the default tail jump", () => {
@@ -855,7 +902,7 @@ test("keeps a detached viewport in place when streaming completes", () => {
     source.indexOf("// Load the model list"),
   );
 
-  assert.match(scrollEffectSource, /!agentRunningRef\.current && isNearBottomRef\.current[\s\S]*?scrollToBottom\("auto"\)/);
+  assert.match(scrollEffectSource, /!agentRunningRef\.current && isNearBottomRef\.current[\s\S]*?followTail\(\)/);
   assert.doesNotMatch(scrollEffectSource, /\|\|/);
   assert.match(source, /addEventListener\("scroll", handleScrollPositionChange/);
 });

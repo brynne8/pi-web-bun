@@ -80,6 +80,36 @@ export function getLiveFollowAttached(
   return wasAttached;
 }
 
+/** The share of the remaining distance a live follow closes in one 60 fps frame. */
+export const CHAT_TAIL_FOLLOW_EASE = 0.3;
+
+/** Below this the follow is already at the tail: landing beats chasing a fraction of a pixel. */
+const CHAT_TAIL_FOLLOW_LAND_PX = 1;
+/** One frame at 60 fps: the length the ease is tuned for, and a chase's first frame. */
+export const CHAT_TAIL_FOLLOW_FRAME_MS = 1000 / 60;
+/** Past this a frame is a stall (a hidden page, a breakpoint), not a fast frame. */
+const MAX_FRAME_MS = 50;
+
+/**
+ * The scrollTop one frame of the live follow moves to: the distance to `targetTop`
+ * closed by `CHAT_TAIL_FOLLOW_EASE` scaled to that frame's length, so the slide runs
+ * at one speed on a 120 Hz display and on a frame that took twice as long. A gap of
+ * more than the viewport is a move rather than a slide (a session read that landed
+ * many messages), so it lands at once, and so does a gap of a pixel.
+ */
+export function getTailFollowScrollTop(
+  scrollTop: number,
+  targetTop: number,
+  clientHeight: number,
+  frameMs: number,
+  ease = CHAT_TAIL_FOLLOW_EASE,
+): number {
+  const gap = targetTop - scrollTop;
+  if (gap <= CHAT_TAIL_FOLLOW_LAND_PX || gap > clientHeight) return targetTop;
+  const frames = Math.min(Math.max(frameMs, 0), MAX_FRAME_MS) / CHAT_TAIL_FOLLOW_FRAME_MS;
+  return scrollTop + gap * (1 - Math.pow(1 - ease, frames));
+}
+
 export function shouldShowScrollToLatest(
   scrollTop: number,
   clientHeight: number,

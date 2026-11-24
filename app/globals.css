@@ -1565,6 +1565,25 @@ pre, code {
   font-size: inherit !important;
 }
 
+/* A streaming thought is released a paragraph at a time (lib/thinking-flush.ts), so each
+   one arrives as a finished block of height. Fading the body's last child lets it appear
+   where it lands: the released checkpoint only ever grows, so a paragraph already shown
+   keeps its node and never plays the fade a second time. */
+@keyframes thinking-paragraph-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.markdown-body.markdown-thinking > :last-child {
+  animation: thinking-paragraph-in 180ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .markdown-body.markdown-thinking > :last-child {
+    animation: none;
+  }
+}
+
 .compaction-file-details {
   margin-top: 10px;
   padding-top: 8px;

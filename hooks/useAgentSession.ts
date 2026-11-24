@@ -72,7 +72,9 @@ import {
 import {
   CHAT_SCROLL_REATTACH_TOLERANCE,
   CHAT_SCROLL_TAIL_TOLERANCE,
+  CHAT_TAIL_FOLLOW_FRAME_MS,
   getLiveFollowAttached,
+  getTailFollowScrollTop,
   shouldShowScrollToLatest,
 } from "@/lib/chat-lazy-load";
 import {
@@ -370,6 +372,12 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** The browser asked for as little movement as it can give, so a follow lands where it is going. */
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined"
+    && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+}
+
 function markOldestNoticeExiting(notices: NoticeItem[]): NoticeItem[] {
   const index = notices.findIndex((notice) => !notice.exiting);
   if (index === -1) return notices;
@@ -622,6 +630,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const isNearBottomRef = useRef(true);
   const previousScrollTopRef = useRef(0);
   const liveFollowFrameRef = useRef<number | null>(null);
+  /** The frame the tail chase last ran on, so its ease sees the real frame length. */
+  const tailFollowAtRef = useRef(0);
   const executeBashRef = useRef<(command: string, excludeFromContext: boolean) => Promise<void> | undefined>(undefined);
   const handleNavigateRef = useRef<((entryId: string) => Promise<boolean>) | undefined>(undefined);
   const resendAfterStopRef = useRef<((queued: QueuedAfterStop[]) => Promise<void>) | undefined>(undefined);
@@ -750,6 +760,58 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     container.scrollTo({ top: container.scrollHeight, behavior });
     previousScrollTopRef.current = container.scrollTop;
   }, []);
+
+  /**
+   * Follow the tail, a frame at a time: a message landing or one more thought released
+   * slides the content up over a few frames instead of snapping it by a card's height.
+   * The chase re-reads the tail every frame, so a run still writing costs the one
+   * scroll per frame it cost before, and it gives the frame back when it lands.
+   * `liveFollowFrameRef` is the handle the places that place the viewport cancel to.
+   */
+  const followTail = useCallback(() => {
+    if (prefersReducedMotion()) {
+      scrollToBottom("instant");
+      return;
+    }
+    // A chase already owns the frame, and its handle is the one the places that place the
+    // viewport cancel: a second one would overwrite it and keep chasing on its own.
+    if (liveFollowFrameRef.current !== null) return;
+    // A chase that starts now takes its first frame as nominal; a frame the chase
+    // scheduled itself is measured against the one before it.
+    tailFollowAtRef.current = 0;
+    const step = () => {
+      const container = scrollContainerRef.current;
+      // No viewport to chase: give the frame back, or the handle outlives the chase.
+      if (!container) {
+        tailFollowAtRef.current = 0;
+        liveFollowFrameRef.current = null;
+        return;
+      }
+      const now = performance.now();
+      const frameMs = tailFollowAtRef.current > 0
+        ? now - tailFollowAtRef.current
+        : CHAT_TAIL_FOLLOW_FRAME_MS;
+      tailFollowAtRef.current = now;
+      const targetTop = Math.max(0, container.scrollHeight - container.clientHeight);
+      const nextTop = getTailFollowScrollTop(
+        container.scrollTop,
+        targetTop,
+        container.clientHeight,
+        frameMs,
+      );
+      // The commanded position decides the landing, not the read-back: a browser that
+      // rounds scrollTop would otherwise never be reported as having arrived.
+      container.scrollTo({ top: nextTop, behavior: "instant" });
+      previousScrollTopRef.current = container.scrollTop;
+      if (nextTop >= targetTop) {
+        tailFollowAtRef.current = 0;
+        liveFollowFrameRef.current = null;
+        return;
+      }
+      liveFollowFrameRef.current = requestAnimationFrame(step);
+    };
+    step();
+  }, [scrollToBottom]);
 
   const currentModel = currentModelOverride ?? liveModel ?? data?.context.model ?? pendingModel ?? null;
   const displayModel = isNew
@@ -2149,7 +2211,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           // streaming content; otherwise scrollIntoView may target stale layout.
           liveFollowFrameRef.current = requestAnimationFrame(() => {
             liveFollowFrameRef.current = null;
-            if (isNearBottomRef.current) scrollToBottom("auto");
+            if (isNearBottomRef.current) followTail();
           });
         }
         break;
@@ -2362,7 +2424,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setExtensionDialogs((queue) => removeExtensionUiRequest(queue, event.id as string));
         break;
     }
-  }, [addNotice, applyLiveUsage, opts.chatInputRef, cancelEventStreamGrace, dispatch, handleExtensionUiRequest, loadSession, markPromptLanded, notifyPromptStage, onAgentEnd, onSessionEnded, onToolEnd, refreshContextUsage, scheduleEventStreamClose, scrollToBottom, settleUiStage, syncLiveModel]);
+  }, [addNotice, applyLiveUsage, opts.chatInputRef, cancelEventStreamGrace, dispatch, followTail, handleExtensionUiRequest, loadSession, markPromptLanded, notifyPromptStage, onAgentEnd, onSessionEnded, onToolEnd, refreshContextUsage, scheduleEventStreamClose, settleUiStage, syncLiveModel]);
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
@@ -3450,16 +3512,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       );
       isNearBottomRef.current = isAttached;
       previousScrollTopRef.current = scrollTop;
-      const shouldShow = shouldShowScrollToLatest(scrollTop, clientHeight, scrollHeight);
-      setShowScrollToBottom((previous) => (previous === shouldShow ? previous : shouldShow));
       if (!wasAttached && isAttached && isAgentRunning) {
-        scrollToBottom("auto");
+        followTail();
       } else if (!isAttached && liveFollowFrameRef.current !== null) {
         cancelAnimationFrame(liveFollowFrameRef.current);
         liveFollowFrameRef.current = null;
       }
+      // The chase owns the scroll while it runs: the viewport is on its way to the tail,
+      // so the button that jumps there must not blink on for those frames.
+      const shouldShow = liveFollowFrameRef.current === null
+        && shouldShowScrollToLatest(scrollTop, clientHeight, scrollHeight);
+      setShowScrollToBottom((previous) => (previous === shouldShow ? previous : shouldShow));
     }
-  }, [scrollToBottom]);
+  }, [followTail]);
 
   // What a session read with its state (`loadSession(…, includeState)`) says is
   // under way on the server: a run or command, a `!` command, a compaction. The
@@ -3731,10 +3796,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         initialScrollDoneRef.current = true;
         scrollToBottom("instant");
       } else if (!agentRunningRef.current && isNearBottomRef.current) {
-        scrollToBottom("auto");
+        followTail();
       }
     }
-  }, [messages.length, agentRunning, scrollToBottom, scrollUserMsgToTop]);
+  }, [messages.length, agentRunning, followTail, scrollToBottom, scrollUserMsgToTop]);
 
   // Load the model list with bounded retries; loadModels exposes each failure.
   useEffect(() => {

@@ -289,6 +289,27 @@ test("renders the thinking body as markdown without growing past the card's type
   }
 });
 
+test("a newly released thinking paragraph fades in where it lands", () => {
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  // A streaming thought arrives a paragraph at a time (lib/thinking-flush.ts), so the body's
+  // last child is the only new one: a paragraph already released keeps its node, and an
+  // animation on the body itself would play it once per paragraph for all of them.
+  assert.match(css, /\.markdown-body\.markdown-thinking > :last-child\s*\{\s*animation:\s*thinking-paragraph-in/);
+  const keyframes = css.slice(
+    css.indexOf("@keyframes thinking-paragraph-in"),
+    css.indexOf(".markdown-body.markdown-thinking > :last-child"),
+  );
+  assert.match(keyframes, /from \{ opacity: 0; \}\s*to \{ opacity: 1; \}/);
+  // Only opacity: the tail follow is already moving the content up, and a shift of its own
+  // would read as a second motion under the first.
+  assert.doesNotMatch(keyframes, /transform|translate/);
+  assert.match(
+    css,
+    /@media \(prefers-reduced-motion: reduce\) \{\s*\.markdown-body\.markdown-thinking > :last-child \{\s*animation: none;/,
+  );
+});
+
 test("shows deferred thinking previews without loading the full content", () => {
   const html = renderMessage({
     role: "assistant",
