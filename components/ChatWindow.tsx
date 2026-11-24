@@ -321,38 +321,70 @@ interface SegmentView {
  * quiet rather than space; a run that a search revealed stays open, because a
  * hit the reader cannot see is worse than the row it cost.
  */
-function ToolRunRow({ count, toolName, forceOpen, children, t }: { count: number; toolName: string; forceOpen?: boolean; children: ReactNode; t: (key: string) => string }) {
+/** The shell a run is drawn in, the same one a single call is drawn in. */
+const TOOL_RUN_BORDER = "1px solid rgba(34,197,94,0.25)";
+const TOOL_RUN_BACKGROUND = "rgba(34,197,94,0.04)";
+const TOOL_RUN_NAME_COLOR = "#16a34a";
+
+function ToolRunRow({ count, toolName, durationMs, forceOpen, children, t, locale }: { count: number; toolName: string; durationMs?: number; forceOpen?: boolean; children: ReactNode; t: (key: string) => string; locale: Locale }) {
   const [open, setOpen] = useState(Boolean(forceOpen));
   const label = `${toolName} ×${count}`;
+  // The run's header is a card of its own — the same border, fill, radius and the
+  // same wrapper div the header button sits in, so new_design.css styles it with
+  // the one rule that styles a call's. Its calls are siblings below it rather than
+  // children inside it: a card holding cards would read as a different kind of
+  // thing, and the header would be two pixels shorter than a call for want of its
+  // own border, which shows as a break in the rhythm of a long list.
   return (
-    <div style={{ marginBottom: 2 }}>
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-label={label}
-        onClick={() => setOpen((v) => !v)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 7,
-          minHeight: 24,
-          padding: "2px 0",
-          border: "none",
-          background: "transparent",
-          color: "var(--text-muted)",
-          cursor: "pointer",
-          fontSize: 12,
-          textAlign: "left",
-        }}
-        title={open ? t("chat.collapseProcess") : t("chat.expandProcess")}
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, transform: open ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>
-          <polyline points="4 2.5 7.5 6 4 9.5" />
-        </svg>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>{label}</span>
-      </button>
-      {open && <div style={{ marginTop: 4 }}>{children}</div>}
-    </div>
+    <>
+      {/* The wrapper a MessageView puts around a call, with its 16px: a card's own
+          margin is forced to 2px by new_design.css, so the rhythm between rows comes
+          from here. Without it the header ran 16px short and read as a break. */}
+      <div style={{ marginBottom: 16 }}>
+      <div style={{
+        borderRadius: 7,
+        overflow: "hidden",
+        fontSize: 12,
+        border: TOOL_RUN_BORDER,
+        background: TOOL_RUN_BACKGROUND,
+        marginBottom: 2,
+      }}>
+        <div style={{ display: "flex", alignItems: "stretch", minWidth: 0 }}>
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-label={label}
+            onClick={() => setOpen((v) => !v)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 7,
+              flex: 1,
+              minWidth: 0,
+              padding: "6px 10px",
+              background: "none",
+              border: "none",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              fontSize: 12,
+              textAlign: "left",
+            }}
+            title={open ? t("chat.collapseProcess") : t("chat.expandProcess")}
+          >
+            <span style={{ color: TOOL_RUN_NAME_COLOR, fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 11, flexShrink: 0 }}>{toolName}</span>
+            <span style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{label.slice(toolName.length)}</span>
+            {durationMs !== undefined && (
+              <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{formatTurnDuration(durationMs, locale)}</span>
+            )}
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
+              <polyline points="2 3.5 5 6.5 8 3.5" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      </div>
+      {open && <>{children}</>}
+    </>
   );
 }
 
@@ -360,7 +392,7 @@ function ToolRunRow({ count, toolName, forceOpen, children, t }: { count: number
  * A stretch's views with its adjacent same-family tool calls merged. A revealed
  * stretch is left alone: what the search hit is inside must stay on screen.
  */
-function mergeSegmentViews(views: SegmentView[], t: (key: string) => string, revealed: boolean): { node: ReactNode; messageIdx: number }[] {
+function mergeSegmentViews(views: SegmentView[], messages: AgentMessage[], t: (key: string) => string, locale: Locale, revealed: boolean): { node: ReactNode; messageIdx: number }[] {
   if (revealed) return views;
   const out: { node: ReactNode; messageIdx: number }[] = [];
   for (const group of groupAdjacentToolCalls(views, (view): ToolRunMembership => ({
@@ -378,7 +410,9 @@ function mergeSegmentViews(views: SegmentView[], t: (key: string) => string, rev
           key={`tool-run-${first.messageIdx}`}
           count={group.callCount}
           toolName={first.toolName ?? ""}
+          durationMs={getTurnDurationMs(messages, first.messageIdx, group.items[group.items.length - 1]!.messageIdx + 1)}
           t={t}
+          locale={locale}
         >
           {group.items.map((entry) => entry.node)}
         </ToolRunRow>
@@ -1210,14 +1244,14 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                     t={t}
                     locale={locale}
                   >
-                    {mergeSegmentViews(views, t, revealSegment).map((entry) => entry.node)}
+                    {mergeSegmentViews(views, messages, t, locale, revealSegment).map((entry) => entry.node)}
                   </ProcessDetailsGroup>
                 </div>
               ),
               messageIdx: groupStartIdx,
             });
           } else {
-            rendered.push(...mergeSegmentViews(views, t, revealSegment));
+            rendered.push(...mergeSegmentViews(views, messages, t, locale, revealSegment));
           }
         }
         idx = endIdx;
@@ -1323,7 +1357,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 t={t}
                 locale={locale}
               >
-                {mergeSegmentViews(views, t, revealSegment).map((entry) => entry.node)}
+                {mergeSegmentViews(views, messages, t, locale, revealSegment).map((entry) => entry.node)}
               </ProcessDetailsGroup>
             </div>
             ),
@@ -1331,7 +1365,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           });
           continue;
         }
-        rendered.push(...mergeSegmentViews(views, t, revealSegment));
+        rendered.push(...mergeSegmentViews(views, messages, t, locale, revealSegment));
       }
 
       // What no segment covers, in its own place in the turn: a `!` command pi ran

@@ -26,7 +26,7 @@ test("renders a turn as its segments, so nothing the model wrote is filed away",
   // An answer segment's views render directly: mergeSegmentViews is the identity for
   // them, because a part holding text or an image carries no tool family and every
   // one of its views comes back a singleton, in order.
-  assert.match(source, /rendered\.push\(\.\.\.mergeSegmentViews\(views, t, revealSegment(?:, [a-zA-Z.]+)?\)\)/, "an answer segment renders directly");
+  assert.match(source, /rendered\.push\(\.\.\.mergeSegmentViews\(views, messages, t, locale, revealSegment\)\)/, "an answer segment renders directly");
   assert.match(source, /key=\{`process-group-\$\{entryIds\[groupStartIdx\] \?\? groupStartIdx\}-\$\{segmentIdx\}`\}/);
 });
 
