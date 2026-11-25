@@ -1345,7 +1345,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
     }
   }, [selectedCwdProp]);
 
-    // Load worktrees for the current effective cwd.
+  // Load worktrees for the current effective cwd.
   // Deliberately not on the sidebar-wide `refreshKey`: a listing is one
   // `git worktree list`, which a large repository answers in seconds, and
   // nothing that bumps that key changes what git would say here. Creating or
