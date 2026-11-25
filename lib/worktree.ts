@@ -255,8 +255,11 @@ async function resolveProjectUncached(cwd: string): Promise<ProjectInfo> {
   } catch (error) {
     // A transient failure propagates so resolveProject keeps it out of the
     // cache; whatever git itself answered is this folder's identity for now.
+    // A checkout that is still there with its `.git` pointer gone (an
+    // interrupted `git worktree remove`) is the same worktree as one whose
+    // folder is gone, and groups back the same way.
     if (isTransientGitError(error)) throw error;
-    info = projectFallback(cwd);
+    info = (await inferRemovedWorktreeAsync(cwd)) ?? projectFallback(cwd);
   }
 
   return info;
