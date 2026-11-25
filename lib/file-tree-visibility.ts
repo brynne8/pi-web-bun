@@ -191,21 +191,22 @@ export async function getFileTreeHiddenReasons(
   const cached = visibilityCache.get(cacheKey);
   if (cached && Date.now() - cached.at < VISIBILITY_CACHE_TTL_MS) return cached.reasons;
 
-  const slot: { running?: Promise<(name: string) => FileTreeHiddenReason | null> } = {};
-  slot.running = readVisibilityAnswer(directory, names).then((reasons) => {
-    visibilityCache.delete(cacheKey);
-    visibilityCache.set(cacheKey, { at: Date.now(), reasons });
-    while (visibilityCache.size > VISIBILITY_CACHE_MAX) {
-      const oldest = visibilityCache.keys().next().value;
-      if (oldest === undefined) break;
-      visibilityCache.delete(oldest);
-    }
-    return reasons;
-  }).finally(() => {
-    if (slot.running && visibilityRefreshes.get(cacheKey) === slot.running) visibilityRefreshes.delete(cacheKey);
-  });
-  const running = slot.running;
-  visibilityRefreshes.set(cacheKey, running);
+  let running = visibilityRefreshes.get(cacheKey);
+  if (!running) {
+    running = readVisibilityAnswer(directory, names).then((reasons) => {
+      visibilityCache.delete(cacheKey);
+      visibilityCache.set(cacheKey, { at: Date.now(), reasons });
+      while (visibilityCache.size > VISIBILITY_CACHE_MAX) {
+        const oldest = visibilityCache.keys().next().value;
+        if (oldest === undefined) break;
+        visibilityCache.delete(oldest);
+      }
+      return reasons;
+    }).finally(() => {
+      if (visibilityRefreshes.get(cacheKey) === running) visibilityRefreshes.delete(cacheKey);
+    });
+    visibilityRefreshes.set(cacheKey, running);
+  }
 
   if (cached) {
     // A failed refresh leaves the answer the tree already shows standing;
