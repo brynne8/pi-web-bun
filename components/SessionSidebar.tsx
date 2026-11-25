@@ -1345,7 +1345,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
     }
   }, [selectedCwdProp]);
 
-  // Load worktrees for the current effective cwd
+    // Load worktrees for the current effective cwd.
+  // Deliberately not on the sidebar-wide `refreshKey`: a listing is one
+  // `git worktree list`, which a large repository answers in seconds, and
+  // nothing that bumps that key changes what git would say here. Creating or
+  // removing a worktree bumps `wtRefreshKey`, and opening the picker's worktree
+  // menu refetches, which is where a checkout made in a terminal is looked for.
   const [wtRefreshKey, setWtRefreshKey] = useState(0);
   useLayoutEffect(() => {
     if (!selectedCwd) {
@@ -1384,7 +1389,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
         }
       });
     return () => { cancelled = true; };
-  }, [selectedCwd, wtRefreshKey, refreshKey]);
+  }, [selectedCwd, wtRefreshKey]);
 
   // Auto-select cwd and restore session from URL on first load
   useEffect(() => {
