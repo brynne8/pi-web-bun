@@ -147,6 +147,33 @@ interface RowHandlers {
   onDropTargetChange?: (path: string | null) => void;
 }
 
+/** Folders of a restored tree listed at once. */
+export const PREFETCH_CONCURRENCY = 4;
+
+/**
+ * Lists the folders a restored tree reopens a few at a time. Enough to overlap
+ * one folder's cold disk reads with the next one's; one request per folder
+ * otherwise, which on a slow mount is a request queue the tree waits on.
+ */
+export async function prefetchFolders(
+  paths: readonly string[],
+  load: (path: string, options?: { forgetOnFailure?: boolean }) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const workers = Array.from({ length: Math.min(PREFETCH_CONCURRENCY, paths.length) }, async () => {
+    while (next < paths.length) {
+      // The listing reports its own failure to the tree through the folder's
+      // row, so one folder that cannot be listed must not end the prefetch.
+      try {
+        await load(paths[next++], { forgetOnFailure: true });
+      } catch {
+        // Already accounted for where the row shows it.
+      }
+    }
+  });
+  await Promise.all(workers);
+}
+
 async function responseError(res: Response, fallback: string): Promise<Error> {
   let message = `${fallback} (HTTP ${res.status})`;
   try {
@@ -924,6 +951,9 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const listRef = useRef<HTMLDivElement>(null);
   const dirLoadsRef = useRef(dirLoads);
   dirLoadsRef.current = dirLoads;
+  // Folders whose listing is on its way, so the tree's own listing effect and a
+  // restored-tree prefetch never ask for the same directory twice.
+  const listingRef = useRef(new Set<string>());
   const showHiddenRef = useRef(showHidden);
   showHiddenRef.current = showHidden;
   const treeRowsRef = useRef<FlatTreeRow[]>([]);
@@ -932,7 +962,9 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const uploadBusy = uploadPhase !== "idle";
   const hasSearchQuery = searchQuery.trim().length > 0;
 
-  const loadDir = useCallback(async (path: string) => {
+  const loadDir = useCallback(async (path: string, options: { forgetOnFailure?: boolean } = {}) => {
+    if (listingRef.current.has(path)) return;
+    listingRef.current.add(path);
     setDirLoads((prev) => {
       const existing = prev.get(path);
       if (existing?.loading) return prev;
@@ -948,11 +980,23 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         return next;
       });
     } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : String(loadError);
       setDirLoads((prev) => {
+        // A folder listed ahead of its parent (the restored tree) that is gone
+        // has no row to report to: forget the attempt, so nothing is stuck on
+        // it if the folder comes back, and a folder that is really there still
+        // lists through its row and shows the error there.
+        if (options.forgetOnFailure && !prev.get(path)?.children) {
+          const forgotten = new Map(prev);
+          forgotten.delete(path);
+          return forgotten;
+        }
         const next = new Map(prev);
-        next.set(path, { children: null, loading: false, error: loadError instanceof Error ? loadError.message : String(loadError) });
+        next.set(path, { children: null, loading: false, error: message });
         return next;
       });
+    } finally {
+      listingRef.current.delete(path);
     }
   }, []);
 
@@ -1364,10 +1408,12 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
     // Swap the open directories only when cwd changes, not on refreshKey bumps.
     // The roots unmount while the new cwd loads, so each restored directory
-    // mounts open and lists itself; one that is gone is never listed to look.
+    // mounts open, and the listings below have already started for them.
+    let reopened: readonly string[] = [];
     if (cwdChanged) {
       if (previousCwd !== null) expandedPathsByCwd.save(previousCwd, expandedPathsRef.current);
       const restored = expandedPathsByCwd.restore(cwd);
+      reopened = [...restored];
       expandedPathsRef.current = restored;
       setExpandedPaths(restored);
       setHighlightedPaths(new Set());
@@ -1390,12 +1436,19 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       return;
     }
     let cancelled = false;
+    // The folders the user left open are known here, so they are listed now,
+    // a few at a time, instead of one network round trip per level as each
+    // parent's entries arrive. One that is gone answers with an error nobody
+    // renders (its row is not in the parent's entries) and is forgotten.
+    const rootPath = normalizeFilePathSlashes(cwd).replace(/\/+$/, "");
+    const ahead = reopened.filter((path) => normalizeFilePathSlashes(path).replace(/\/+$/, "") !== rootPath);
+    if (ahead.length > 0) void prefetchFolders(ahead, loadDir);
     fetchEntries(cwd, showHidden)
       .then((entries) => { if (!cancelled) setRoots(entries); })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [cwd, refreshKey, treeRefreshKey, showHidden, treeVisible]);
+  }, [cwd, refreshKey, treeRefreshKey, showHidden, treeVisible, loadDir]);
 
   // A tree refresh (a run ended, the window refocused, an upload, the button)
   // or the ignored-files switch reloads every open directory and marks a
