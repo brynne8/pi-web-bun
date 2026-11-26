@@ -41,3 +41,55 @@ export function createShellFrameCollapseExtension(): InlineExtension {
     },
   };
 }
+
+/** A command that writes one endless line would otherwise grow the buffer without bound. */
+const MAX_PENDING_BYTES = 4 * 1024 * 1024;
+
+export interface ShellStreamCollapse {
+  /** Raw bytes as the child process produced them. */
+  push(data: Buffer | string): void;
+  /** The last line, however it ends. Further pushes are dropped, as they were before. */
+  flush(): void;
+}
+
+/**
+ * What the shell tool's `onData` becomes upstream: pi builds the tool result, the live output
+ * and a `!` command's transcript entry out of these bytes, and none of them is a `tool_result`
+ * the extension can reach. A row goes out when its line end arrives, so the frames a command
+ * painted on it are behind us — the cost is that a row the command never ends shows nothing
+ * until it exits. Bytes are cut at a line end and only there, never inside a character.
+ */
+export function createShellStreamCollapse(emit: (data: Buffer) => void): ShellStreamCollapse {
+  let pending: Buffer | undefined;
+  let closed = false;
+  const emitText = (bytes: Buffer): void => {
+    const text = collapseTerminalOverwrites(bytes.toString("utf8"));
+    if (text !== "") emit(Buffer.from(text, "utf8"));
+  };
+  return {
+    push(data) {
+      if (closed) return;
+      const chunk = typeof data === "string" ? Buffer.from(data, "utf8") : data;
+      const bytes = pending ? Buffer.concat([pending, chunk]) : chunk;
+      const lineEnd = bytes.lastIndexOf(0x0a);
+      if (lineEnd >= 0) {
+        pending = lineEnd + 1 < bytes.length ? Buffer.from(bytes.subarray(lineEnd + 1)) : undefined;
+        emitText(bytes.subarray(0, lineEnd + 1));
+        return;
+      }
+      if (bytes.length > MAX_PENDING_BYTES) {
+        pending = undefined;
+        emitText(bytes);
+        return;
+      }
+      pending = bytes;
+    },
+    flush() {
+      if (closed) return;
+      closed = true;
+      const bytes = pending;
+      pending = undefined;
+      if (bytes) emitText(bytes);
+    },
+  };
+}

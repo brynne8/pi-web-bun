@@ -27,6 +27,7 @@ import {
 } from "./bash-bg-tasks.ts";
 import { buildBgTaskNotification, type BgTaskOutcome } from "./bg-task-notification.ts";
 import { collapseTerminalOverwrites } from "./ansi-overwrite.ts";
+import { createShellStreamCollapse } from "./shell-frame-collapse.ts";
 import { sanitizeProjectCommandEnvironment } from "./project-environment.ts";
 
 const HOST_EXTENSION_NAME = "pi-web-project-command-environment";
@@ -140,6 +141,11 @@ export function createProjectCommandBashOperations(
         ? timeout
         : undefined;
       const timeoutMs = timeoutSeconds === undefined ? undefined : timeoutSeconds * 1000;
+      // Upstream sees the screen, not the frames: pi builds the tool result, a `!` command's
+      // transcript entry and the live output from these bytes, and none of them is a
+      // `tool_result` the extension can reach. The log file and the handoff buffer keep the
+      // raw bytes below.
+      const sink = createShellStreamCollapse(onData);
       const execution = localOperations.exec(command, cwd, {
         ...executionOptions,
         env: environment,
@@ -148,14 +154,27 @@ export function createProjectCommandBashOperations(
         // Callers finalize their output once the command is released; a
         // survivor must not append to it afterwards.
         onData: (data) => {
-          if (!released) onData(data);
+          if (!released) sink.push(data);
           if (bgStream) {
             bgStream.write(data);
             if (bgController) noteBgTaskOutput(bgController);
           } else buffer?.push(data);
         },
       });
-      if (!execSignal && timeoutMs === undefined && !autoBgArmed) return execution;
+      // No timer and no caller signal: the command ends on its own, and that is when the last
+      // line has to be handed over.
+      if (!execSignal && timeoutMs === undefined && !autoBgArmed) {
+        return execution.then(
+          (result) => {
+            sink.flush();
+            return result;
+          },
+          (error: unknown) => {
+            sink.flush();
+            throw error;
+          },
+        );
+      }
 
       // On Stop or a timeout, pi kills the shell's process tree but then keeps
       // reading until every inherited stdout/stderr handle falls idle. A
@@ -167,6 +186,8 @@ export function createProjectCommandBashOperations(
       return new Promise<BashExecResult>((resolve, reject) => {
         const timers: ReturnType<typeof setTimeout>[] = [];
         const release = () => {
+          // Whatever the last row held, the caller must see it before it finalizes its output.
+          sink.flush();
           released = true;
           for (const timer of timers) clearTimeout(timer);
           signal?.removeEventListener("abort", onAbort);
