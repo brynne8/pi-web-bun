@@ -93,6 +93,7 @@ Two kinds of difference. [Running on Bun](#running-on-bun) is what it takes to r
 | Integrated terminal | Works via `node-pty` | Works via Bun's native PTY behind a small node-pty-compatible shim (see below, and [docs/terminal.md](./docs/terminal.md)) |
 | SDK package resolution | `findPackageJSON()` from `node:module` | `findPackageManifest()` in `lib/pi-sdk-internals.ts` walks `node_modules` upward, because Bun implements none of `node:module`'s named exports |
 | Home directory | `os.homedir()` | `$HOME` first, then the user database (`homeDir()` in `lib/home-dir.ts`), because Bun's `os.homedir()` ignores `$HOME` — the agent directory, the default cwd, the browser's root, `~` in a path, and the agent directory the HTTP dispatcher reads its timeouts from. On Windows `$HOME` is normally unset, so the database is what applies |
+| HTTP proxy | undici's `EnvHttpProxyAgent` installed as the global dispatcher, which reads the proxy variables when a request starts | Bun's fetch consults no dispatcher and reads the proxy variables itself, so a saved address is written to `HTTP_PROXY` and `HTTPS_PROXY` for it to read, an address the process started with is left to whoever set it, and one `ALL_PROXY` serving both protocols is not offered, since Bun takes one proxy per protocol |
 | Skills install | `npx skills add …` | `bun x skills add …` |
 | Plugin update check | `npm view … version --json` | `bun pm view … version --json` |
 | Test suite | Node's runner (`npm test`) | Both runners, both green: `bun test` and `npm test` |
@@ -325,6 +326,8 @@ $env:HTTPS_PROXY = "http://127.0.0.1:7890"
 $env:NO_PROXY = "localhost,127.0.0.1"
 pi-web
 ```
+
+Settings › General › Network can hold one address instead of an environment: it goes to pi's global `httpProxy` key, applies to the next request without a restart, and an address already in the environment outranks it. Under Bun that save writes `HTTP_PROXY` and `HTTPS_PROXY`, because Bun's fetch reads those variables as each request starts and configures no dispatcher — so a command a session runs sees the address too, and clearing the setting takes back only what this process wrote. Upstream hands the same key to undici's dispatcher and leaves the environment as it is.
 
 ## Notes
 

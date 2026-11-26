@@ -95,6 +95,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 | 内置终端 | 通过 `node-pty` 正常工作 | 通过一层薄薄的 node-pty 兼容封装使用 Bun 原生 PTY（见下，另见 [docs/terminal.md](./terminal.md)） |
 | SDK 包解析 | `node:module` 的 `findPackageJSON()` | `lib/pi-sdk-internals.ts` 里的 `findPackageManifest()` 向上遍历 `node_modules`，因为 Bun 不实现 `node:module` 的任何具名导出 |
 | 用户目录 | `os.homedir()` | 先看 `$HOME`，再回落到用户数据库（`lib/home-dir.ts` 的 `homeDir()`），因为 Bun 的 `os.homedir()` 会忽略 `$HOME`——agent 目录、默认 cwd、目录浏览器的根、路径里的 `~`，以及 HTTP dispatcher 读超时所在的 agent 目录。Windows 上通常没有 `$HOME`，所以那里同样走用户数据库 |
+| HTTP 代理 | 把 undici 的 `EnvHttpProxyAgent` 装成全局 dispatcher，请求开始时再读代理变量 | Bun 的 fetch 不查 dispatcher，代理变量它自己读，所以保存的地址会写进 `HTTP_PROXY` 和 `HTTPS_PROXY` 供它读取；进程启动时已有的地址原样留给设它的人；`ALL_PROXY` 一个地址管两种协议这里不提供，因为 Bun 是一种协议一个代理 |
 | 技能安装 | `npx skills add …` | `bun x skills add …` |
 | 插件更新检查 | `npm view … version --json` | `bun pm view … version --json` |
 | 测试套件 | Node 运行器（`npm test`） | 两种运行器都跑、都绿：`bun test` 与 `npm test` |
@@ -327,6 +328,8 @@ $env:HTTPS_PROXY = "http://127.0.0.1:7890"
 $env:NO_PROXY = "localhost,127.0.0.1"
 pi-web
 ```
+
+Settings › General › Network 也可以不靠环境变量而存一个地址：它写进 pi 全局的 `httpProxy`，下一个请求就生效、不需重启，而环境里已有的地址比它优先。在 Bun 下这一存是把 `HTTP_PROXY` 和 `HTTPS_PROXY` 写下去，因为 Bun 的 fetch 在每个请求开始时读这两个变量、也不配置任何 dispatcher——所以会话跑的命令也看得见这个地址，关掉设置只拿回本进程自己写的那一份。原版把同一个 key 交给 undici 的 dispatcher，环境变量一律不碰。
 
 ## 注意事项
 

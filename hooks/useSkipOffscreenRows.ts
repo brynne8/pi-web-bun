@@ -1,9 +1,18 @@
 "use client";
 
 import { useCallback, type RefObject } from "react";
+import { subscribeChatAppearance } from "@/hooks/useChatAppearance";
+import { subscribeFontPreferences } from "@/hooks/useFontPreferences";
 
-/** How far past the scroll container's edges a row stays laid out, as a share of its height. */
+/** Inside this band past the scroll container's edges (a share of its height) a row is laid out. */
 const NEAR_MARGIN = "100% 0px";
+/**
+ * Outside this wider band a row is skipped. In between a row stays as it is:
+ * IntersectionObserver reads a laid-out row's box snapped to whole pixels and a
+ * skipped one's unsnapped, so one edge for both would flip a row sitting within
+ * that fraction of it every frame.
+ */
+const FAR_MARGIN = "125% 0px";
 /** A width change re-measures the skipped rows once it has settled. */
 const RESIZE_SETTLE_MS = 200;
 
@@ -15,6 +24,169 @@ function scrollParent(element: HTMLElement): HTMLElement | null {
   return null;
 }
 
+function contentBlockSize(element: HTMLElement): number {
+  const style = getComputedStyle(element);
+  const edges = ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth"] as const;
+  const size = edges.reduce((height, edge) => height - (parseFloat(style[edge]) || 0), element.getBoundingClientRect().height);
+  return Math.max(0, size);
+}
+
+/** The child of `rows` that holds `node`, if any. */
+function rowOf(rows: Node, node: Node | null): Node | null {
+  for (let current = node; current; current = current.parentNode) {
+    if (current.parentNode === rows) return current;
+  }
+  return null;
+}
+
+/**
+ * Skips the layout of `rows`' children while they are far outside the scroll
+ * container; see `useSkipOffscreenRows`. Returns the cleanup, or null when the
+ * browser cannot skip rows or `rows` has no scroll container.
+ */
+export function skipOffscreenRows(rows: HTMLElement): (() => void) | null {
+  const scroller = scrollParent(rows);
+  if (!scroller || typeof IntersectionObserver === "undefined" || typeof ResizeObserver === "undefined" || !CSS.supports?.("content-visibility", "auto")) return null;
+
+  const inside = new Set<Element>();
+  const skipped = new Set<HTMLElement>();
+  const stale = new Set<HTMLElement>();
+  const unskip = (row: HTMLElement) => {
+    row.style.removeProperty("content-visibility");
+    row.style.removeProperty("contain-intrinsic-block-size");
+    skipped.delete(row);
+  };
+  // The size alone, without `auto`: a size the browser remembered from an
+  // earlier layout of the row is not what it has laid out now.
+  const skip = (targets: HTMLElement[]) => {
+    const sizes = targets.map(contentBlockSize);
+    targets.forEach((row, index) => {
+      row.style.containIntrinsicBlockSize = `${sizes[index]}px`;
+      row.style.contentVisibility = "auto";
+      skipped.add(row);
+    });
+  };
+
+  // A skipped row that may no longer be the size it was skipped at (its content
+  // changed, the width or the fonts did) is laid out again with the next frame
+  // and skipped at its new size once that layout is done: never measured in
+  // the middle of a script, which would lay out every such row at once.
+  const settled = new ResizeObserver((entries) => {
+    const ready: HTMLElement[] = [];
+    for (const entry of entries) {
+      const row = entry.target as HTMLElement;
+      settled.unobserve(row);
+      if (!stale.delete(row)) continue;
+      if (row.parentElement === rows && !inside.has(row)) ready.push(row);
+    }
+    if (ready.length > 0) skip(ready);
+  });
+  const remeasure = (targets: Iterable<HTMLElement>) => {
+    for (const row of targets) {
+      if (!skipped.has(row)) continue;
+      unskip(row);
+      stale.add(row);
+      settled.observe(row);
+    }
+  };
+  const settle = (row: HTMLElement) => {
+    if (stale.delete(row)) settled.unobserve(row);
+  };
+
+  // Each observer decides one way only, so the order their callbacks run in does not matter.
+  const near = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      const row = entry.target as HTMLElement;
+      if (!entry.isIntersecting) {
+        inside.delete(row);
+        continue;
+      }
+      inside.add(row);
+      settle(row);
+      if (skipped.has(row)) unskip(row);
+    }
+  }, { root: scroller, rootMargin: NEAR_MARGIN });
+  const far = new IntersectionObserver((entries) => {
+    const leaving: HTMLElement[] = [];
+    for (const entry of entries) {
+      const row = entry.target as HTMLElement;
+      if (entry.isIntersecting || skipped.has(row) || row.parentElement !== rows) continue;
+      settle(row);
+      leaving.push(row);
+    }
+    if (leaving.length > 0) skip(leaving);
+  }, { root: scroller, rootMargin: FAR_MARGIN });
+
+  const adopt = (node: Node) => {
+    if (!(node instanceof HTMLElement) || node.parentElement !== rows) return;
+    near.observe(node);
+    far.observe(node);
+  };
+  const forget = (node: Node) => {
+    if (!(node instanceof HTMLElement) || node.parentElement === rows) return;
+    near.unobserve(node);
+    far.unobserve(node);
+    inside.delete(node);
+    settle(node);
+    if (skipped.has(node)) unskip(node);
+  };
+  Array.from(rows.children).forEach(adopt);
+  const mutations = new MutationObserver((records) => {
+    const changed = new Set<HTMLElement>();
+    for (const record of records) {
+      if (record.target === rows) {
+        if (record.type !== "childList") continue;
+        record.removedNodes.forEach(forget);
+        record.addedNodes.forEach(adopt);
+        continue;
+      }
+      // A highlighted fence, a diagram, a re-render: content a skipped row was
+      // not laid out with. A row's own style is what skipping writes.
+      if (record.type === "attributes" && record.attributeName === "style" && record.target.parentNode === rows) continue;
+      const row = rowOf(rows, record.target);
+      if (row instanceof HTMLElement && skipped.has(row)) changed.add(row);
+    }
+    remeasure(changed);
+  });
+  mutations.observe(rows, { childList: true, subtree: true, characterData: true, attributes: true });
+
+  // A skipped row keeps its height from the old width, where its text wrapped
+  // differently: once the width settles, measure them all again.
+  let width = rows.getBoundingClientRect().width;
+  let widthTimer: ReturnType<typeof setTimeout> | null = null;
+  const resize = new ResizeObserver(() => {
+    const next = rows.getBoundingClientRect().width;
+    if (next === width) return;
+    width = next;
+    if (widthTimer) clearTimeout(widthTimer);
+    widthTimer = setTimeout(() => {
+      widthTimer = null;
+      remeasure(Array.from(skipped));
+    }, RESIZE_SETTLE_MS);
+  });
+  resize.observe(rows);
+
+  // The same once the chat's font size or fonts change, and once a font
+  // finishes loading after rows that use it were skipped.
+  const remeasureAll = () => remeasure(Array.from(skipped));
+  const unsubscribeAppearance = subscribeChatAppearance(remeasureAll);
+  const unsubscribeFonts = subscribeFontPreferences(remeasureAll);
+  document.fonts?.addEventListener("loadingdone", remeasureAll);
+
+  return () => {
+    if (widthTimer) clearTimeout(widthTimer);
+    near.disconnect();
+    far.disconnect();
+    settled.disconnect();
+    mutations.disconnect();
+    resize.disconnect();
+    unsubscribeAppearance();
+    unsubscribeFonts();
+    document.fonts?.removeEventListener("loadingdone", remeasureAll);
+    skipped.forEach(unskip);
+  };
+}
+
 /**
  * Lets the browser skip the layout of transcript rows far outside the scroll
  * container (`content-visibility: auto`), so work that scales with the laid-out
@@ -22,135 +194,24 @@ function scrollParent(element: HTMLElement): HTMLElement | null {
  * selection sync on every mouse press took 42 ms with 300 turns loaded, 1.5 ms
  * with the rows off screen skipped.
  *
- * A skipped row is held to its own box height, which `.chat-rows` being a flex column
- * makes equal to the room the row takes: each row is its own formatting context and its
- * own margins are its own, so a row is one size lying plain and another skipped, and
- * folding one moves neither the view nor the scrollbar. Near the screen a row is plain
- * again: no containment clips its focus rings or shadows there. The returned callback
- * ref goes on the element whose children are the rows.
+ * A skipped row keeps the size it has laid out, so the scroll height and every
+ * row's offset stay exact. That needs each block row to be its own block
+ * formatting context, as skipping makes it, so its children's margins stay
+ * inside it either way: the element this ref goes on carries the
+ * `transcript-rows` class, whose rule in `app/globals.css` makes its children
+ * `display: flow-root`. A skipped row whose content changes is measured again.
+ * Near the screen a row has no containment: nothing clips its focus rings or
+ * shadows there. The returned callback ref goes on the element whose children
+ * are the rows.
  */
 export function useSkipOffscreenRows(rowsRef?: RefObject<HTMLElement | null>) {
   return useCallback((rows: HTMLElement | null) => {
     if (rowsRef) rowsRef.current = rows;
     if (!rows) return;
-    const scroller = scrollParent(rows);
-    if (!scroller || typeof IntersectionObserver === "undefined" || !CSS.supports?.("content-visibility", "auto")) {
-      return () => { if (rowsRef) rowsRef.current = null; };
-    }
-
-    const near = new Set<Element>();
-    const skipped = new Set<HTMLElement>();
-    const unskip = (row: HTMLElement) => {
-      row.style.removeProperty("content-visibility");
-      row.style.removeProperty("contain-intrinsic-block-size");
-      row.style.removeProperty("contain");
-      skipped.delete(row);
-    };
-    // A size read at one moment can be wrong at the next: the width changed, and with
-    // it how the row's text wraps. Whatever the cause, rows outside the viewport moving
-    // must not move the row the reader is on, so it is put back. A row crossing the band
-    // is never inside the viewport, so the anchor is never one of the rows being changed.
-    const holdWhile = (change: () => void) => {
-      const top = scroller.getBoundingClientRect().top;
-      const anchor = Array.from(rows.children).find((row) => (
-        row instanceof HTMLElement && row.getBoundingClientRect().bottom > top
-      ));
-      const before = anchor?.getBoundingClientRect().top ?? 0;
-      change();
-      if (!(anchor instanceof HTMLElement) || !anchor.isConnected) return;
-      const drift = anchor.getBoundingClientRect().top - before;
-      if (Math.abs(drift) >= 0.5) scroller.scrollTop += drift;
-    };
-
-    // A row outside the viewport whose height is wrong moves the rows under it, so the
-    // size is read in one pass and written in the next: reading a box after writing a
-    // style would cost a layout per row instead of one for the batch.
-    const skip = (targets: HTMLElement[]) => {
-      const sized: { row: HTMLElement; size: number }[] = [];
-      for (const row of targets) {
-        // The last row has nothing under it to keep in place and is the newest content,
-        // where the reader is, so it is never folded.
-        if (!row.nextElementSibling) continue;
-        const style = getComputedStyle(row);
-        const around = ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth"] as const;
-        const outside = around.reduce((sum, edge) => sum + (parseFloat(style[edge]) || 0), 0);
-        // `contain-intrinsic-block-size` sizes the content box, so what the row adds
-        // around its content comes off the box. Left in, a padded row grows by its own
-        // padding when folded (the load-earlier line, 21 px over by its 10.5 px above
-        // and below).
-        const size = Math.max(0, Math.round((row.getBoundingClientRect().height - outside) * 100) / 100);
-        sized.push({ row, size });
-      }
-      for (const { row, size } of sized) {
-        row.style.containIntrinsicBlockSize = `${size}px`;
-        row.style.contentVisibility = "auto";
-        skipped.add(row);
-      }
-    };
-
-    const intersection = new IntersectionObserver((entries) => {
-      const far: HTMLElement[] = [];
-      holdWhile(() => {
-        for (const entry of entries) {
-          const row = entry.target as HTMLElement;
-          if (entry.isIntersecting) {
-            near.add(row);
-            if (skipped.has(row)) unskip(row);
-          } else {
-            near.delete(row);
-            if (!skipped.has(row) && row.parentElement === rows) far.push(row);
-          }
-        }
-        if (far.length > 0) skip(far);
-      });
-    }, { root: scroller, rootMargin: NEAR_MARGIN });
-
-    const observe = (node: Node) => {
-      if (node instanceof HTMLElement) intersection.observe(node);
-    };
-    const forget = (node: Node) => {
-      if (!(node instanceof HTMLElement) || node.parentElement === rows) return;
-      intersection.unobserve(node);
-      near.delete(node);
-      if (skipped.has(node)) unskip(node);
-    };
-    Array.from(rows.children).forEach(observe);
-    const mutations = new MutationObserver((records) => {
-      for (const record of records) {
-        record.removedNodes.forEach(forget);
-        record.addedNodes.forEach(observe);
-      }
-    });
-    mutations.observe(rows, { childList: true });
-
-    // A skipped row keeps its height from the old width, where its text wrapped
-    // differently: once the width settles, measure them all again.
-    let width = rows.getBoundingClientRect().width;
-    let settle: ReturnType<typeof setTimeout> | null = null;
-    const resize = new ResizeObserver(() => {
-      const next = rows.getBoundingClientRect().width;
-      if (next === width) return;
-      width = next;
-      if (settle) clearTimeout(settle);
-      settle = setTimeout(() => {
-        settle = null;
-        const stale = Array.from(skipped);
-        if (stale.length === 0) return;
-        holdWhile(() => {
-          stale.forEach(unskip);
-          skip(stale.filter((row) => row.parentElement === rows && !near.has(row)));
-        });
-      }, RESIZE_SETTLE_MS);
-    });
-    resize.observe(rows);
-
+    const cleanup = skipOffscreenRows(rows);
     return () => {
       if (rowsRef) rowsRef.current = null;
-      if (settle) clearTimeout(settle);
-      intersection.disconnect();
-      mutations.disconnect();
-      resize.disconnect();
-      skipped.forEach(unskip);
+      cleanup?.();
     };
   }, [rowsRef]);
 }

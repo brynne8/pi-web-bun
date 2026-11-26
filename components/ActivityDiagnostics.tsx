@@ -60,8 +60,8 @@ import {
   type DebugStatusState,
   type DebugTitleOf,
   type DebugTone,
-  type Translate,
 } from "./debug-panel-state";
+import type { Translate } from "@/lib/i18n/types";
 
 /** Keeps a render error in the read-out from taking the page down with it. */
 export class DiagnosticsBoundary extends Component<{ fallback: string; children: ReactNode }, { failed: boolean }> {

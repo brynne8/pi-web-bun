@@ -16,6 +16,7 @@ import type {
 import { useI18n } from "@/hooks/useI18n";
 import { displayPathWithin, shortenPath } from "@/lib/display-path";
 import {
+  displayMcpPath,
   mcpFieldLabel,
   mcpFileProblemDetail,
   mcpOverrideNotice,
@@ -142,9 +143,8 @@ import {
   postMcpSignIn,
   type McpSignInRun,
 } from "./mcp-sign-in-helpers";
-import { projectTrustReloadKey } from "./settings-ui-helpers";
-
-type Translate = ReturnType<typeof useI18n>["t"];
+import { projectTrustReloadKey, scopeLabel } from "./settings-ui-helpers";
+import type { Translate } from "@/lib/i18n/types";
 
 /** What the panel has loaded; a project the route refused leaves the global listing and `projectError`. */
 export type McpConfigLoad =
@@ -152,19 +152,11 @@ export type McpConfigLoad =
   | { state: "failed"; error: McpLoadFailure }
   | { state: "loaded"; data: McpResponse; projectError?: McpLoadFailure };
 
-function scopeLabel(scope: McpScope, t: Translate): string {
-  return scope === "project" ? t("skills.scope.project") : t("skills.scope.global");
-}
-
 /** A path as the panel shows it: the home folder as `~`, hidden characters escaped. */
-function displayPath(path: string): string {
-  return revealHiddenCharacters(shortenPath(path));
-}
-
-/** A notice's text, with any `path` parameter shown as `displayPath()` shows it. */
+/** A notice's text, with any `path` parameter shown as `displayMcpPath()` shows it. */
 function noticeText({ key, params }: McpNoticeText, t: Translate): string {
   if (!params) return t(key);
-  return t(key, params.path === undefined ? params : { ...params, path: displayPath(params.path) });
+  return t(key, params.path === undefined ? params : { ...params, path: displayMcpPath(params.path) });
 }
 
 /** A refusal's translated reason, or for an internal or network failure its diagnostic. */
@@ -901,7 +893,7 @@ export function McpConfigView({
           </ConfigNotice>
         )}
         {hostInactive && (
-          <ConfigNotice>{t("mcp.hostInactive", { path: displayPath(hostInactive.cwd), owner: displayPath(hostInactive.owner) })}</ConfigNotice>
+          <ConfigNotice>{t("mcp.hostInactive", { path: displayMcpPath(hostInactive.cwd), owner: displayMcpPath(hostInactive.owner) })}</ConfigNotice>
         )}
         {load.state === "loaded" && load.projectError && (
           <ConfigNotice>{t("mcp.projectNotListed", { reason: failureText(load.projectError, t) })}</ConfigNotice>
@@ -918,7 +910,7 @@ export function McpConfigView({
               </ConfigButton>
             )}
           >
-            {t("mcp.removed", { name: revealHiddenCharacters(undo.name), path: displayPath(undo.path) })}
+            {t("mcp.removed", { name: revealHiddenCharacters(undo.name), path: displayMcpPath(undo.path) })}
             {undo.error && <> {t("mcp.undoFailed")} {actionFailureText(undo.error, t)}</>}
           </ConfigNotice>
         )}
@@ -1030,7 +1022,7 @@ export function McpConfigView({
             ) : (
               <ConfigEmptyState>
                 {emptyKey === "mcp.empty"
-                  ? t(emptyKey, { globalPath: displayPath(globalFile?.path ?? "~/.pi/agent/mcp.json") })
+                  ? t(emptyKey, { globalPath: displayMcpPath(globalFile?.path ?? "~/.pi/agent/mcp.json") })
                   : t(emptyKey)}
               </ConfigEmptyState>
             )}
@@ -1047,7 +1039,7 @@ export function McpConfigView({
               const detail = mcpFileProblemDetail(problem, file.realPath);
               return (
                 <>
-                  <code className="mcp-config-chip">{displayPath(file.path)}</code>{" "}
+                  <code className="mcp-config-chip">{displayMcpPath(file.path)}</code>{" "}
                   {t(`mcp.fileProblem.${problem.reason}`)}
                   {detail && <> <code className="mcp-config-chip">{detail}</code></>}
                 </>
@@ -1100,7 +1092,7 @@ function McpAddedNoticeView({
   const name = revealHiddenCharacters(added.name);
   // Two absolute paths took a quarter of a phone screen, so a project path is shown from the
   // panel's folder and the folder itself as "this folder".
-  const path = added.scope === "project" && cwd ? revealHiddenCharacters(displayPathWithin(added.path, cwd)) : displayPath(added.path);
+  const path = added.scope === "project" && cwd ? revealHiddenCharacters(displayPathWithin(added.path, cwd)) : displayMcpPath(added.path);
   const status = server.status;
   const asksSignIn = !testing && status?.origin === "test" && status.state === "needs-auth" && server.usesOAuth;
   const signingIn = signIn?.starting === true || mcpSignInActive(signIn);
@@ -1116,7 +1108,7 @@ function McpAddedNoticeView({
         ? t("mcp.add.added", { name, path })
         : added.trustedFolder === cwd
           ? t("mcp.add.addedTrustedHere", { name, path })
-          : t("mcp.add.addedTrusted", { name, path, folder: displayPath(added.trustedFolder) })}
+          : t("mcp.add.addedTrusted", { name, path, folder: displayMcpPath(added.trustedFolder) })}
       {testing && <> {t("mcp.add.testing")}</>}
       {asksSignIn && <> {t("mcp.add.needsSignIn")}</>}
     </ConfigNotice>
@@ -1545,7 +1537,7 @@ function McpServerDetail({
           </ConfigDetailGridRow>
         )}
         <ConfigDetailGridRow label={t("mcp.detail.file")} tone="dim" mono className="mcp-config-code">
-          {displayPath(server.sourcePath)}
+          {displayMcpPath(server.sourcePath)}
         </ConfigDetailGridRow>
       </ConfigDetailGrid>
 
@@ -1651,7 +1643,7 @@ function McpTestStatusLines({
       )}
       {status.resources && <span className="mcp-config-line is-dim">{t("mcp.test.resources")}</span>}
       {status.cwd !== undefined && status.cwd !== entryCwd && (
-        <span className="mcp-config-line is-dim">{t("mcp.test.ranIn", { path: displayPath(status.cwd) })}</span>
+        <span className="mcp-config-line is-dim">{t("mcp.test.ranIn", { path: displayMcpPath(status.cwd) })}</span>
       )}
       {status.queuedMs !== undefined && status.queuedMs >= 500 && (
         <span className="mcp-config-line is-dim">{t("mcp.test.queued", { seconds: mcpSeconds(status.queuedMs) })}</span>
@@ -1674,11 +1666,11 @@ function McpSessionStatusLines({ status, showState }: { status: McpSessionStatus
     <>
       <span className="mcp-config-line">
         {showState && <McpStatusStateWord view={mcpSessionStateView(status)} />}
-        {t(mcpSessionSummaryKey(status), { path: displayPath(status.cwd), time, ...(closedTime === undefined ? {} : { closedTime }) })}
+        {t(mcpSessionSummaryKey(status), { path: displayMcpPath(status.cwd), time, ...(closedTime === undefined ? {} : { closedTime }) })}
       </span>
       {status.conflict !== undefined && (
         <span className="mcp-config-line is-error">
-          {t("mcp.session.conflictOwner")} <code className="mcp-config-chip">{displayPath(status.conflict)}</code>
+          {t("mcp.session.conflictOwner")} <code className="mcp-config-chip">{displayMcpPath(status.conflict)}</code>
         </span>
       )}
       <McpStatusOutput error={status.error} stderr={status.stderr} />

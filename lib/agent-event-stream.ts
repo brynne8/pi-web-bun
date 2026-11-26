@@ -6,6 +6,7 @@ import {
 } from "./agent-event-wire.ts";
 import type { DebugEventStream } from "./debug-types.ts";
 import { recordRuntimeDiagnostic } from "./runtime-diagnostics.ts";
+import { errorMessage } from "./errors.ts";
 
 export interface AgentEventStreamSession {
   readonly isStreaming: boolean;
@@ -145,10 +146,6 @@ export function listAgentEventStreams(): (DebugEventStream & { sessionId: string
 /** Every live agent event stream, those opened before a hot reload of this file included. */
 export function countAgentEventStreams(): number {
   return activeStreamClosers.size;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /**

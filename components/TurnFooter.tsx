@@ -59,7 +59,7 @@ export function TurnFooter({ usage, timestamp, durationMs, text, writtenFiles = 
       }}
     >
       {writtenFiles.length > 0 && <TurnWrittenFiles files={writtenFiles} onOpenFile={onOpenFile} />}
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
         {(stopText || usageParts.length > 0) && (
           // One item per count: a single space at 11px ran them together. The
           // spaces stay in the text for copying; the flex gap draws the room.

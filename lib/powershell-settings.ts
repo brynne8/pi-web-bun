@@ -47,11 +47,8 @@ export function resolveShellTools(
   return replaceShellTool(toolNames, isPowerShellToolEnabled(defaultTools, platform));
 }
 
-export function getPowerShellSettingsPath(agentDir?: string): string {
-  return getGlobalSettingsPath(agentDir);
-}
-
-function isToolModifier(entry: string): boolean {
+/** A `+name` / `-name` entry of `defaultTools`, which adjusts the defaults instead of replacing them. */
+export function isToolModifier(entry: string): boolean {
   return entry.startsWith("+") || entry.startsWith("-");
 }
 
@@ -82,7 +79,7 @@ function configuredTools(settings: Record<string, unknown>): string[] | undefine
 }
 
 export async function readPowerShellToolEnabled(
-  settingsPath = getPowerShellSettingsPath(),
+  settingsPath = getGlobalSettingsPath(),
   platform: NodeJS.Platform = process.platform,
 ): Promise<boolean> {
   return readGlobalSettings(settingsPath, (settings) => isPowerShellToolEnabled(configuredTools(settings), platform));
@@ -90,7 +87,7 @@ export async function readPowerShellToolEnabled(
 
 export async function writePowerShellToolEnabled(
   enabled: boolean,
-  settingsPath = getPowerShellSettingsPath(),
+  settingsPath = getGlobalSettingsPath(),
   platform: NodeJS.Platform = process.platform,
 ): Promise<boolean> {
   if (platform !== "win32") throw new Error("PowerShell tool settings are only available on Windows");
@@ -142,7 +139,7 @@ export function withBuiltinTools(
 }
 
 export async function readBuiltinTools(
-  settingsPath = getPowerShellSettingsPath(),
+  settingsPath = getGlobalSettingsPath(),
   platform: NodeJS.Platform = process.platform,
 ): Promise<string[]> {
   return readGlobalSettings(settingsPath, (settings) => builtinToolsOf(defaultToolEntries(settings), platform));
@@ -150,7 +147,7 @@ export async function readBuiltinTools(
 
 export async function writeBuiltinTools(
   selected: readonly string[],
-  settingsPath = getPowerShellSettingsPath(),
+  settingsPath = getGlobalSettingsPath(),
   platform: NodeJS.Platform = process.platform,
 ): Promise<void> {
   await updateGlobalSettings(settingsPath, (settings) => {

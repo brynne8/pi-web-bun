@@ -70,6 +70,7 @@ export function sessionMenuEntries(
 }
 
 export type ProjectNameActionId = "rename-project" | "reset-project-name";
+import { errorMessage } from "./errors.ts";
 
 /** A group menu's name entries: Rename…, and Reset name while the project has a display name of its own. */
 export function projectNameMenuEntries(project: Pick<SidebarProject, "customName">): ProjectNameActionId[] {
@@ -172,7 +173,7 @@ export async function deleteProjectSessions(
       outcome.deletedRoots.push(...part.filter((id) => deleted.has(id)));
       outcome.running.push(...(data.running ?? []));
     } catch (error) {
-      outcome.error = error instanceof Error ? error.message : String(error);
+      outcome.error = errorMessage(error);
       break;
     }
   }

@@ -696,7 +696,7 @@ export function createSubagentExtension(
             };
           } catch (error) {
             return {
-              content: [{ type: "text", text: withSubagentCandidates(error instanceof Error ? error.message : String(error), ctx?.sessionManager) }],
+              content: [{ type: "text", text: withSubagentCandidates(errorMessage(error), ctx?.sessionManager) }],
               details: undefined,
               isError: true,
             };
@@ -809,7 +809,7 @@ export function createSubagentExtension(
               details: undefined,
             };
           } catch (error) {
-            return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], details: undefined, isError: true };
+            return { content: [{ type: "text", text: errorMessage(error) }], details: undefined, isError: true };
           }
         },
       }));

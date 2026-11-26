@@ -5,6 +5,7 @@ import { getRpcSession, startRpcSession } from "@/lib/rpc-manager";
 import { autoNameDeclines, appendSessionNameSource, readSessionNameRecord } from "@/lib/session-name-source";
 import { invalidateSessionListCache, openSessionManager, resolveSessionPath } from "@/lib/session-reader";
 import type { SessionEntry } from "@/lib/types";
+import { errorMessage } from "@/lib/errors";
 
 export async function POST(
   _req: Request,
@@ -55,7 +56,7 @@ export async function POST(
     return NextResponse.json({ title: result.title, usage: result.usage ?? null });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : String(error) },
+      { error: errorMessage(error) },
       { status: 500 },
     );
   }

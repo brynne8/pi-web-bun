@@ -2,7 +2,8 @@ import type { AgentMessage } from "./types.ts";
 import { formatDuration } from "./i18n/format.ts";
 import type { Locale } from "./i18n/types.ts";
 
-function recordedMs(value: unknown): number | undefined {
+/** A time pi recorded, or undefined when it is missing, negative or not a finite number. */
+export function recordedMs(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 

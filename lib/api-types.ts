@@ -11,6 +11,12 @@ export interface SubagentSettingsResponse {
   maxConcurrent: number;
 }
 
+export interface HttpProxySettingsResponse {
+  enabled: boolean;
+  displayAddress: string | null;
+  sources: { http: string; https: string };
+}
+
 /** Code mode's one choice (ADR 0006): Always on is the default; Automatic writes `-codemode` to say so. */
 export type CodemodePreference = "automatic" | "always";
 
