@@ -1,4 +1,4 @@
-import { isRecord } from "./is-record";
+import { isRecord } from "./is-record.ts";
 /** Client/server helpers for the model directory's context-window overrides. */
 export interface ModelContextConfig {
   providers?: Record<string, { modelOverrides?: Record<string, unknown> }>;

@@ -7,19 +7,19 @@ import { closeSync, type Dirent, fstatSync, openSync, readSync, statSync } from 
 import { open, readdir } from "fs/promises";
 import { isAbsolute, join, normalize as normalizePath, relative, resolve as resolvePath, sep } from "path";
 import type { AgentMessage, ImageContent, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
-import { normalizeToolCalls } from "./normalize";
-import { withoutMessageSignatures } from "./message-signatures";
-import { getClosedTurnCounts, getThinkingPreview, getTurnAnchors, type TurnAnchorMessage } from "./message-display";
-import { projectIdentityKey } from "./project-identity";
-import { sessionPathKey } from "./session-path";
-import { skillExpansionToCommand } from "./slash-display";
-import { MAX_TOOL_RESULT_IMAGE_BYTES, TOOL_RESULT_IMAGE_MIMES } from "./tool-result-images";
-import { resolveProject, type ProjectInfo } from "./worktree";
-import { readSideRelation } from "./side-session";
-import { readSubagentRun, settleOrphanedSubagentStatus, SUBAGENT_META_TYPE } from "./subagents";
-import { checkSessionMembership, listSessionsIncremental, scanSessionFileInfo, type ScannedSessionInfo } from "./session-list-scanner";
+import { normalizeToolCalls } from "./normalize.ts";
+import { withoutMessageSignatures } from "./message-signatures.ts";
+import { getClosedTurnCounts, getThinkingPreview, getTurnAnchors, type TurnAnchorMessage } from "./message-display.ts";
+import { projectIdentityKey } from "./project-identity.ts";
+import { sessionPathKey } from "./session-path.ts";
+import { skillExpansionToCommand } from "./slash-display.ts";
+import { MAX_TOOL_RESULT_IMAGE_BYTES, TOOL_RESULT_IMAGE_MIMES } from "./tool-result-images.ts";
+import { resolveProject, type ProjectInfo } from "./worktree.ts";
+import { readSideRelation } from "./side-session.ts";
+import { readSubagentRun, settleOrphanedSubagentStatus, SUBAGENT_META_TYPE } from "./subagents.ts";
+import { checkSessionMembership, listSessionsIncremental, scanSessionFileInfo, type ScannedSessionInfo } from "./session-list-scanner.ts";
 import { SESSION_ID_PATTERN } from "./session-ui-state-shared";
-import { isRecord } from "./is-record";
+import { isRecord } from "./is-record.ts";
 
 export { getAgentDir };
 

@@ -1,4 +1,4 @@
-import { isRecord } from "./is-record";
+import { isRecord } from "./is-record.ts";
 // Display helpers for pi's `codemode` tool, whose calls carry a JavaScript
 // script and whose results list the tool calls the script made. The shapes
 // mirror the SDK's `CodemodeToolDetails` / `CodemodeNestedCall`, read

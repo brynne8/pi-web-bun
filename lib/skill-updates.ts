@@ -7,7 +7,7 @@ import type {
   SkillInstallInfo,
   SkillUpdateResult,
 } from "@/lib/api-types";
-import { errorMessage } from "./errors";
+import { errorMessage } from "./errors.ts";
 
 const CHECK_TIMEOUT_MS = 15_000;
 const GIT_CHECK_TIMEOUT_MS = 30_000;

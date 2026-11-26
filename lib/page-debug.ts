@@ -3,7 +3,7 @@ import type {
   DebugRunningPoll,
   DebugTrackedEventSource,
   DebugTrackedEventSourceKind,
-} from "./debug-types";
+} from "./debug-types.ts";
 
 /**
  * What this page knows about its own connections, for the debug panel: the EventSources it holds,

@@ -9,15 +9,15 @@ import {
 import {
   SUBAGENT_NOTIFICATION_CUSTOM_TYPE,
   SUBAGENT_NOTIFICATION_PREFIX,
-} from "./subagent-notification";
+} from "./subagent-notification.ts";
 import {
   SUBAGENT_CONTROL_TOOL_NAMES,
   type SubagentListEntry,
   type SubagentProfile,
   type SubagentRunInfo,
-} from "./subagents";
-import { worktreeHasUncommittedFiles } from "./worktree";
-import { shortSessionId } from "./session-short-id";
+} from "./subagents.ts";
+import { worktreeHasUncommittedFiles } from "./worktree.ts";
+import { shortSessionId } from "./session-short-id.ts";
 
 // The guard and its screen-side strip live in the client-safe module, so the chat view can take
 // it off without importing the extension that writes it. Re-exported here because this is where

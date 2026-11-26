@@ -5,30 +5,30 @@ import { getCurrentSystemPrompt } from "@earendil-works/pi-ai";
 import { randomUUID } from "crypto";
 import { existsSync } from "fs";
 import { isDeepStrictEqual } from "util";
-import { validateAgentImages } from "./image-attachments";
-import { writeSessionFileAtomicSync } from "./atomic-file";
-import { EXTENSION_REPORTED_CODE } from "./agent-client";
-import { cwdMissingError } from "./missing-cwd";
-import { invalidateModelsCache } from "./models-cache";
-import { invalidateModelRuntimeWithExtensions } from "./model-runtime";
-import { llamaCppExtension } from "./pi-sdk-internals";
-import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
-import { findDeferredModel, findDeferredStartupModel, rememberProviderModels } from "./deferred-provider-models";
-import { isBlockingExtensionUiRequest } from "./extension-ui-queue";
+import { validateAgentImages } from "./image-attachments.ts";
+import { writeSessionFileAtomicSync } from "./atomic-file.ts";
+import { EXTENSION_REPORTED_CODE } from "./agent-client.ts";
+import { cwdMissingError } from "./missing-cwd.ts";
+import { invalidateModelsCache } from "./models-cache.ts";
+import { invalidateModelRuntimeWithExtensions } from "./model-runtime.ts";
+import { llamaCppExtension } from "./pi-sdk-internals.ts";
+import { resolveVisibleModels, selectInitialModelScope } from "./model-scope.ts";
+import { findDeferredModel, findDeferredStartupModel, rememberProviderModels } from "./deferred-provider-models.ts";
+import { isBlockingExtensionUiRequest } from "./extension-ui-queue.ts";
 import {
   createProjectCommandBashExtension,
   createProjectCommandBashOperations,
   createProjectCommandPowerShellExtension,
   preferUserBashExtension,
   preferUserPowerShellExtension,
-} from "./project-command-env";
-import { cacheSessionPath, catalogFirstMessage, findSessionIdsByShortId, getLatestModelChange, invalidateSessionListCache, invalidateSessionManagerCache, invalidateSessionPathCache, listAllSessions, readLatestSessionEntryId, resolveSessionPath } from "./session-reader";
-import { appendSessionNameSource } from "./session-name-source";
-import { computeLiveSessionTotalActiveMs } from "./session-timing";
-import { realPathOrResolved } from "./paths";
-import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
-import { notifySessionComplete } from "./web-push";
-import { hasActiveSessionLivenessProvider } from "./session-liveness";
+} from "./project-command-env.ts";
+import { cacheSessionPath, catalogFirstMessage, findSessionIdsByShortId, getLatestModelChange, invalidateSessionListCache, invalidateSessionManagerCache, invalidateSessionPathCache, listAllSessions, readLatestSessionEntryId, resolveSessionPath } from "./session-reader.ts";
+import { appendSessionNameSource } from "./session-name-source.ts";
+import { computeLiveSessionTotalActiveMs } from "./session-timing.ts";
+import { realPathOrResolved } from "./paths.ts";
+import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust.ts";
+import { notifySessionComplete } from "./web-push.ts";
+import { hasActiveSessionLivenessProvider } from "./session-liveness.ts";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
 import type {
@@ -40,18 +40,18 @@ import type {
   SessionMessageEntry,
   TextContent,
   SubagentSessionStatus,
-} from "./types";
-import { extensionUiTheme } from "./extension-ui-theme";
-import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS, type HeadlessCustomUiTui } from "./custom-ui-terminal";
-import { createSettledReportSink } from "./settled-report-note";
+} from "./types.ts";
+import { extensionUiTheme } from "./extension-ui-theme.ts";
+import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS, type HeadlessCustomUiTui } from "./custom-ui-terminal.ts";
+import { createSettledReportSink } from "./settled-report-note.ts";
 import type { RailNotificationEvent } from "./background-notifications";
-import { createPendingNotificationsExtension } from "./pending-notifications-extension";
-import { pendingNotificationsFor } from "./pending-notifications";
-import { createGetResultExtension } from "./get-result-extension";
+import { createPendingNotificationsExtension } from "./pending-notifications-extension.ts";
+import { pendingNotificationsFor } from "./pending-notifications.ts";
+import { createGetResultExtension } from "./get-result-extension.ts";
 import {
   createSubagentExtension,
   preferPiWebSubagentExtension,
-} from "./subagent-extension";
+} from "./subagent-extension.ts";
 import {
   listSubagentProfiles,
   hasSubagentResourceSnapshot,
@@ -63,46 +63,46 @@ import {
   subagentExtensionLoaderOptions,
   subagentToolOptions,
   SUBAGENT_CONTROL_TOOL_NAMES,
-} from "./subagents";
-import { hasSideMetadata, hasSideNoToolsNotice, readSideRelation, SIDE_NO_TOOLS_TEXT } from "./side-session";
-import { SIDE_SESSION_NAME, sideChatNameFrom } from "./session-family";
-import { createSubagentController, getLiveSubagentStatus, hasUnsettledSubagentRun, type DirectSubagentPromptRun } from "./subagent-runtime";
-import { isBuiltInSubagentsEnabled } from "./subagent-settings";
-import { isBgTasksEnabled } from "./bg-tasks-settings";
-import { createBgTaskNotifier, hasLiveBgTasks, killBgTasksForSession } from "./bash-bg-tasks";
-import { resolveShellTools } from "./powershell-settings";
-import { withCodemodeDefault } from "./codemode-settings";
-import { withShellDefault } from "./shell-settings";
-import { CHAT_ONLY_RESOURCE_LOADER_OPTIONS, contextFilesSystemPrompt } from "./chat-only";
-import { appendSystemPromptSources } from "./append-system-prompt";
-import { refreshLoaderPromptText, type PromptSourcesLoader } from "./prompt-sources";
-import { createExactSystemPromptExtension } from "./exact-system-prompt";
-import { createPlatformInfoExtension } from "./platform-info";
-import { computeForcedSystemPrompt } from "./effective-system-prompt";
-import { createPiWebBuiltinExtensions, createSubagentCodemodeExtension, createSubagentMcpExtensions } from "./builtin-extensions";
+} from "./subagents.ts";
+import { hasSideMetadata, hasSideNoToolsNotice, readSideRelation, SIDE_NO_TOOLS_TEXT } from "./side-session.ts";
+import { SIDE_SESSION_NAME, sideChatNameFrom } from "./session-family.ts";
+import { createSubagentController, getLiveSubagentStatus, hasUnsettledSubagentRun, type DirectSubagentPromptRun } from "./subagent-runtime.ts";
+import { isBuiltInSubagentsEnabled } from "./subagent-settings.ts";
+import { isBgTasksEnabled } from "./bg-tasks-settings.ts";
+import { createBgTaskNotifier, hasLiveBgTasks, killBgTasksForSession } from "./bash-bg-tasks.ts";
+import { resolveShellTools } from "./powershell-settings.ts";
+import { withCodemodeDefault } from "./codemode-settings.ts";
+import { withShellDefault } from "./shell-settings.ts";
+import { CHAT_ONLY_RESOURCE_LOADER_OPTIONS, contextFilesSystemPrompt } from "./chat-only.ts";
+import { appendSystemPromptSources } from "./append-system-prompt.ts";
+import { refreshLoaderPromptText, type PromptSourcesLoader } from "./prompt-sources.ts";
+import { createExactSystemPromptExtension } from "./exact-system-prompt.ts";
+import { createPlatformInfoExtension } from "./platform-info.ts";
+import { computeForcedSystemPrompt } from "./effective-system-prompt.ts";
+import { createPiWebBuiltinExtensions, createSubagentCodemodeExtension, createSubagentMcpExtensions } from "./builtin-extensions.ts";
 import type { McpHost } from "./mcp-host";
 import type { DebugMcpHost, DebugPendingReport, DebugSessionLifecycle, DebugWrapperSnapshot } from "./debug-types";
-import { mcpPromptPreparation, type McpCommandCandidate } from "./mcp-command";
-import { createReadOnlyMcpPolicyExtension, createSubagentMcpPolicyExtension } from "./mcp-read-only-policy";
-import { createOmitEmptyToolsExtension } from "./omit-empty-tools";
-import { createStrictToolArgsExtension } from "./tool-args-strict";
-import { createBashCommandNormalizeExtension } from "./bash-command-normalize";
-import { createShellFrameCollapseExtension } from "./shell-frame-collapse";
-import { createSubagentCompactionGuardExtension } from "./subagent-compaction-guard";
-import { createSubagentSkillsBinding } from "./subagent-skills";
-import { isNestedToolExecutionEvent, liveToolExecutionEvent, parallelToolCallIds } from "./agent-event-wire";
-import { retryHttp2StreamDrops } from "./retry-http2-stream-drops";
-import { onServerShutdown } from "./server-shutdown";
-import { recordRuntimeDiagnostic } from "./runtime-diagnostics";
-import { collectStartupIssues, extensionErrorMessage, limitStartupNotices, type StartupIssue } from "./startup-issues";
-import { collectLiveAssistantNotices, readShowCacheMissNotices, withSessionPrices } from "./transcript-notices-server";
+import { mcpPromptPreparation, type McpCommandCandidate } from "./mcp-command.ts";
+import { createReadOnlyMcpPolicyExtension, createSubagentMcpPolicyExtension } from "./mcp-read-only-policy.ts";
+import { createOmitEmptyToolsExtension } from "./omit-empty-tools.ts";
+import { createStrictToolArgsExtension } from "./tool-args-strict.ts";
+import { createBashCommandNormalizeExtension } from "./bash-command-normalize.ts";
+import { createShellFrameCollapseExtension } from "./shell-frame-collapse.ts";
+import { createSubagentCompactionGuardExtension } from "./subagent-compaction-guard.ts";
+import { createSubagentSkillsBinding } from "./subagent-skills.ts";
+import { isNestedToolExecutionEvent, liveToolExecutionEvent, parallelToolCallIds } from "./agent-event-wire.ts";
+import { retryHttp2StreamDrops } from "./retry-http2-stream-drops.ts";
+import { onServerShutdown } from "./server-shutdown.ts";
+import { recordRuntimeDiagnostic } from "./runtime-diagnostics.ts";
+import { collectStartupIssues, extensionErrorMessage, limitStartupNotices, type StartupIssue } from "./startup-issues.ts";
+import { collectLiveAssistantNotices, readShowCacheMissNotices, withSessionPrices } from "./transcript-notices-server.ts";
 import {
   appendClearedSessionToolSelection,
   appendSessionToolSelection,
   readSessionToolSelection,
   validateSessionToolSelection,
-} from "./session-tool-selection";
-import { isThinkingLevel } from "./thinking-levels";
+} from "./session-tool-selection.ts";
+import { isThinkingLevel } from "./thinking-levels.ts";
 
 // ============================================================================
 // Types

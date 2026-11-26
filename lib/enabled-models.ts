@@ -27,7 +27,7 @@
  * `lib/enabled-models-runtime.ts`.
  */
 
-import { isThinkingLevel } from "./thinking-levels";
+import { isThinkingLevel } from "./thinking-levels.ts";
 
 /** How one configured pattern resolves against the available models. */
 export interface PatternResolution {

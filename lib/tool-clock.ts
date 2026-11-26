@@ -1,4 +1,4 @@
-import { recordedMs } from "./turn-duration";
+import { recordedMs } from "./turn-duration.ts";
 
 /**
  * The time a tool card shows before its result message arrives, as pi's TUI: `Elapsed` while the

@@ -1,7 +1,7 @@
 import { existsSync, readlinkSync } from "node:fs";
 import { arch, release } from "node:os";
 import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
-import { readRegularFileText } from "./regular-file";
+import { readRegularFileText } from "./regular-file.ts";
 
 const OS_NAMES: Record<string, string> = { darwin: "macOS", linux: "Linux", win32: "Windows" };
 const OS_RELEASE_PATH = "/etc/os-release";

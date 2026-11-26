@@ -1,4 +1,4 @@
-import { getBrowserStorage } from "./browser-storage";
+import { getBrowserStorage } from "./browser-storage.ts";
 
 /**
  * One completion, one chime per browser (#1688). A finished run is heard by

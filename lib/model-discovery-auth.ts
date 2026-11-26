@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { isRecord } from "./is-record";
+import { isRecord } from "./is-record.ts";
 
 export interface ModelDiscoveryAuth {
   apiKey?: string;

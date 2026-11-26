@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { getGlobalSettingsPath, readGlobalSettings, updateGlobalSettings } from "./global-settings-file";
+import { getGlobalSettingsPath, readGlobalSettings, updateGlobalSettings } from "./global-settings-file.ts";
 
 // The `bgTasksEnabled` key of the global settings.json: opt-in switch for the
 // background bash extension. Absent reads as disabled; `true` turns it on.

@@ -1,5 +1,5 @@
-import { getLiveRpcSession } from "./rpc-manager";
-import { readSessionEntry, resolveSessionPath } from "./session-reader";
+import { getLiveRpcSession } from "./rpc-manager.ts";
+import { readSessionEntry, resolveSessionPath } from "./session-reader.ts";
 import type { SessionEntry } from "./types";
 
 /**

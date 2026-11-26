@@ -1,4 +1,4 @@
-import { isRecord } from "./is-record";
+import { isRecord } from "./is-record.ts";
 const SIGNATURE_FIELDS = ["thinkingSignature", "textSignature", "thoughtSignature"] as const;
 
 /** Provider signatures belong to model context, not browser display copies. */

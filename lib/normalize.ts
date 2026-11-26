@@ -1,5 +1,5 @@
 import type { AgentMessage, AssistantMessage, ToolCallContent } from "./types";
-import { isRecord } from "./is-record";
+import { isRecord } from "./is-record.ts";
 
 function streamingRawInput(block: Record<string, unknown>): string | undefined {
   if (typeof block.rawInput === "string") return block.rawInput;

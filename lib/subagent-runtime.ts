@@ -17,7 +17,7 @@ import {
   type StartSubagentRequest,
   type SubagentExecution,
   type SubagentExtensionRuntime,
-} from "./subagent-extension";
+} from "./subagent-extension.ts";
 import {
   readSubagentRun,
   resolveSubagentProfile,
@@ -35,33 +35,33 @@ import {
   type SubagentMetadata,
   type SubagentResultMetadata,
   type SubagentRunInfo,
-} from "./subagents";
+} from "./subagents.ts";
 import type { SessionEntry, SessionInfo } from "./types";
 import type { DebugParentNotification, DebugSubagentRun } from "./debug-types";
-import { buildSubagentPromptPlan } from "./subagent-prompt";
-import { appendSystemPromptSources } from "./append-system-prompt";
-import { createSubagentSkillsBinding } from "./subagent-skills";
-import { getProjectTrustStatus } from "./project-trust";
-import { createSubagentCodemodeExtension, createSubagentMcpExtensions } from "./builtin-extensions";
+import { buildSubagentPromptPlan } from "./subagent-prompt.ts";
+import { appendSystemPromptSources } from "./append-system-prompt.ts";
+import { createSubagentSkillsBinding } from "./subagent-skills.ts";
+import { getProjectTrustStatus } from "./project-trust.ts";
+import { createSubagentCodemodeExtension, createSubagentMcpExtensions } from "./builtin-extensions.ts";
 import type { McpHost } from "./mcp-host";
-import { createSubagentMcpPolicyExtension } from "./mcp-read-only-policy";
-import { createOmitEmptyToolsExtension } from "./omit-empty-tools";
-import { createBashCommandNormalizeExtension } from "./bash-command-normalize";
-import { createShellFrameCollapseExtension } from "./shell-frame-collapse";
-import { createSubagentCompactionGuardExtension } from "./subagent-compaction-guard";
-import { resolveShellTools } from "./powershell-settings";
-import { isBuiltInSubagentsEnabled, readSubagentSettings } from "./subagent-settings";
-import { pendingTitleFrom } from "./pending-notifications";
-import { subagentFetchHint } from "./get-result-tool";
+import { createSubagentMcpPolicyExtension } from "./mcp-read-only-policy.ts";
+import { createOmitEmptyToolsExtension } from "./omit-empty-tools.ts";
+import { createBashCommandNormalizeExtension } from "./bash-command-normalize.ts";
+import { createShellFrameCollapseExtension } from "./shell-frame-collapse.ts";
+import { createSubagentCompactionGuardExtension } from "./subagent-compaction-guard.ts";
+import { resolveShellTools } from "./powershell-settings.ts";
+import { isBuiltInSubagentsEnabled, readSubagentSettings } from "./subagent-settings.ts";
+import { pendingTitleFrom } from "./pending-notifications.ts";
+import { subagentFetchHint } from "./get-result-tool.ts";
 import type { SettledReportHandoff, SettledReportSink } from "./settled-report-note";
-import { SETTLED_REPORTS_CUSTOM_TYPE } from "./settled-report";
-import { SubagentQueue } from "./subagent-queue";
-import { isShortSessionId, shortSessionId } from "./session-short-id";
-import { addWorktree, removeWorktree } from "./worktree";
+import { SETTLED_REPORTS_CUSTOM_TYPE } from "./settled-report.ts";
+import { SubagentQueue } from "./subagent-queue.ts";
+import { isShortSessionId, shortSessionId } from "./session-short-id.ts";
+import { addWorktree, removeWorktree } from "./worktree.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { writeSessionFileAtomicSync } from "./atomic-file";
-import { isThinkingLevel } from "./thinking-levels";
+import { writeSessionFileAtomicSync } from "./atomic-file.ts";
+import { isThinkingLevel } from "./thinking-levels.ts";
 
 interface HostSession {
   readonly inner: AgentSessionLike;

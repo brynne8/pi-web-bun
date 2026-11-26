@@ -29,7 +29,7 @@
  */
 
 import type { SplitDiffCell, SplitDiffFile, SplitDiffRow } from "./patch";
-import { isRecord } from "./is-record";
+import { isRecord } from "./is-record.ts";
 
 export interface ApplyPatchPreviewFile {
   filePath?: string;

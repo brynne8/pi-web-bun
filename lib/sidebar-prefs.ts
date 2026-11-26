@@ -1,4 +1,4 @@
-import { getBrowserStorage } from "./browser-storage";
+import { getBrowserStorage } from "./browser-storage.ts";
 
 /**
  * Per-browser sidebar preferences: the active tab (sessions or files), the

@@ -1,13 +1,13 @@
 import { randomBytes, randomUUID } from "crypto";
 import { existsSync, readFileSync, statSync, writeFileSync } from "fs";
 import { SessionManager, type SessionEntry as PiSessionEntry } from "@earendil-works/pi-coding-agent";
-import { writeSessionFileAtomicSync } from "./atomic-file";
-import { forkSessionName, sessionDisplayTitle } from "./session-fork-name";
-import { scanSessionFileInfo } from "./session-list-scanner";
-import { readSubagentRun } from "./subagents";
-import { SIDE_SESSION_NAME } from "./session-family";
-import { createSessionToolSelectionEntry, readSessionToolSelection } from "./session-tool-selection";
-import { createSideBoundaryEntry, createSideMetadataEntry, readSideRelation } from "./side-session";
+import { writeSessionFileAtomicSync } from "./atomic-file.ts";
+import { forkSessionName, sessionDisplayTitle } from "./session-fork-name.ts";
+import { scanSessionFileInfo } from "./session-list-scanner.ts";
+import { readSubagentRun } from "./subagents.ts";
+import { SIDE_SESSION_NAME } from "./session-family.ts";
+import { createSessionToolSelectionEntry, readSessionToolSelection } from "./session-tool-selection.ts";
+import { createSideBoundaryEntry, createSideMetadataEntry, readSideRelation } from "./side-session.ts";
 import type { SessionEntry } from "./types";
 
 /**

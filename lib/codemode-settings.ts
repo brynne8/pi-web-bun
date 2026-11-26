@@ -6,9 +6,9 @@ import {
   getGlobalSettingsPath,
   readGlobalSettings,
   updateGlobalSettings,
-} from "./global-settings-file";
-import { DEFAULT_SESSION_TOOLS, isToolModifier, resolveDefaultToolEntries } from "./powershell-settings";
-import { PROJECT_SETTINGS_MAX_BYTES, readRegularFileText } from "./regular-file";
+} from "./global-settings-file.ts";
+import { DEFAULT_SESSION_TOOLS, isToolModifier, resolveDefaultToolEntries } from "./powershell-settings.ts";
+import { PROJECT_SETTINGS_MAX_BYTES, readRegularFileText } from "./regular-file.ts";
 
 // Code mode offers one choice (ADR 0006, "Code mode"):
 // - "always", the default: a session starts with `codemode` active. Nothing

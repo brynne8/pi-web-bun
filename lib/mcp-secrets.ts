@@ -1,5 +1,5 @@
-import { isRecord } from "./is-record";
-import { safeDecode } from "./safe-decode";
+import { isRecord } from "./is-record.ts";
+import { safeDecode } from "./safe-decode.ts";
 // Secret classification and masking for MCP server entries (ADR 0006). The
 // Settings panel and the trust dialog show a server's command, arguments and
 // URL to a browser that may be on another machine, and a project's `mcp.json`

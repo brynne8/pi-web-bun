@@ -1,4 +1,4 @@
-import { toSlashPath } from "./paths";
+import { toSlashPath } from "./paths.ts";
 
 // In-memory roots that should be browsable in addition to roots derived from
 // persisted sessions. Stored on globalThis so Next.js hot-reload keeps them.

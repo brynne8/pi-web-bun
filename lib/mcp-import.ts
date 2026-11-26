@@ -1,6 +1,6 @@
 import type { McpServerConfig } from "@earendil-works/pi-coding-agent";
-import { parseJsonc } from "./jsonc";
-import { readCommandLine } from "./mcp-import-cli";
+import { parseJsonc } from "./jsonc.ts";
+import { readCommandLine } from "./mcp-import-cli.ts";
 import {
   configValueEnvVarNames,
   escapeConfigValue,
@@ -19,11 +19,11 @@ import {
   sanitizeServerName,
   suggestFreeName,
   validationProblem,
-} from "./mcp-import-core";
-import { type EntryOutcome, readJsonServers } from "./mcp-import-json";
-import { readLink } from "./mcp-import-links";
-import { AUTHORIZATION_SCHEME, literalSecretFields, maskArgs } from "./mcp-secrets";
-import { splitShellWords, type ShellWordsError } from "./shell-words";
+} from "./mcp-import-core.ts";
+import { type EntryOutcome, readJsonServers } from "./mcp-import-json.ts";
+import { readLink } from "./mcp-import-links.ts";
+import { AUTHORIZATION_SCHEME, literalSecretFields, maskArgs } from "./mcp-secrets.ts";
+import { splitShellWords, type ShellWordsError } from "./shell-words.ts";
 
 /**
  * The paste box of Settings › MCP (ADR 0006): turns a URL, a command line,
@@ -55,9 +55,9 @@ import { splitShellWords, type ShellWordsError } from "./shell-words";
  * - Notes are `{ code, params }`, rendered by the panel through i18n.
  */
 
-export * from "./mcp-import-core";
-export { decodeBase64Utf8 } from "./mcp-import-links";
-import { errorMessage } from "./errors";
+export * from "./mcp-import-core.ts";
+export { decodeBase64Utf8 } from "./mcp-import-links.ts";
+import { errorMessage } from "./errors.ts";
 
 type ReadResult = { entries: EntryOutcome[]; notes: McpImportNote[] } | { error: McpImportNote };
 

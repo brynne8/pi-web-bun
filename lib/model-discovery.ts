@@ -1,4 +1,4 @@
-import { isRecord } from "./is-record";
+import { isRecord } from "./is-record.ts";
 const EFFORT_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
 type EffortLevel = typeof EFFORT_LEVELS[number];
 

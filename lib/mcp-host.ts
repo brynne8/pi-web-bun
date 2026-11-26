@@ -12,10 +12,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { McpHostInactiveInfo, McpScope, McpSessionState, McpSessionStatus } from "./api-types";
 import type { DebugMcpHost } from "./debug-types";
-import { isBuiltinMcpCommand, isMcpExtensionCommand } from "./mcp-command";
-import { canonicalJson, mcpConfigKey, mcpEntryConfigKey } from "./mcp-config-key";
-import { scrubMcpLoadError } from "./mcp-json-error";
-import { isMcpOverrideEntry, mcpOverrideRefusal } from "./mcp-override";
+import { isBuiltinMcpCommand, isMcpExtensionCommand } from "./mcp-command.ts";
+import { canonicalJson, mcpConfigKey, mcpEntryConfigKey } from "./mcp-config-key.ts";
+import { scrubMcpLoadError } from "./mcp-json-error.ts";
+import { isMcpOverrideEntry, mcpOverrideRefusal } from "./mcp-override.ts";
 import {
   forgetMcpHostInactive,
   forgetMcpStatus,
@@ -26,14 +26,14 @@ import {
   recordMcpStatus,
   replaceMcpStatus,
   type McpStatusEntry,
-} from "./mcp-status";
-import { aborted, createTestRedactor, maskStatusError, maskStatusStderr } from "./mcp-test";
-import { hasParentDirectorySegment, isPathWithinRoots, resolveRealRoots } from "./path-security";
+} from "./mcp-status.ts";
+import { aborted, createTestRedactor, maskStatusError, maskStatusStderr } from "./mcp-test.ts";
+import { hasParentDirectorySegment, isPathWithinRoots, resolveRealRoots } from "./path-security.ts";
 import type { McpTransport, PiSdkInternals } from "./pi-sdk-internals";
-import { mayReadProjectConfigNow } from "./project-trust";
-import { cancellableDelay } from "./cancellable-delay";
-import { errorMessage } from "./errors";
-import { isRecord } from "./is-record";
+import { mayReadProjectConfigNow } from "./project-trust.ts";
+import { cancellableDelay } from "./cancellable-delay.ts";
+import { errorMessage } from "./errors.ts";
+import { isRecord } from "./is-record.ts";
 
 export { canonicalJson };
 

@@ -1,7 +1,7 @@
 import { lstatSync } from "fs";
 import path from "path";
-import { isExistingFilePathAllowed, isFilePathAllowed } from "./file-access";
-import { hasParentDirectorySegment } from "./path-security";
+import { isExistingFilePathAllowed, isFilePathAllowed } from "./file-access.ts";
+import { hasParentDirectorySegment } from "./path-security.ts";
 
 /**
  * Authorizes one working-tree path for a Git action — a diff read, a revert —

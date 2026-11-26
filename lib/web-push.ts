@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 import webpush from "web-push";
-import { writePrivateFileAtomicSync } from "./atomic-file";
-import { enLocale } from "./i18n/messages/en";
-import { getLocalePlugin } from "./i18n/registry";
-import { getAgentDir } from "./session-reader";
+import { writePrivateFileAtomicSync } from "./atomic-file.ts";
+import { enLocale } from "./i18n/messages/en.ts";
+import { getLocalePlugin } from "./i18n/registry.ts";
+import { getAgentDir } from "./session-reader.ts";
 
 export interface PushSubscriptionRecord {
   endpoint: string;

@@ -1,4 +1,4 @@
-import { errorMessage } from "./errors";
+import { errorMessage } from "./errors.ts";
 // What `JSON.parse` said about an `mcp.json`, without the source text it
 // quotes. Settings › MCP shows a file's parse error (`lib/mcp-config-read.ts`),
 // the writer refuses with it (`lib/mcp-config-file.ts`), and the MCP host logs

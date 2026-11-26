@@ -32,9 +32,9 @@ import fs from "fs";
 import type { Dirent } from "fs";
 import { dirname, join } from "path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { writeSessionFileAtomicSync } from "./atomic-file";
-import { deleteBgLogsForSession } from "./bash-bg-tasks";
-import { abortSubagent, getRpcSession, getRpcSessionInfos, getRunningRpcSessionIds } from "./rpc-manager";
+import { writeSessionFileAtomicSync } from "./atomic-file.ts";
+import { deleteBgLogsForSession } from "./bash-bg-tasks.ts";
+import { abortSubagent, getRpcSession, getRpcSessionInfos, getRunningRpcSessionIds } from "./rpc-manager.ts";
 import {
   invalidateSessionListCache,
   invalidateSessionManagerCache,
@@ -43,11 +43,11 @@ import {
   mergeSessionLists,
   readSessionHeader,
   resolveSessionPath,
-} from "./session-reader";
-import { sessionPathKey } from "./session-path";
-import { forgetSessionUiState } from "./session-ui-state";
-import { readSubagentRun, SUBAGENT_META_TYPE } from "./subagents";
-import { readSideRelation } from "./side-session";
+} from "./session-reader.ts";
+import { sessionPathKey } from "./session-path.ts";
+import { forgetSessionUiState } from "./session-ui-state.ts";
+import { readSubagentRun, SUBAGENT_META_TYPE } from "./subagents.ts";
+import { readSideRelation } from "./side-session.ts";
 import type { SessionEntry, SessionHeader } from "./types";
 import { errorMessage } from "./errors.ts";
 

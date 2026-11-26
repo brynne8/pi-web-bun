@@ -1,5 +1,5 @@
 import type { CodemodeInfo, CodemodeSandboxStatus } from "./api-types";
-import { peekCodemodeSandbox, type BuiltinExtensionSwitch } from "./builtin-extensions";
+import { peekCodemodeSandbox, type BuiltinExtensionSwitch } from "./builtin-extensions.ts";
 import {
   CODEMODE_INLINE_BUDGET_DEFAULT,
   CODEMODE_INLINE_BUDGET_MAX,
@@ -8,8 +8,8 @@ import {
   readProjectCodemodeInlineBudget,
   readProjectCodemodeMode,
   readProjectCodemodeOverride,
-} from "./codemode-settings";
-import { getGlobalSettingsPath } from "./global-settings-file";
+} from "./codemode-settings.ts";
+import { getGlobalSettingsPath } from "./global-settings-file.ts";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

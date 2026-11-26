@@ -5,7 +5,7 @@ import {
   type ScopedModel,
 } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { isThinkingLevel } from "./thinking-levels";
+import { isThinkingLevel } from "./thinking-levels.ts";
 
 /**
  * Model scoping shared by the UI selector and AgentSession startup.
