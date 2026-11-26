@@ -86,6 +86,7 @@ import { createReadOnlyMcpPolicyExtension, createSubagentMcpPolicyExtension } fr
 import { createOmitEmptyToolsExtension } from "./omit-empty-tools";
 import { createStrictToolArgsExtension } from "./tool-args-strict";
 import { createBashCommandNormalizeExtension } from "./bash-command-normalize";
+import { createShellFrameCollapseExtension } from "./shell-frame-collapse";
 import { createSubagentCompactionGuardExtension } from "./subagent-compaction-guard";
 import { createSubagentSkillsBinding } from "./subagent-skills";
 import { isNestedToolExecutionEvent, liveToolExecutionEvent, parallelToolCallIds } from "./agent-event-wire";
@@ -3983,10 +3984,13 @@ export async function startRpcSession(
       // A chat-only subagent has no shell tool and loads nothing.
       ...(chatOnly
         ? []
-        : [createBashCommandNormalizeExtension({
-            cwd: sessionCwd,
-            caseInsensitivePaths: process.platform === "win32",
-          })]),
+        : [
+            createBashCommandNormalizeExtension({
+              cwd: sessionCwd,
+              caseInsensitivePaths: process.platform === "win32",
+            }),
+            createShellFrameCollapseExtension(),
+          ]),
       ...(subagentCodemode ? [subagentCodemode] : []),
       ...(subagentMcp && subagentResources
         ? [...subagentMcp.extensions, createSubagentMcpPolicyExtension(() => subagentResources)]
@@ -4039,6 +4043,7 @@ export async function startRpcSession(
                 cwd: sessionCwd,
                 caseInsensitivePaths: process.platform === "win32",
               }),
+              createShellFrameCollapseExtension(),
               createPendingNotificationsExtension({
                 hasLiveBackgroundWork: (sessionId) =>
                   hasLiveBgTasks(sessionId) || hasUnsettledSubagentRun(sessionId),

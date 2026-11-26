@@ -7,7 +7,6 @@ import {
   createLocalPowerShellOperations,
   createPowerShellToolDefinition,
   getAgentDir,
-  type AgentToolResult,
   type BashOperations,
   type InlineExtension,
   type LoadExtensionsResult,
@@ -71,17 +70,6 @@ type ProjectCommandBashOperationsOptions = {
 };
 
 type BashExecResult = Awaited<ReturnType<BashOperations["exec"]>>;
-
-/**
- * The screen the command left rather than every frame it drew: an animated command repaints one
- * row, and the bytes of all those frames are tokens the model reads for nothing.
- */
-export function withoutRedrawnFrames<T>(result: AgentToolResult<T>): AgentToolResult<T> {
-  return {
-    ...result,
-    content: result.content.map((block) => (block.type === "text" ? { ...block, text: collapseTerminalOverwrites(block.text) } : block)),
-  };
-}
 
 function withAgentBinDirectory(
   environment: NodeJS.ProcessEnv,
@@ -382,7 +370,7 @@ export function createProjectCommandBashExtension(options: {
             }),
           });
           try {
-            return withoutRedrawnFrames(await executionDefinition.execute(toolCallId, params, signal, onUpdate, context));
+            return await executionDefinition.execute(toolCallId, params, signal, onUpdate, context);
           } catch (error) {
             if (error instanceof Error && error.message.startsWith("bg-task-backgrounded:")) {
               return {
@@ -484,13 +472,13 @@ export function createProjectCommandPowerShellExtension(options: { cwd: string }
         ...createPowerShellToolDefinition(options.cwd),
         // Active only when named (`defaultTools`, the PowerShell switch, a preset), as pi's own is (#1235).
         defaultActive: false,
-        async execute(toolCallId, params, signal, onUpdate, context) {
+        execute(toolCallId, params, signal, onUpdate, context) {
           const executionDefinition = createPowerShellToolDefinition(options.cwd, {
             operations: createProjectCommandBashOperations({
               localOperations: createLocalPowerShellOperations(),
             }),
           });
-          return withoutRedrawnFrames(await executionDefinition.execute(toolCallId, params, signal, onUpdate, context));
+          return executionDefinition.execute(toolCallId, params, signal, onUpdate, context);
         },
       });
     },
