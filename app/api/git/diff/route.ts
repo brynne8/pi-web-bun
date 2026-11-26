@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "vinext/shims/server";
 import { getAllowedFileRoots, isExistingFilePathAllowed, isFilePathAllowed, isWindowsAbsolutePath } from "@/lib/file-access";
 import { getGitFileDiff } from "@/lib/git-changes";
 import { isGitWorkingPathAllowed } from "@/lib/git-path-access";
+import { errorMessage } from "@/lib/errors";
 
 export async function GET(request: NextRequest) {
   try {
@@ -26,6 +27,6 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(await getGitFileDiff(cwd, filePath));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }

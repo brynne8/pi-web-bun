@@ -37,6 +37,7 @@ import { registerFileWatch } from "@/lib/file-watch-registry";
 import { FILE_WATCH_HEARTBEAT_MS } from "@/lib/file-version";
 import { pageStreamLabel, registerPageStream } from "@/lib/page-stream-registry";
 import { contentDisposition } from "@/lib/content-disposition";
+import { errorMessage } from "@/lib/errors";
 
 const FILE_REQUEST_TYPES = ["list", "read", "download", "meta", "preview", "watch"] as const;
 type FileRequestType = typeof FILE_REQUEST_TYPES[number];
@@ -206,7 +207,7 @@ export async function POST(
       try {
         bytes = Buffer.from(await file.arrayBuffer());
       } catch (error) {
-        errors.push({ name: file.name, error: error instanceof Error ? error.message : String(error) });
+        errors.push({ name: file.name, error: errorMessage(error) });
         continue;
       }
 
@@ -220,7 +221,7 @@ export async function POST(
         }
         uploaded.push(file.name);
       } catch (error) {
-        errors.push({ name: file.name, error: error instanceof Error ? error.message : String(error) });
+        errors.push({ name: file.name, error: errorMessage(error) });
       }
     }
 
@@ -229,7 +230,7 @@ export async function POST(
       { status: errors.length > 0 ? 207 : 200 },
     );
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
   }
 }
 

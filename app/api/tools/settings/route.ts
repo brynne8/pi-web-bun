@@ -1,6 +1,6 @@
 import { NextResponse } from "vinext/shims/server";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { CodemodeInfo, McpErrorResponse, McpRefusalReason, ToolSettingsResponse } from "@/lib/api-types";
+import type { CodemodeInfo, ToolSettingsResponse } from "@/lib/api-types";
 import {
   CODEMODE_INLINE_BUDGET_MAX,
   isCodemodeInlineBudget,
@@ -14,7 +14,7 @@ import { readCodemodeInfo } from "@/lib/codemode-info";
 import { readBuiltinExtensionSwitches, type BuiltinExtensionSwitch } from "@/lib/builtin-extensions";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { readBgTasksEnabled, writeBgTasksEnabled } from "@/lib/bg-tasks-settings";
-import { isMcpEntryRefusal, validateMcpProject } from "@/lib/mcp-entry-request";
+import { isMcpEntryRefusal, mcpRefusalResponse, validateMcpProject } from "@/lib/mcp-entry-request";
 import {
   readBuiltinTools,
   readPowerShellToolEnabled,
@@ -23,6 +23,7 @@ import {
 } from "@/lib/powershell-settings";
 import { getProjectTrustStatus } from "@/lib/project-trust";
 import { SETTINGS_BUILTIN_TOOLS } from "@/lib/tool-presets";
+import { errorMessage } from "@/lib/errors";
 
 export const dynamic = "force-dynamic";
 
@@ -39,12 +40,8 @@ export const dynamic = "force-dynamic";
 
 const CHANGES = ["enabled", "builtinTools", "codemode", "codemodeMode", "codemodeInlineBudget", "bgTasksEnabled"] as const;
 
-function refusal(status: number, reason: McpRefusalReason, error: string) {
-  return NextResponse.json({ error, reason } satisfies McpErrorResponse, { status });
-}
-
 function errorResponse(error: unknown) {
-  return refusal(500, "internal", error instanceof Error ? error.message : String(error));
+  return mcpRefusalResponse(500, "internal", errorMessage(error));
 }
 
 /** Whether sessions in `cwd` load its `.pi/settings.json`; an unreadable trust store trusts nothing. */
@@ -104,24 +101,24 @@ export async function GET(req: Request) {
 
 export async function PUT(req: Request) {
   if (!isApiRequestAllowed(req)) {
-    return refusal(403, "request-denied", "Untrusted API request");
+    return mcpRefusalResponse(403, "request-denied", "Untrusted API request");
   }
   if (!hasJsonContentType(req)) {
-    return refusal(415, "content-type", "Content-Type must be application/json");
+    return mcpRefusalResponse(415, "content-type", "Content-Type must be application/json");
   }
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return refusal(400, "invalid-request", "Invalid JSON body");
+    return mcpRefusalResponse(400, "invalid-request", "Invalid JSON body");
   }
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    return refusal(400, "invalid-request", "Expected a JSON object");
+    return mcpRefusalResponse(400, "invalid-request", "Expected a JSON object");
   }
   const changes = body as { enabled?: unknown; builtinTools?: unknown; codemode?: unknown; codemodeMode?: unknown; codemodeInlineBudget?: unknown; bgTasksEnabled?: unknown };
   if (CHANGES.filter((key) => key in changes).length !== 1) {
-    return refusal(400, "invalid-request", "Send one of enabled (PowerShell), builtinTools, codemode, codemodeMode, codemodeInlineBudget or bgTasksEnabled");
+    return mcpRefusalResponse(400, "invalid-request", "Send one of enabled (PowerShell), builtinTools, codemode, codemodeMode, codemodeInlineBudget or bgTasksEnabled");
   }
 
   let cwd: string | undefined;
@@ -135,7 +132,7 @@ export async function PUT(req: Request) {
 
   if ("bgTasksEnabled" in changes) {
     if (typeof changes.bgTasksEnabled !== "boolean") {
-      return refusal(400, "invalid-request", "bgTasksEnabled must be a boolean");
+      return mcpRefusalResponse(400, "invalid-request", "bgTasksEnabled must be a boolean");
     }
     try {
       await writeBgTasksEnabled(changes.bgTasksEnabled);
@@ -149,7 +146,7 @@ export async function PUT(req: Request) {
     // The built-in tools new sessions start with; every other defaultTools entry is kept.
     const tools = changes.builtinTools;
     if (!Array.isArray(tools) || !tools.every((name) => SETTINGS_BUILTIN_TOOLS.includes(name as never))) {
-      return refusal(400, "invalid-request", `builtinTools must list names from ${SETTINGS_BUILTIN_TOOLS.join(", ")}`);
+      return mcpRefusalResponse(400, "invalid-request", `builtinTools must list names from ${SETTINGS_BUILTIN_TOOLS.join(", ")}`);
     }
     try {
       await writeBuiltinTools(tools as string[]);
@@ -162,7 +159,7 @@ export async function PUT(req: Request) {
   if ("codemodeMode" in changes) {
     // "on" removes the key: it is pi's default.
     if (!isCodemodeMode(changes.codemodeMode)) {
-      return refusal(400, "invalid-request", "codemodeMode must be \"on\" or \"only\"");
+      return mcpRefusalResponse(400, "invalid-request", "codemodeMode must be \"on\" or \"only\"");
     }
     try {
       await writeCodemodeMode(changes.codemodeMode);
@@ -176,7 +173,7 @@ export async function PUT(req: Request) {
     // null removes the key, which gives sessions pi's default.
     const budget = changes.codemodeInlineBudget;
     if (budget !== null && !isCodemodeInlineBudget(budget)) {
-      return refusal(400, "invalid-request", `codemodeInlineBudget must be a whole number from 0 to ${CODEMODE_INLINE_BUDGET_MAX}, or null`);
+      return mcpRefusalResponse(400, "invalid-request", `codemodeInlineBudget must be a whole number from 0 to ${CODEMODE_INLINE_BUDGET_MAX}, or null`);
     }
     try {
       await writeCodemodeInlineBudget(budget ?? undefined);
@@ -188,7 +185,7 @@ export async function PUT(req: Request) {
 
   if ("codemode" in changes) {
     if (!isCodemodePreference(changes.codemode)) {
-      return refusal(400, "invalid-request", "codemode must be \"automatic\" or \"always\"");
+      return mcpRefusalResponse(400, "invalid-request", "codemode must be \"automatic\" or \"always\"");
     }
     try {
       await writeCodemodePreference(changes.codemode);
@@ -199,10 +196,10 @@ export async function PUT(req: Request) {
   }
 
   if (process.platform !== "win32") {
-    return refusal(404, "invalid-request", "PowerShell tool settings are only available on Windows");
+    return mcpRefusalResponse(404, "invalid-request", "PowerShell tool settings are only available on Windows");
   }
   if (typeof changes.enabled !== "boolean") {
-    return refusal(400, "invalid-request", "enabled must be a boolean");
+    return mcpRefusalResponse(400, "invalid-request", "enabled must be a boolean");
   }
   try {
     await writePowerShellToolEnabled(changes.enabled);

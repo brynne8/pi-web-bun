@@ -3,6 +3,7 @@
 import { forwardRef, memo, useState, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef } from "react";
 import type { MouseEvent as ReactMouseEvent, RefObject } from "react";
 import { getFileIcon, FolderIcon } from "./FileIcons";
+import { MentionIcon } from "./SidebarIcons";
 import { DismissButton } from "./DismissButton";
 import {
   encodeFilePathForApi,
@@ -31,8 +32,10 @@ import {
   type FileTreeNode,
   type FlatTreeRow,
 } from "@/lib/file-tree-rows";
-type Translate = ReturnType<typeof useI18n>["t"];
+import type { Translate } from "@/lib/i18n/types";
+import { errorMessage } from "@/lib/errors";
 
+/** Why a listed entry is normally left out; only listings with `hidden=1` report it. */
 type HiddenReason = Exclude<FileTreeHiddenReason, "always">;
 type FileNode = FileTreeNode;
 
@@ -275,15 +278,6 @@ function GitStatusBadge({ status, t }: { status: GitFileStatus; t: Translate }) 
     >
       {status.code}
     </span>
-  );
-}
-
-function MentionIcon({ size = 11 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="4" />
-      <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" />
-    </svg>
   );
 }
 
@@ -980,7 +974,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         return next;
       });
     } catch (loadError) {
-      const message = loadError instanceof Error ? loadError.message : String(loadError);
+      const message = errorMessage(loadError);
       setDirLoads((prev) => {
         // A folder listed ahead of its parent (the restored tree) that is gone
         // has no row to report to: forget the attempt, so nothing is stuck on
@@ -1034,7 +1028,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     } catch (allowError) {
       setLinkErrors((prev) => {
         const next = new Map(prev);
-        next.set(fullPath, allowError instanceof Error ? allowError.message : String(allowError));
+        next.set(fullPath, errorMessage(allowError));
         return next;
       });
     }
@@ -1262,7 +1256,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       setUploadProgress(100);
       applyUploadResult(data, directory);
     } catch (uploadFailure) {
-      setUploadError(uploadFailure instanceof Error ? uploadFailure.message : String(uploadFailure));
+      setUploadError(errorMessage(uploadFailure));
     } finally {
       setUploadPhase("idle");
     }
@@ -1301,7 +1295,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
 
       await performUpload(files, "error", directory);
     } catch (uploadFailure) {
-      setUploadError(uploadFailure instanceof Error ? uploadFailure.message : String(uploadFailure));
+      setUploadError(errorMessage(uploadFailure));
     } finally {
       setUploadPhase("idle");
     }
@@ -1445,7 +1439,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     if (ahead.length > 0) void prefetchFolders(ahead, loadDir);
     fetchEntries(cwd, showHidden)
       .then((entries) => { if (!cancelled) setRoots(entries); })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
+      .catch((e) => { if (!cancelled) setError(errorMessage(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [cwd, refreshKey, treeRefreshKey, showHidden, treeVisible, loadDir]);

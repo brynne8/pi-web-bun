@@ -3,8 +3,7 @@ import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { getCurrentSystemPrompt } from "@earendil-works/pi-ai";
 import { randomUUID } from "crypto";
-import { existsSync, realpathSync } from "fs";
-import { resolve } from "path";
+import { existsSync } from "fs";
 import { isDeepStrictEqual } from "util";
 import { validateAgentImages } from "./image-attachments";
 import { writeSessionFileAtomicSync } from "./atomic-file";
@@ -26,6 +25,7 @@ import {
 import { cacheSessionPath, catalogFirstMessage, findSessionIdsByShortId, getLatestModelChange, invalidateSessionListCache, invalidateSessionManagerCache, invalidateSessionPathCache, listAllSessions, readLatestSessionEntryId, resolveSessionPath } from "./session-reader";
 import { appendSessionNameSource } from "./session-name-source";
 import { computeLiveSessionTotalActiveMs } from "./session-timing";
+import { realPathOrResolved } from "./paths";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
 import { notifySessionComplete } from "./web-push";
 import { hasActiveSessionLivenessProvider } from "./session-liveness";
@@ -58,6 +58,7 @@ import {
   readSubagentRun,
   readSubagentSessionResources,
   settleOrphanedSubagentStatus,
+  configuredPackageRoots,
   subagentContextFilesOverride,
   subagentExtensionLoaderOptions,
   subagentToolOptions,
@@ -101,6 +102,7 @@ import {
   readSessionToolSelection,
   validateSessionToolSelection,
 } from "./session-tool-selection";
+import { isThinkingLevel } from "./thinking-levels";
 
 // ============================================================================
 // Types
@@ -331,7 +333,6 @@ export interface RpcSessionStartOptions {
 }
 
 const CODING_TOOL_NAMES = ["read", "bash", "powershell", "edit", "write", "grep", "find", "ls"];
-const THINKING_LEVEL_NAMES = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 // The SDK's DEFAULT_THINKING_LEVEL (dist/core/defaults.js), which it does not export.
 const SDK_DEFAULT_THINKING_LEVEL: ThinkingLevel = "medium";
 
@@ -3389,15 +3390,6 @@ function closingRpcSessionWait(sessionId: string): Promise<void> | null {
   return wait.done ? null : wait.promise;
 }
 
-function normalizeRpcCwd(cwd: string): string {
-  const resolvedCwd = resolve(cwd);
-  try {
-    return realpathSync(resolvedCwd);
-  } catch {
-    return resolvedCwd;
-  }
-}
-
 function getStartingSessionCwds(): Map<string, number> {
   if (!globalThis.__piStartingSessionCwds) globalThis.__piStartingSessionCwds = new Map();
   return globalThis.__piStartingSessionCwds;
@@ -3405,7 +3397,7 @@ function getStartingSessionCwds(): Map<string, number> {
 
 function trackStartingSession(cwd: string): () => void {
   const startingCwds = getStartingSessionCwds();
-  const key = normalizeRpcCwd(cwd);
+  const key = realPathOrResolved(cwd);
   startingCwds.set(key, (startingCwds.get(key) ?? 0) + 1);
   return () => {
     const remaining = (startingCwds.get(key) ?? 1) - 1;
@@ -3416,6 +3408,36 @@ function trackStartingSession(cwd: string): () => void {
 
 export function getRpcSession(sessionId: string): AgentSessionWrapper | undefined {
   return getRegistry().get(sessionId);
+}
+
+/**
+ * The session's wrapper while it is alive, for reads that should come from its in-memory
+ * `SessionManager` rather than the file. A closing wrapper is left out: its replacement may
+ * already be reading the file.
+ */
+export function getLiveRpcSession(sessionId: string): AgentSessionWrapper | undefined {
+  const rpc = getRpcSession(sessionId);
+  return rpc?.isAlive() ? rpc : undefined;
+}
+
+/**
+ * Settings › General changed pi's global `steeringMode` or `followUpMode`: each open
+ * session takes the values its own settings resolve now (a project's .pi/settings.json
+ * still wins), as pi's TUI applies its /settings choice to the running session at once.
+ * Queued messages stay queued; they go out by the new mode.
+ */
+export async function applyQueueModesToLiveSessions(): Promise<void> {
+  await Promise.all(Array.from(getRegistry().values(), async (wrapper) => {
+    if (!wrapper.isAlive()) return;
+    const { settingsManager, agent } = wrapper.inner;
+    try {
+      await settingsManager.reload();
+      agent.steeringMode = settingsManager.getSteeringMode();
+      agent.followUpMode = settingsManager.getFollowUpMode();
+    } catch {
+      // Unreadable settings keep this session's mode until it reloads.
+    }
+  }));
 }
 
 /**
@@ -3540,8 +3562,8 @@ export async function setRpcSessionTools(
     ...(toolNames !== undefined ? { toolNames } : {}),
     ...(model ? { initialModel: { provider: model.provider, modelId: model.id } } : {}),
     allowInitialModelFallback: true,
-    ...(currentThinkingLevel && THINKING_LEVEL_NAMES.has(currentThinkingLevel as ThinkingLevel)
-      ? { thinkingLevel: currentThinkingLevel as ThinkingLevel }
+    ...(isThinkingLevel(currentThinkingLevel)
+      ? { thinkingLevel: currentThinkingLevel }
       : {}),
   });
   return { session: started.session, sessionId: started.realSessionId, recreated: true };
@@ -3654,17 +3676,17 @@ export function getRpcSessionInfos(options: { includeTransient?: boolean } = {})
 }
 
 export function hasBusyRpcSessionForCwd(cwd: string): boolean {
-  const targetCwd = normalizeRpcCwd(cwd);
+  const targetCwd = realPathOrResolved(cwd);
   if (getStartingSessionCwds().has(targetCwd)) return true;
   return Array.from(getRegistry().values()).some(
-    (session) => normalizeRpcCwd(session.cwd) === targetCwd && session.isRunning(),
+    (session) => realPathOrResolved(session.cwd) === targetCwd && session.isRunning(),
   );
 }
 
 export async function destroyRpcSessionsForCwd(cwd: string): Promise<number> {
-  const targetCwd = normalizeRpcCwd(cwd);
+  const targetCwd = realPathOrResolved(cwd);
   const sessions = Array.from(getRegistry().values()).filter(
-    (session) => normalizeRpcCwd(session.cwd) === targetCwd,
+    (session) => realPathOrResolved(session.cwd) === targetCwd,
   );
   await Promise.all(sessions.map((session) => session.shutdown()));
   return sessions.length;
@@ -4003,7 +4025,7 @@ export async function startRpcSession(
       settingsManager,
       resourceLoaderOptions: subagentResources
         ? {
-            ...subagentExtensionLoaderOptions(subagentResources),
+            ...subagentExtensionLoaderOptions(subagentResources, configuredPackageRoots(sessionCwd, agentDir, settingsManager)),
             ...skillsBinding!.loaderOptions,
             extensionFactories: subagentExtensionFactories,
             noPromptTemplates: true,

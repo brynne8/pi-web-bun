@@ -1,19 +1,11 @@
 import { CONFIGURED_TOOL_PRESET, isToolPreset, type ToolPreset } from "./tool-presets.ts";
+import { getBrowserStorage } from "./browser-storage.ts";
 
 const STORAGE_KEY = "pi-tool-preset";
 
 interface StorageLike {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
-}
-
-function getBrowserStorage(): StorageLike | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
 }
 
 /**

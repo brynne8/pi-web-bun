@@ -5,7 +5,7 @@
 // bottom). `lib/dlp-realpath-compat.ts` holds the driver story and what its one
 // start-up log line means.
 import { reportRealpathCoverage } from "@/lib/dlp-realpath-compat";
-import { configureHttpDispatcher, readHttpIdleTimeoutMs } from "@/lib/http-dispatcher";
+import { configureHttpDispatcherFromSettings } from "@/lib/http-dispatcher";
 import { closeAllAgentEventStreams } from "@/lib/agent-event-stream";
 import { onServerShutdown, subscribeShutdownOutcome } from "@/lib/server-shutdown";
 import { pruneBgLogs } from "@/lib/bash-bg-tasks";
@@ -29,7 +29,7 @@ export function registerNodeInstrumentation(): void {
   // body/header timeouts, so a Web UI session gets the timeout the user
   // configured. Without it the built-in five minutes aborts a provider stream
   // that stays quiet for longer, which a CLI session tolerates.
-  configureHttpDispatcher(readHttpIdleTimeoutMs());
+  configureHttpDispatcherFromSettings();
 
   // Closing the streams is what lets a shutdown finish at all: an SSE response
   // only ends when the client disconnects, so an open one would hold the process

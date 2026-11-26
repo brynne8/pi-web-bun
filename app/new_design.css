@@ -368,18 +368,6 @@ div:has(> div:first-child > div > button[style*="border-top: 2px solid transpare
   background: linear-gradient(90deg, transparent, var(--nd-hairline) 14%, var(--nd-hairline) 86%, transparent);
 }
 
-/* The transcript's rows are a flex column, so a row's children cannot hand their
-   margins to the neighbour below and two rows cannot share one collapsed margin: each row
-   is its own formatting context and its own margins are its own. A row's box plus its own
-   margins is then exactly the room it takes in the flow, which is what lets a row off
-   screen be held by a placeholder of that size (hooks/useSkipOffscreenRows.ts) — with the
-   margins collapsing between rows, folding a row changed the document's height and the
-   transcript jumped under the reader. */
-.chat-rows {
-  display: flex;
-  flex-direction: column;
-}
-
 .chat-content {
   overflow: hidden;
   border: 0;

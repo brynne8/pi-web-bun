@@ -7,7 +7,7 @@ import {
   readGlobalSettings,
   updateGlobalSettings,
 } from "./global-settings-file";
-import { DEFAULT_SESSION_TOOLS, resolveDefaultToolEntries } from "./powershell-settings";
+import { DEFAULT_SESSION_TOOLS, isToolModifier, resolveDefaultToolEntries } from "./powershell-settings";
 import { PROJECT_SETTINGS_MAX_BYTES, readRegularFileText } from "./regular-file";
 
 // Code mode offers one choice (ADR 0006, "Code mode"):
@@ -30,10 +30,6 @@ const CODEMODE = "codemode";
 
 export function isCodemodePreference(value: unknown): value is CodemodePreference {
   return typeof value === "string" && (CODEMODE_PREFERENCES as readonly string[]).includes(value);
-}
-
-function isToolModifier(entry: string): boolean {
-  return entry.startsWith("+") || entry.startsWith("-");
 }
 
 function namesCodemode(entry: string): boolean {

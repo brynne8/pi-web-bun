@@ -8,7 +8,15 @@ import { readRegularFileText } from "./regular-file.ts";
 export const DEFAULT_HTTP_IDLE_TIMEOUT_MS = 300_000;
 
 type DispatcherGlobal = typeof globalThis & {
-  __piWebHttpDispatcherConfigured?: boolean;
+  __piWebHttpDispatcher?: {
+    /** Absent under Bun, where no dispatcher serves the fetches. */
+    dispatcher?: undici.EnvHttpProxyAgent;
+    timeoutMs: number;
+    httpProxy?: string;
+    httpsProxy?: string;
+  };
+  /** The proxy variables this process wrote for Bun's fetch, so clearing the setting takes them back out. */
+  __piWebHttpProxyEnvironment?: Record<string, string>;
 };
 
 const dispatcherGlobal = globalThis as DispatcherGlobal;
@@ -26,6 +34,24 @@ function parseHttpIdleTimeoutMs(value: unknown): number | undefined {
     return undefined;
   }
   return Math.floor(value);
+}
+
+export function parseHttpProxy(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  try {
+    const url = new URL(value);
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      // Undici's HTTP proxy client takes an origin.
+      if (url.pathname !== "/" || url.search || url.hash) return undefined;
+    } else if ((url.protocol !== "socks5:" && url.protocol !== "socks:") || !url.hostname) {
+      return undefined;
+    }
+    decodeURIComponent(url.username);
+    decodeURIComponent(url.password);
+    return value.trim();
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -65,6 +91,17 @@ function windowsShellPath(path: string): string {
   return `${match[1].toUpperCase()}:\\${match[2]?.replaceAll("/", "\\") ?? ""}`;
 }
 
+function readSettingsFile(agentDir: string): Record<string, unknown> {
+  try {
+    const text = readRegularFileText(join(agentDir, "settings.json"));
+    if (!text) return {};
+    const settings = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+    return settings && typeof settings === "object" ? settings : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * The global `httpIdleTimeoutMs`, read the way the pi CLI reads it, so a Web UI
  * session gets the HTTP idle timeout the user configured instead of the
@@ -77,23 +114,7 @@ function windowsShellPath(path: string): string {
  * default in place.
  */
 export function readHttpIdleTimeoutMs(agentDir: string = defaultAgentDir()): number | undefined {
-  let text: string | undefined;
-  try {
-    text = readRegularFileText(join(agentDir, "settings.json"));
-  } catch {
-    return undefined;
-  }
-  if (text === undefined) return undefined;
-
-  let settings: unknown;
-  try {
-    settings = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
-  } catch {
-    return undefined;
-  }
-  if (typeof settings !== "object" || settings === null) return undefined;
-
-  return parseHttpIdleTimeoutMs((settings as { httpIdleTimeoutMs?: unknown }).httpIdleTimeoutMs);
+  return parseHttpIdleTimeoutMs(readSettingsFile(agentDir).httpIdleTimeoutMs);
 }
 
 // Undici can emit an internal Client error while terminating a response body.
@@ -126,29 +147,103 @@ function createUndiciOriginDispatcher(origin: string | URL, options: object): un
   );
 }
 
+export function configureHttpDispatcherFromSettings(agentDir: string = defaultAgentDir()): void {
+  const settings = readSettingsFile(agentDir);
+  configureHttpDispatcher(
+    parseHttpIdleTimeoutMs(settings.httpIdleTimeoutMs),
+    parseHttpProxy(settings.httpProxy),
+  );
+}
+
 export function configureHttpDispatcher(
   timeoutMs: number = DEFAULT_HTTP_IDLE_TIMEOUT_MS,
+  proxyUrl?: string,
 ): void {
-  if (dispatcherGlobal.__piWebHttpDispatcherConfigured) return;
+  if (dispatcherGlobal.__piWebHttpDispatcher) return;
 
   const normalizedTimeoutMs = parseHttpIdleTimeoutMs(timeoutMs);
   if (normalizedTimeoutMs === undefined) {
     throw new Error(`Invalid HTTP idle timeout: ${String(timeoutMs)}`);
   }
+  installHttpDispatcher(normalizedTimeoutMs, proxyUrl);
+}
 
-  // Bun's fetch is Bun's own HTTP client. It reads HTTP_PROXY / HTTPS_PROXY / NO_PROXY from
-  // the environment itself and never consults an undici dispatcher, and the `undici` its
-  // module loader hands out exposes no `install` (jiti's CJS interop finds it on Node, Bun's
-  // named-export resolution does not), so there is no way even to point global fetch at one
-  // from here. The proxy env is already honoured, from the values the process started with;
-  // making the no-op explicit beats installing a dispatcher that nothing would read.
+/** A replacement dispatcher inherits the timeout chosen at startup. */
+export function setHttpProxy(proxyUrl: string | undefined): void {
+  const proxy = parseHttpProxy(proxyUrl);
+  if (proxy === undefined && proxyUrl?.trim()) throw new Error("Invalid proxy URL");
+  const timeoutMs = dispatcherGlobal.__piWebHttpDispatcher?.timeoutMs
+    ?? readHttpIdleTimeoutMs()
+    ?? DEFAULT_HTTP_IDLE_TIMEOUT_MS;
+  installHttpDispatcher(timeoutMs, proxy);
+}
+
+function proxyForProtocol(variable: "http_proxy" | "https_proxy", proxyUrl?: string) {
+  const upper = variable.toUpperCase();
+  const written = dispatcherGlobal.__piWebHttpProxyEnvironment?.[upper];
+  // A variable written here carries the saved setting to Bun's fetch, so it reports as the
+  // setting and not as an operator's override; the setting's own current value is what applies,
+  // including its removal. An address already in the environment stays an override.
+  if (written !== undefined && process.env[upper] === written) return { url: proxyUrl, source: "settings" as const };
+  const lowerValue = process.env[variable];
+  const envValue = lowerValue ?? process.env[upper];
+  if (envValue === undefined) return { url: proxyUrl, source: "settings" as const };
+  // Windows' environment is case-insensitive; use its conventional uppercase label.
+  const source = lowerValue !== undefined && process.platform !== "win32" ? variable : upper;
+  return { url: envValue, source };
+}
+
+export function resolveHttpProxies(proxyUrl?: string) {
+  const http = proxyForProtocol("http_proxy", proxyUrl);
+  const https = proxyForProtocol("https_proxy", proxyUrl);
+  const httpSource = http.url ? http.source : "direct";
+  // EnvHttpProxyAgent falls back to its HTTP agent when the HTTPS URL is empty.
+  return {
+    httpProxy: http.url,
+    httpsProxy: https.url,
+    sources: { http: httpSource, https: https.url ? https.source : httpSource },
+  };
+}
+
+/**
+ * Bun's fetch is Bun's own HTTP client: it reads `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` from
+ * the environment when a request starts and never consults an undici dispatcher, and the
+ * `undici` its module loader hands out exposes no `install` (jiti's CJS interop finds it on
+ * Node, Bun's named-export resolution does not). So the setting is applied where Bun looks.
+ * A variable the process started with is left alone, which is the precedence Node's
+ * `EnvHttpProxyAgent` gives the environment, and one written here is undone with the setting.
+ */
+function writeProxyEnvironment(httpProxy: string | undefined, httpsProxy: string | undefined): void {
+  const written = (dispatcherGlobal.__piWebHttpProxyEnvironment ??= {});
+  for (const [variable, value] of [["HTTP_PROXY", httpProxy], ["HTTPS_PROXY", httpsProxy]] as const) {
+    if (written[variable] === undefined && process.env[variable] !== undefined) continue;
+    if (value === undefined) {
+      if (written[variable] !== undefined) {
+        delete process.env[variable];
+        delete written[variable];
+      }
+      continue;
+    }
+    process.env[variable] = value;
+    written[variable] = value;
+  }
+}
+
+function installHttpDispatcher(normalizedTimeoutMs: number, proxyUrl?: string): void {
+  const { httpProxy, httpsProxy } = resolveHttpProxies(proxyUrl);
+  const previous = dispatcherGlobal.__piWebHttpDispatcher;
+  if (previous && previous.httpProxy === httpProxy && previous.httpsProxy === httpsProxy) return;
+
   if (typeof Bun !== "undefined") {
-    dispatcherGlobal.__piWebHttpDispatcherConfigured = true;
+    writeProxyEnvironment(httpProxy, httpsProxy);
+    dispatcherGlobal.__piWebHttpDispatcher = { timeoutMs: normalizedTimeoutMs, httpProxy, httpsProxy };
     return;
   }
 
   const dispatcher = withUndiciErrorListener(
     new undici.EnvHttpProxyAgent({
+      httpProxy,
+      httpsProxy,
       allowH2: false,
       // Reach an http:// origin through a CONNECT tunnel, as the pi SDK's own
       // dispatcher does. A forwarded request is carried by a client that keeps
@@ -173,5 +268,8 @@ export function configureHttpDispatcher(
   // dispatcher itself needs no install: `setGlobalDispatcher()` writes the
   // well-known symbol Node's built-in fetch reads, so the built-in classes keep
   // serving and use this dispatcher.
-  dispatcherGlobal.__piWebHttpDispatcherConfigured = true;
+  dispatcherGlobal.__piWebHttpDispatcher = { dispatcher, timeoutMs: normalizedTimeoutMs, httpProxy, httpsProxy };
+
+  // close() drains active responses. New fetches already use the new dispatcher.
+  previous?.dispatcher?.close().catch((error) => console.warn("Failed to close the previous HTTP dispatcher", error));
 }

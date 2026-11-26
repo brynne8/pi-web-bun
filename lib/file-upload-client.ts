@@ -1,5 +1,6 @@
 import { buildAtMentionText } from "./file-fuzzy.ts";
 import { encodeFilePathForApi } from "./file-paths.ts";
+import { errorMessage } from "./errors.ts";
 
 /** Browser side of `POST /api/files/[...path]?type=upload`; mirrors `lib/file-upload.ts`. */
 export type UploadConflictStrategy = "error" | "overwrite" | "skip";
@@ -138,6 +139,6 @@ export async function uploadDroppedFiles(files: File[], deps: DroppedFilesDeps):
       deps.addNotice({ type: "error", message: deps.t("chat.dropFailed", { message: `${failure.name}: ${failure.error}` }) });
     }
   } catch (uploadError) {
-    deps.addNotice({ type: "error", message: deps.t("chat.dropFailed", { message: uploadError instanceof Error ? uploadError.message : String(uploadError) }) });
+    deps.addNotice({ type: "error", message: deps.t("chat.dropFailed", { message: errorMessage(uploadError) }) });
   }
 }
