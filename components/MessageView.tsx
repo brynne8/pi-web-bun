@@ -2051,8 +2051,6 @@ function PairedResult({ text, isEmpty, isError, shell, powershell }: {
   // takes the error one, as `(exit N)` alone does in pi's TUI, where every output
   // line is painted muted. Painting the whole block red turned output that carries
   // no colour of its own into a failure too; every other card keeps its colour.
-  // A shell command that animates redraws one line instead of writing new ones, so the
-  // text carries every frame; the card draws the screen it ended on.
   const shown = shell ? collapseTerminalOverwrites(text) : text;
   const split = powershell ? splitShellStatus(shown) : null;
   const body = split ? split.body : shown;

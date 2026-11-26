@@ -7,6 +7,7 @@ import {
   createLocalPowerShellOperations,
   createPowerShellToolDefinition,
   getAgentDir,
+  type AgentToolResult,
   type BashOperations,
   type InlineExtension,
   type LoadExtensionsResult,
@@ -26,6 +27,7 @@ import {
   wasBgTaskKilled,
 } from "./bash-bg-tasks.ts";
 import { buildBgTaskNotification, type BgTaskOutcome } from "./bg-task-notification.ts";
+import { collapseTerminalOverwrites } from "./ansi-overwrite.ts";
 import { sanitizeProjectCommandEnvironment } from "./project-environment.ts";
 
 const HOST_EXTENSION_NAME = "pi-web-project-command-environment";
@@ -69,6 +71,17 @@ type ProjectCommandBashOperationsOptions = {
 };
 
 type BashExecResult = Awaited<ReturnType<BashOperations["exec"]>>;
+
+/**
+ * The screen the command left rather than every frame it drew: an animated command repaints one
+ * row, and the bytes of all those frames are tokens the model reads for nothing.
+ */
+export function withoutRedrawnFrames<T>(result: AgentToolResult<T>): AgentToolResult<T> {
+  return {
+    ...result,
+    content: result.content.map((block) => (block.type === "text" ? { ...block, text: collapseTerminalOverwrites(block.text) } : block)),
+  };
+}
 
 function withAgentBinDirectory(
   environment: NodeJS.ProcessEnv,
@@ -281,7 +294,8 @@ async function reportBgTask(
 async function readLogTail(path: string, maxBytes = 4096): Promise<string> {
   try {
     const content = await readFile(path);
-    return (content.length > maxBytes ? content.subarray(content.length - maxBytes) : content).toString("utf8");
+    // The log file keeps the bytes as they came; only what the model reads is the finished screen.
+    return collapseTerminalOverwrites((content.length > maxBytes ? content.subarray(content.length - maxBytes) : content).toString("utf8"));
   } catch {
     return "";
   }
@@ -368,7 +382,7 @@ export function createProjectCommandBashExtension(options: {
             }),
           });
           try {
-            return await executionDefinition.execute(toolCallId, params, signal, onUpdate, context);
+            return withoutRedrawnFrames(await executionDefinition.execute(toolCallId, params, signal, onUpdate, context));
           } catch (error) {
             if (error instanceof Error && error.message.startsWith("bg-task-backgrounded:")) {
               return {
@@ -470,13 +484,13 @@ export function createProjectCommandPowerShellExtension(options: { cwd: string }
         ...createPowerShellToolDefinition(options.cwd),
         // Active only when named (`defaultTools`, the PowerShell switch, a preset), as pi's own is (#1235).
         defaultActive: false,
-        execute(toolCallId, params, signal, onUpdate, context) {
+        async execute(toolCallId, params, signal, onUpdate, context) {
           const executionDefinition = createPowerShellToolDefinition(options.cwd, {
             operations: createProjectCommandBashOperations({
               localOperations: createLocalPowerShellOperations(),
             }),
           });
-          return executionDefinition.execute(toolCallId, params, signal, onUpdate, context);
+          return withoutRedrawnFrames(await executionDefinition.execute(toolCallId, params, signal, onUpdate, context));
         },
       });
     },
