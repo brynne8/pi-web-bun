@@ -151,8 +151,11 @@ const DELEGATION_INTRO = `\`${AGENT_TOOL_NAME}\` runs a whole task in a fresh se
 
 /** How to write the delegated task itself: what the parent has and wants, and nothing more. */
 const DELEGATION_BRIEF_RULES = [
+  "A subagent starts without this conversation, so put only what its task needs in the prompt.",
   "Write its `prompt` as what you have and what you want: the paths, facts and constraints it cannot infer, and the result you need.",
   "It reads the same harness prompt you do and plans its own steps, so restate no rule and prescribe no order. A one-line request takes a one-line prompt.",
+  "When you hand over work already under way, restate in the prompt what is done and what remains.",
+  "When the content to pass is long, write it to a file first, then name that file in the prompt.",
 ];
 
 const DELEGATION_RULES = [
