@@ -1,5 +1,5 @@
 import type { McpConfigFieldRef, McpConfigFileProblem, McpOverrideKey, McpServerInfo, McpVariableReference } from "./api-types";
-import { shortenPath } from "./display-path";
+import { shortenPath } from "./display-path.ts";
 
 // Display helpers for MCP server descriptions (`McpServerInfo`), shared by the
 // trust dialog and Settings › MCP. Client-safe: no Node imports.

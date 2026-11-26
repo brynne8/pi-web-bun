@@ -1,4 +1,4 @@
-import { getBrowserStorage } from "./browser-storage";
+import { getBrowserStorage } from "./browser-storage.ts";
 
 /**
  * Per-workspace "last open session" memory.

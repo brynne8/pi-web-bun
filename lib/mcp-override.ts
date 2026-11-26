@@ -1,5 +1,5 @@
 import type { McpOverrideKey } from "./api-types";
-import { isRecord } from "./is-record";
+import { isRecord } from "./is-record.ts";
 
 // Project overrides of global MCP servers (pi 1.0.1): a project `.pi/mcp.json`
 // entry without `command`, `url` or `type` changes only `enabled`, `exposure`

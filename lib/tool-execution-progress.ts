@@ -1,4 +1,4 @@
-import { isRecord } from "./is-record";
+import { isRecord } from "./is-record.ts";
 const MAX_PROGRESS_LENGTH = 500;
 
 export function getToolExecutionProgress(partialResult: unknown): string | null {

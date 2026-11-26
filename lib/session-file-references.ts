@@ -1,10 +1,10 @@
-import { getSessionEntries, resolveSessionPath } from "./session-reader";
-export { isFilePathReferencedByEntries } from "./session-file-references-core";
+import { getSessionEntries, resolveSessionPath } from "./session-reader.ts";
+export { isFilePathReferencedByEntries } from "./session-file-references-core.ts";
 import {
   isBashOutputPathReferencedByEntries,
   isFilePathReferencedByEntries,
   isValidSessionId,
-} from "./session-file-references-core";
+} from "./session-file-references-core.ts";
 
 export async function isFilePathReferencedBySession(filePath: string, sessionId: string | null): Promise<boolean> {
   if (!isValidSessionId(sessionId)) return false;

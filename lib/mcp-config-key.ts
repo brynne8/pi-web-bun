@@ -1,5 +1,5 @@
 import { createHmac, randomBytes } from "node:crypto";
-import { isRecord } from "./is-record";
+import { isRecord } from "./is-record.ts";
 
 // How an `mcp.json` entry is identified across the modules that compare
 // entries: the MCP host (`lib/mcp-host.ts`) diffs what it registered against

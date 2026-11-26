@@ -3,10 +3,10 @@ import { existsSync, mkdirSync, readFileSync, realpath, realpathSync } from "fs"
 import { access } from "fs/promises";
 import { basename, dirname, join, resolve } from "path";
 import { promisify } from "util";
-import { allowFileRoot } from "./allowed-roots";
+import { allowFileRoot } from "./allowed-roots.ts";
 import { projectGitEnvironment } from "./git-environment.ts";
-import { samePath, toNativePath } from "./paths";
-import { errorMessage } from "./errors";
+import { samePath, toNativePath } from "./paths.ts";
+import { errorMessage } from "./errors.ts";
 
 const execFileAsync = promisify(execFile);
 

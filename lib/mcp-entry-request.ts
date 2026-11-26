@@ -1,17 +1,17 @@
 import { statSync } from "node:fs";
-import { homeDir } from "./home-dir";
+import { homeDir } from "./home-dir.ts";
 import { isAbsolute, resolve } from "node:path";
 import { getAgentDir, type McpServerConfig } from "@earendil-works/pi-coding-agent";
 import type { McpErrorResponse, McpRefusalReason, McpScope } from "./api-types";
-import { isMcpDisabledByOperator, MCP_DISABLE_VARIABLE } from "./builtin-extensions";
-import { getAllowedFileRoots, isExistingFilePathAllowed } from "./file-access";
-import { readMcpServerDefinition, readMcpServerEntry } from "./mcp-config-read";
-import { findWebPasswordField } from "./mcp-transport";
-import { loadPiSdkInternals, type PiSdkInternals } from "./pi-sdk-internals";
-import { getProjectTrustStatus } from "./project-trust";
-import { hasJsonContentType, isApiRequestAllowed } from "./request-security";
-import { errorMessage } from "./errors";
-import { isRecord } from "./is-record";
+import { isMcpDisabledByOperator, MCP_DISABLE_VARIABLE } from "./builtin-extensions.ts";
+import { getAllowedFileRoots, isExistingFilePathAllowed } from "./file-access.ts";
+import { readMcpServerDefinition, readMcpServerEntry } from "./mcp-config-read.ts";
+import { findWebPasswordField } from "./mcp-transport.ts";
+import { loadPiSdkInternals, type PiSdkInternals } from "./pi-sdk-internals.ts";
+import { getProjectTrustStatus } from "./project-trust.ts";
+import { hasJsonContentType, isApiRequestAllowed } from "./request-security.ts";
+import { errorMessage } from "./errors.ts";
+import { isRecord } from "./is-record.ts";
 
 // The checks a route makes before it connects one `mcp.json` entry outside any
 // session: Settings › MCP's Test (`POST /api/mcp/test`) and its sign-in

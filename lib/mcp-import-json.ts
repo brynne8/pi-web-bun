@@ -18,10 +18,10 @@ import {
   UNION_GRAMMAR,
   type ValueGrammar,
   type VsCodeInput,
-} from "./mcp-import-core";
-import { isSecretName } from "./mcp-secrets";
-import { literalWord, splitShellWords } from "./shell-words";
-import { isRecord } from "./is-record";
+} from "./mcp-import-core.ts";
+import { isSecretName } from "./mcp-secrets.ts";
+import { literalWord, splitShellWords } from "./shell-words.ts";
+import { isRecord } from "./is-record.ts";
 
 // JSON shapes of other MCP clients, mapped onto pi's schema: the `mcpServers`
 // family (Claude Desktop and Code, Cursor, Windsurf, Cline, Gemini, Copilot,

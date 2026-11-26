@@ -1,4 +1,4 @@
-import { isRecord } from "./is-record";
+import { isRecord } from "./is-record.ts";
 /**
  * Client/server helpers for a models.json model's image size limit, pi's
  * `inputLimits.images.resize.maxBytes`: the most a new image may take in

@@ -1,5 +1,5 @@
 import type { AgentMessage, CustomMessage } from "./types";
-import { userMessageKey } from "./prompt-recovery";
+import { userMessageKey } from "./prompt-recovery.ts";
 
 /**
  * React keys of the chat's messages (#1184). A message read from the session

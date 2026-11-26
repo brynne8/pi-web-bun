@@ -1,6 +1,6 @@
 import type { McpExposure, McpServerConfig } from "@earendil-works/pi-coding-agent";
-import { isSecretName, maskArgs, maskUrl, SECRET_MASK } from "./mcp-secrets";
-import { isRecord } from "./is-record";
+import { isSecretName, maskArgs, maskUrl, SECRET_MASK } from "./mcp-secrets.ts";
+import { isRecord } from "./is-record.ts";
 
 // Shared parts of the paste importer (`lib/mcp-import.ts`): the result types,
 // how a value written for another client becomes a pi value, the draft every

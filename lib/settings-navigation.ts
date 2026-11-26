@@ -1,4 +1,4 @@
-import { getBrowserStorage } from "./browser-storage";
+import { getBrowserStorage } from "./browser-storage.ts";
 
 export const SETTINGS_SECTION_VALUES = [
   "general",

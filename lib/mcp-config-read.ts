@@ -12,28 +12,28 @@ import type {
   McpServerInfo,
   McpTransportKind,
   McpVariableReference,
-} from "./api-types";
+} from "./api-types.ts";
 import {
   isMcpDisabledByOperator,
   MCP_DISABLE_VARIABLE,
   readBuiltinExtensionSwitches,
   type BuiltinExtensionName,
   type BuiltinExtensionSwitch,
-} from "./builtin-extensions";
-import { readCodemodeInfo } from "./codemode-info";
-import { mcpConfigKey, mcpEntryConfigKey } from "./mcp-config-key";
-import { jsonErrorMessage } from "./mcp-json-error";
-import { isMcpOverrideEntry, MCP_OVERRIDE_KEYS, mcpOverrideRefusal } from "./mcp-override";
-import { maskArgs, maskCommand, maskUrl } from "./mcp-secrets";
-import { mcpOAuthStoreKeys } from "./mcp-sign-out";
-import { readMcpHostInactive, withMcpStatuses } from "./mcp-status";
-import { findWebPasswordField, resolvedConfigValues, WEB_PASSWORD_VARIABLE } from "./mcp-transport";
-import { realPathOrResolved, samePath } from "./paths";
-import { hasParentDirectorySegment, isPathWithinRoots, resolveRealRoots } from "./path-security";
-import { loadPiSdkInternals, type PiSdkInternals } from "./pi-sdk-internals";
-import { freshFolderTrustBreadth, getProjectTrustStatus, hasTrustRelevantEntries } from "./project-trust";
-import { errorCode, errorMessage } from "./errors";
-import { isRecord } from "./is-record";
+} from "./builtin-extensions.ts";
+import { readCodemodeInfo } from "./codemode-info.ts";
+import { mcpConfigKey, mcpEntryConfigKey } from "./mcp-config-key.ts";
+import { jsonErrorMessage } from "./mcp-json-error.ts";
+import { isMcpOverrideEntry, MCP_OVERRIDE_KEYS, mcpOverrideRefusal } from "./mcp-override.ts";
+import { maskArgs, maskCommand, maskUrl } from "./mcp-secrets.ts";
+import { mcpOAuthStoreKeys } from "./mcp-sign-out.ts";
+import { readMcpHostInactive, withMcpStatuses } from "./mcp-status.ts";
+import { findWebPasswordField, resolvedConfigValues, WEB_PASSWORD_VARIABLE } from "./mcp-transport.ts";
+import { realPathOrResolved, samePath } from "./paths.ts";
+import { hasParentDirectorySegment, isPathWithinRoots, resolveRealRoots } from "./path-security.ts";
+import { loadPiSdkInternals, type PiSdkInternals } from "./pi-sdk-internals.ts";
+import { freshFolderTrustBreadth, getProjectTrustStatus, hasTrustRelevantEntries } from "./project-trust.ts";
+import { errorCode, errorMessage } from "./errors.ts";
+import { isRecord } from "./is-record.ts";
 
 // What Settings › MCP and the trust dialog list (ADR 0006): the entries of the
 // global `mcp.json` and of a project's `.pi/mcp.json`, read from the files

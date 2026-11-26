@@ -7,7 +7,7 @@
 // Call sites previously repeated the same 5-line fetch block 13× in
 // hooks/useAgentSession.ts. This helper collapses that down to one line.
 
-import { missingCwdFromBody } from "./missing-cwd";
+import { missingCwdFromBody } from "./missing-cwd.ts";
 
 export class AgentCommandError extends Error {
   constructor(

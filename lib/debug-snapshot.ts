@@ -1,5 +1,5 @@
-import { AGENT_EVENT_HEARTBEAT_MS } from "./agent-event-wire";
-import { countAgentEventStreams, listAgentEventStreams } from "./agent-event-stream";
+import { AGENT_EVENT_HEARTBEAT_MS } from "./agent-event-wire.ts";
+import { countAgentEventStreams, listAgentEventStreams } from "./agent-event-stream.ts";
 import type {
   DebugEventStream,
   DebugParentNotification,
@@ -9,19 +9,19 @@ import type {
   DebugSessionSummary,
   DebugSnapshotResponse,
   DebugSubagentRun,
-} from "./debug-types";
-import { countFileWatches } from "./file-watch-registry";
-import { listPageStreams } from "./page-stream-registry";
+} from "./debug-types.ts";
+import { countFileWatches } from "./file-watch-registry.ts";
+import { listPageStreams } from "./page-stream-registry.ts";
 import {
   getRpcSessionDebugSnapshots,
   getRpcSessionLifecycle,
   getRpcStartingSessionIds,
   SESSION_IDLE_TIMEOUT_MS,
   type RpcSessionDebugEntry,
-} from "./rpc-manager";
-import { listRegisteredSessionLivenessProviders, listSessionLivenessProviders } from "./session-liveness";
-import { hasUnsettledSubagentRun, subagentDebugSnapshot } from "./subagent-runtime";
-import { getTerminalStats } from "./terminal-manager";
+} from "./rpc-manager.ts";
+import { listRegisteredSessionLivenessProviders, listSessionLivenessProviders } from "./session-liveness.ts";
+import { hasUnsettledSubagentRun, subagentDebugSnapshot } from "./subagent-runtime.ts";
+import { getTerminalStats } from "./terminal-manager.ts";
 
 // Each source on its own: one that throws reads as empty, so the panel always gets a well-formed
 // answer. Not logged: the panel polls every two seconds.

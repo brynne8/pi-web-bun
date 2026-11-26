@@ -2,8 +2,8 @@ import { lstatSync, mkdirSync, readlinkSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import type { McpExposure } from "@earendil-works/pi-coding-agent";
 import lockfile from "proper-lockfile";
-import { writeFileExactModeAtomicSync } from "./atomic-file";
-import { serializeByKey } from "./key-serializer";
+import { writeFileExactModeAtomicSync } from "./atomic-file.ts";
+import { serializeByKey } from "./key-serializer.ts";
 import {
   globalMcpConfigPath,
   isMcpOverrideEntry,
@@ -12,9 +12,9 @@ import {
   PROJECT_MCP_CONFIG_MAX_BYTES,
   projectMcpConfigCreatePath,
   readResolvedConfigFile,
-} from "./mcp-config-read";
-import { errorCode, errorMessage } from "./errors";
-import { isRecord } from "./is-record";
+} from "./mcp-config-read.ts";
+import { errorCode, errorMessage } from "./errors.ts";
+import { isRecord } from "./is-record.ts";
 
 // Pi Web's `mcp.json` writer (ADR 0006, "Writes"). The SDK's editors
 // (`dist/extensions/mcp/config.js` add/update/removeMcpServerConfig, which the

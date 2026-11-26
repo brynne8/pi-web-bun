@@ -8,7 +8,7 @@
  * keep the cached prefix.
  */
 
-import { SIDE_BOUNDARY_MESSAGE_TYPE } from "./session-family";
+import { SIDE_BOUNDARY_MESSAGE_TYPE } from "./session-family.ts";
 import type { SessionEntry } from "./types";
 
 export const SIDE_META_TYPE = "pi-web:side";

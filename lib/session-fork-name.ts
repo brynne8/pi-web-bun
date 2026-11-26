@@ -1,4 +1,4 @@
-import { skillExpansionToCommand } from "./slash-display";
+import { skillExpansionToCommand } from "./slash-display.ts";
 
 /**
  * The name the sidebar's Fork gives its copy: the title the sidebar shows for

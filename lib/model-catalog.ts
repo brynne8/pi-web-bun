@@ -1,4 +1,4 @@
-import { isRecord } from "./is-record";
+import { isRecord } from "./is-record.ts";
 export interface ModelCatalogCost {
   input?: number;
   output?: number;

@@ -1,4 +1,4 @@
-import { isRecord } from "./is-record";
+import { isRecord } from "./is-record.ts";
 /**
  * Client/server check of the models.json provider entries Settings › Models
  * saves. pi composes every provider when it loads models.json; an entry that
