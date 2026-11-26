@@ -10,6 +10,7 @@ import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
 import { stripAnsi } from "@/lib/ansi";
+import { collapseTerminalOverwrites } from "@/lib/ansi-overwrite";
 import { getAssistantErrorMessage, getThinkingPreview, hasAssistantAnswer, isAssistantAborted, isAssistantTruncated, isEmptyThinkingBlock } from "@/lib/message-display";
 import { toolClockMs, type ToolClock, type ToolClocks } from "@/lib/tool-clock";
 import { blockRenderKey } from "@/lib/message-keys";
@@ -1567,6 +1568,7 @@ function ToolCallBlock({ block, result, notRun, duration, clock, cwd, onOpenFile
             : <PairedResult
                 text={resultText ?? ""}
                 isEmpty={resultIsEmpty}
+                shell={isShellToolName(block.toolName)}
                 powershell={isPowerShellToolName(block.toolName)}
                 isError={isError}
               />
@@ -2034,10 +2036,12 @@ function splitShellStatus(text: string): { body: string; status: string | null }
   return { body: text.slice(0, start).replace(/\n+$/, ""), status };
 }
 
-function PairedResult({ text, isEmpty, isError, powershell }: {
+function PairedResult({ text, isEmpty, isError, shell, powershell }: {
   text: string;
   isEmpty: boolean;
   isError: boolean;
+  /** A shell call: its output is what a terminal would have left on screen. */
+  shell?: boolean;
   /** This is a `powershell` call, whose output PowerShell coloured itself. */
   powershell?: boolean;
 }) {
@@ -2047,8 +2051,11 @@ function PairedResult({ text, isEmpty, isError, powershell }: {
   // takes the error one, as `(exit N)` alone does in pi's TUI, where every output
   // line is painted muted. Painting the whole block red turned output that carries
   // no colour of its own into a failure too; every other card keeps its colour.
-  const split = powershell ? splitShellStatus(text) : null;
-  const body = split ? split.body : text;
+  // A shell command that animates redraws one line instead of writing new ones, so the
+  // text carries every frame; the card draws the screen it ended on.
+  const shown = shell ? collapseTerminalOverwrites(text) : text;
+  const split = powershell ? splitShellStatus(shown) : null;
+  const body = split ? split.body : shown;
   const status = split ? split.status : null;
   const showPre = isEmpty || body !== "";
   return (

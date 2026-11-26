@@ -1,6 +1,7 @@
 import { NextResponse } from "vinext/shims/server";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { stripAnsi } from "@/lib/ansi";
+import { collapseTerminalOverwrites } from "@/lib/ansi-overwrite";
 import { runNpx } from "@/lib/npx";
 import { nodeCliInvocation } from "@/lib/node-cli";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
@@ -48,7 +49,9 @@ export async function POST(req: Request) {
       cwd: !isGlobal && cwd ? cwd : undefined,
     });
 
-    const output = stripAnsi(stdout + stderr);
+    // The installer animates one line over and over; keeping the screen it ended on is
+    // what reads as its result rather than as every frame it drew.
+    const output = stripAnsi(collapseTerminalOverwrites(stdout + stderr));
     const success = /Installation complete|Installed \d+ skill/.test(output);
     if (!success) {
       return NextResponse.json({ error: output.slice(-300) || "Install failed" }, { status: 500 });
@@ -56,7 +59,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true, output });
   } catch (e: unknown) {
     const err = e as { stdout?: string; stderr?: string; message?: string };
-    const output = stripAnsi((err.stdout ?? "") + (err.stderr ?? ""));
+    const output = stripAnsi(collapseTerminalOverwrites((err.stdout ?? "") + (err.stderr ?? "")));
     return NextResponse.json({ error: output || (err.message ?? String(e)) }, { status: 500 });
   }
 }

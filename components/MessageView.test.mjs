@@ -1738,7 +1738,9 @@ test("the layout is the viewport's choice, taken once for both the patch input a
 });
 
 test("a powershell card draws its output's colours; every other card prints it raw", () => {
-  const output = "SQLite\x1b[7mError:\x1b[0m no such column: model_name\n\x1b[31m1 fail\x1b[0m\x1b[2K";
+  // The `\x1b[2K` opens the second row, as an animated frame erases before it writes; an
+  // erase really erases, so a sequence after the text would take that row off the card.
+  const output = "SQLite\x1b[7mError:\x1b[0m no such column: model_name\n\x1b[2K\x1b[31m1 fail\x1b[0m";
   const render = (toolName) => {
     const block = { type: "toolCall", toolCallId: `call-${toolName}`, toolName, input: { command: "bun test" } };
     const result = { role: "toolResult", toolCallId: block.toolCallId, content: [{ type: "text", text: output }], isError: true };
@@ -1768,6 +1770,40 @@ test("a powershell card draws its output's colours; every other card prints it r
     assert.ok(html.includes("[7mError:"), toolName);
     assert.ok(!html.includes("var(--ansi-"), toolName);
   }
+});
+
+test("a shell card shows the screen a command left, not every frame it drew", () => {
+  const frames =
+    "\x1b[?25l│\n◒  Cloning repository…\x1b[1G\x1b[J◐  Cloning repository…\x1b[1G\x1b[J◇  Repository cloned\x1b[?25h\n";
+  const render = (toolName, output = frames) => {
+    const block = { type: "toolCall", toolCallId: `call-${toolName}`, toolName, input: { command: "npx skills add x" } };
+    const result = { role: "toolResult", toolCallId: block.toolCallId, content: [{ type: "text", text: output }], isError: false };
+    clearExpandedToolCalls();
+    setToolCallExpanded(block.toolCallId, true);
+    try {
+      return renderMessage(
+        { role: "assistant", provider: "anthropic", model: "claude-test", content: [block] },
+        { toolResults: new Map([[block.toolCallId, result]]) },
+      );
+    } finally {
+      clearExpandedToolCalls();
+    }
+  };
+
+  for (const toolName of ["bash", "powershell"]) {
+    const html = render(toolName);
+    assert.ok(textOf(html).includes("Repository cloned"), toolName);
+    assert.ok(!textOf(html).includes("Cloning repository"), toolName);
+    assert.ok(!html.includes("[?25l"), toolName);
+  }
+
+  // The pass runs before the colours, so a powershell card keeps drawing them.
+  const colored = render("powershell", "\x1b[32m◐ building\x1b[1G\x1b[J\x1b[31m✗ failed\x1b[0m");
+  assert.ok(textOf(colored).includes("✗ failed"));
+  assert.match(colored, /color:var\(--ansi-1,/);
+
+  // Every other tool's result is text, not a screen: it stays as it came.
+  assert.ok(textOf(render("mcp__srv__run")).includes("Cloning repository"));
 });
 
 test("releases a streamed thought a paragraph at a time", () => {
