@@ -16,25 +16,36 @@ import {
   type GitPorcelainEntry,
   type IndexChange,
 } from "./git-status.ts";
-import { projectGitEnvironment } from "./git-environment.ts";
+import { readOnlyGitEnvironment } from "./git-environment.ts";
 import { resolveExistingPath } from "./paths.ts";
 
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 10_000;
 const GIT_STATUS_MAX_BUFFER = 8 * 1024 * 1024;
 
-async function git(cwd: string, args: string[], maxBuffer = GIT_STATUS_MAX_BUFFER): Promise<string> {
+/** What one git child gets: a bigger buffer, and the request whose abort kills it. */
+interface GitRunOptions {
+  maxBuffer?: number;
+  signal?: AbortSignal;
+}
+
+async function git(
+  cwd: string,
+  args: string[],
+  { maxBuffer = GIT_STATUS_MAX_BUFFER, signal }: GitRunOptions = {},
+): Promise<string> {
   const { stdout } = await execFileAsync("git", ["-C", cwd, ...args], {
     timeout: GIT_TIMEOUT_MS,
     maxBuffer,
-    env: projectGitEnvironment(),
+    env: readOnlyGitEnvironment(),
+    signal,
   });
   return stdout;
 }
 
-async function findRepositoryRoot(cwd: string): Promise<string | null> {
+async function findRepositoryRoot(cwd: string, signal?: AbortSignal): Promise<string | null> {
   try {
-    return (await git(cwd, ["rev-parse", "--show-toplevel"])).replace(/\r?\n$/, "") || null;
+    return (await git(cwd, ["rev-parse", "--show-toplevel"], { signal })).replace(/\r?\n$/, "") || null;
   } catch {
     return null;
   }
@@ -60,6 +71,7 @@ export function toGitPath(filePath: string): string {
 async function readStatusEntries(
   repositoryRoot: string,
   gitConfig: readonly string[] = [],
+  signal?: AbortSignal,
 ): Promise<GitPorcelainEntry[]> {
   const output = await git(repositoryRoot, [
     ...gitConfig,
@@ -67,7 +79,7 @@ async function readStatusEntries(
     "--porcelain=v1",
     "-z",
     "--untracked-files=all",
-  ]);
+  ], { signal });
   return parseGitPorcelainV1(output);
 }
 
@@ -79,6 +91,7 @@ async function readStatusEntries(
  */
 async function readTrackedLineStats(
   cwd: string,
+  signal?: AbortSignal,
 ): Promise<{ additions: number; deletions: number }> {
   try {
     const output = await git(cwd, [
@@ -90,7 +103,7 @@ async function readTrackedLineStats(
       "HEAD",
       "--",
       ".",
-    ]);
+    ], { signal });
     let additions = 0;
     let deletions = 0;
     for (const line of output.split(/\r?\n/)) {
@@ -232,13 +245,16 @@ export async function getGitStatus(cwd: string, signal?: AbortSignal, recentFile
   // changes. Git names its paths by the repository root however it is asked, so
   // asking from the folder itself answers what asking from the root does.
   const [repositoryRoot, statusResult, trackedLineStats] = await Promise.all([
-    findRepositoryRoot(cwd),
-    readStatusEntries(cwd).then(
+    findRepositoryRoot(cwd, signal),
+    readStatusEntries(cwd, [], signal).then(
       (entries) => ({ entries }),
       (error: unknown) => ({ error }),
     ),
-    readTrackedLineStats(cwd),
+    readTrackedLineStats(cwd, signal),
   ]);
+  // An aborted request killed its children: the rejected commands above are how a
+  // replaced refresh ends, and there is no listing to report for it.
+  signal?.throwIfAborted();
   if (!repositoryRoot) {
     return {
       isGitRepository: false,
@@ -336,7 +352,7 @@ async function createTrackedFilePatch(
       "HEAD",
       "--",
       ...paths,
-    ], TEXT_PREVIEW_MAX_BYTES * 4);
+    ], { maxBuffer: TEXT_PREVIEW_MAX_BYTES * 4 });
   } catch {
     return null;
   }

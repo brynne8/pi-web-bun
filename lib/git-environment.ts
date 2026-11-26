@@ -9,3 +9,13 @@ import { sanitizeProjectCommandEnvironment } from "./project-environment.ts";
 export function projectGitEnvironment(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   return { ...sanitizeProjectCommandEnvironment(base), LC_ALL: "C" };
 }
+
+/**
+ * The same for a child that only reads. `GIT_OPTIONAL_LOCKS=0` keeps it out of
+ * `.git/index.lock`: `git status` takes the lock to write back a refreshed stat
+ * cache, and a listing that changed nothing has nothing to write, so that lock is
+ * held for the whole scan and refuses a `git commit` that lands inside it.
+ */
+export function readOnlyGitEnvironment(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...projectGitEnvironment(base), GIT_OPTIONAL_LOCKS: "0" };
+}
