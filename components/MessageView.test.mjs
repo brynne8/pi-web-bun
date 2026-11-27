@@ -1331,7 +1331,7 @@ test("labels an MCP call server/tool and indents a JSON result", (t) => {
   assert.match(text, /\{\n {2}"hits": \[\n {4}\{\n {6}"title": "Code mode"/);
 });
 
-test("keeps a shell command out of the folded header, and in reach of it", (t) => {
+test("a shell card's header is its command, not the tool name", (t) => {
   const block = {
     type: "toolCall",
     toolCallId: "call-bash-1",
@@ -1346,14 +1346,13 @@ test("keeps a shell command out of the folded header, and in reach of it", (t) =
   }, { toolResults: new Map() });
   const collapsed = textOf(collapsedHtml);
 
-  // The folded row carries the tool name and its duration only: a shell command
-  // is the one preview that runs to six colours and a hundred characters, and it
-  // is what makes a run's tool rows read as noise.
-  assert.match(collapsed, /bash/);
-  assert.doesNotMatch(collapsed, /git commit/);
-  // Nothing is lost: hover gets the whole command, and so does a screen reader.
+  // The header leads with the command in its own colours; no `bash` label sits
+  // in front of it, on a card of its own or under a merged run's `bash ×N`.
+  assert.match(collapsed, /git commit -m "fix: \$HOME" --amend/);
+  assert.doesNotMatch(collapsedHtml, /font-weight:600;font-size:11px[^>]*>bash</);
+  // Hover and assistive tech get the whole command too.
   assert.match(collapsedHtml, /title="git commit -m &quot;fix: \$HOME&quot; --amend"/);
-  assert.match(collapsedHtml, /aria-label="bash: git commit -m &quot;fix: \$HOME&quot; --amend"/);
+  assert.match(collapsedHtml, /aria-label="git commit -m &quot;fix: \$HOME&quot; --amend"/);
 
   setToolCallExpanded(block.toolCallId, true);
   t.after(() => setToolCallExpanded(block.toolCallId, false));

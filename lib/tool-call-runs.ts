@@ -44,7 +44,6 @@ const SUBAGENT_TOOL_NAMES = new Set(["agent", "task", "subagent"]);
 const SUBAGENT_PREFIXES = [
   "get_subagent",
   "steer_subagent",
-  "await_result",
   "list_subagent",
   "abort_subagent",
 ];

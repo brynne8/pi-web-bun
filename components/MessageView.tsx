@@ -1364,7 +1364,7 @@ function ToolCallBlock({ block, result, notRun, duration, clock, cwd, onOpenFile
         <button
           onClick={readSnapshot ? () => onOpenReadSnapshot?.(block.toolCallId, readSnapshot) : toggleExpanded}
           title={shellCommand ?? (readSnapshot ? t("readPanel.open") : undefined)}
-          aria-label={shellCommand !== null ? `${block.toolName}: ${shellCommand}` : undefined}
+          aria-label={shellCommand ?? undefined}
           style={{
             display: "flex",
             alignItems: "center",
@@ -1380,27 +1380,27 @@ function ToolCallBlock({ block, result, notRun, duration, clock, cwd, onOpenFile
             textAlign: "left",
           }}
         >
-          <span
-            title={mcpLabel ? block.toolName : undefined}
-            style={{ color: isError ? "#f87171" : "#16a34a", fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 11, flexShrink: 0 }}
-          >
-            {mcpLabel ? (
-              <>
-                <span style={{ fontWeight: 500, opacity: 0.75 }}>{mcpLabel.server}/</span>
-                {mcpLabel.tool}
-              </>
-            ) : block.toolName}
-          </span>
+          {shellCommand === null && (
+            <span
+              title={mcpLabel ? block.toolName : undefined}
+              style={{ color: isError ? "#f87171" : "#16a34a", fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 11, flexShrink: 0 }}
+            >
+              {mcpLabel ? (
+                <>
+                  <span style={{ fontWeight: 500, opacity: 0.75 }}>{mcpLabel.server}/</span>
+                  {mcpLabel.tool}
+                </>
+              ) : block.toolName}
+            </span>
+          )}
           <span style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
-            {/* A shell command is the one preview that runs to six colours and a
-                hundred characters, and it is what makes a run's tool rows read as
-                noise. The folded row keeps the tool name and its duration; the
-                command moves to the header's title (hover) and to the expanded
-                card, where it is the thing you opened the card to read. */}
+            {/* A shell card is read by the command it ran, highlighted here as in
+                its expanded body. The run header above it keeps the tool name and
+                the count; each call under that header does not repeat the name. */}
             {isStreamingInput
               ? t("chat.generatingToolInput")
               : shellCommand !== null
-                ? null
+                ? <BashCommand command={shellCommand} />
                 : (patchLabel ?? (codemode ? codemodeScriptPreview(codemode.code) : toolInputPreview(block.input, resultPatchPath, block.toolName, cwd)))}
           </span>
           {shellBackground && (

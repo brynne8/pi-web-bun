@@ -136,7 +136,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **断流不再赔上整次运行。** 有些中继会在响应中途掐断 HTTP/2 流，运行就连同写到一半的回答一起停下。pi 自己的重试表从 1.4.0 起收录了常见的措辞，本分支再补上它还没收的那些，沿用 pi 自己的重试次数与退避，同时仍然把你按下的「停止」、额度被拒、上下文装满当作致命错误处理。原版的立场是浏览器应当和终端里的 pi 重试得一模一样（[#1134](https://github.com/agegr/pi-web/pull/1134)）。（[重试什么、不重试什么](./agents/sessions.md#agentsession-lifecycle-librpc-managerts)）
 
-**一眼能读懂的 shell 命令。** bash 工具卡片里的命令按 shell 语法高亮，不再是一整条灰字；展开后显示命令本身和它的超时，而不是原始 JSON——于是 `grep -rl "foo" src | xargs rm` 看起来就是一条管道。模型主动要求放到后台跑的命令另有 `(background)` 标记。原版会在参数行里随着流量显示出命令的文字（[#1396](https://github.com/agegr/pi-web/pull/1396)），其余部分仍选择不带样式（[#1135](https://github.com/agegr/pi-web/pull/1135)）。（[说明](./agents/sessions.md#tool-execution-events-on-the-sse-stream)）
+**一眼能读懂的 shell 命令。** bash 工具卡片里的命令按 shell 语法高亮，不再是一整条灰字；折叠的标题栏直接显示这条命令，而不是 `bash` 标签，合并后的 run 仍由自己的标题栏写出工具名。展开后显示命令本身和它的超时，而不是原始 JSON——于是 `grep -rl "foo" src | xargs rm` 看起来就是一条管道。模型主动要求放到后台跑的命令另有 `(background)` 标记。原版会在参数行里随着流量显示出命令的文字（[#1396](https://github.com/agegr/pi-web/pull/1396)），其余部分仍选择不带样式（[#1135](https://github.com/agegr/pi-web/pull/1135)）。（[说明](./agents/sessions.md#tool-execution-events-on-the-sse-stream)）
 
 **多余的 `cd` 不会再出现在卡片上。** 指向会话自身目录的 `cd` 会在命令执行前被剥掉，于是模型写 `cd ~/repo && make`，卡片上显示的是 `make`。这个前缀也一并从会话文件和模型自己的历史里消失，而它原本就是从那里被一遍遍抄下去的。进子目录的 `cd` 原样保留。原版照模型写的那样执行，也照那样显示。（[说明](./agents/tools.md#tool-selection-and-built-in-extensions)）
 
