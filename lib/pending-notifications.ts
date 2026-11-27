@@ -173,17 +173,19 @@ export function formatPendingNotifications(
 }
 
 /**
- * The one line steered at a turn boundary when results are waiting. It names the count and the
- * split, because a model that knows there are three answers differently from one that knows
- * there is "some" — and it names the tool, so looking is one call away.
+ * The one line steered at a turn boundary when results are waiting: the count and the split,
+ * because a model that knows there are three answers differently from one that knows there is
+ * "some", and the tool that reads them. The guard above it already says to look now or keep
+ * working, so the line adds no rule about when to call.
  */
 export function formatPendingPointer(pending: readonly PendingNotification[]): string {
   if (pending.length === 0) return "";
   const bash = pending.filter((entry) => entry.kind === "bash").length;
   const agents = pending.length - bash;
   const kinds = [
-    bash > 0 ? `${bash} 个 bash 命令` : "",
-    agents > 0 ? `${agents} 个子代理` : "",
-  ].filter(Boolean).join("、");
-  return `${PENDING_POINTER_PREFIX}您有 ${pending.length} 条未处理的后台通知（${kinds}）。现在可以调用 ${PENDING_TOOL_NAME} 查看；没有这条提醒时不要调用。`;
+    bash > 0 ? `${bash} ${bash === 1 ? "bash command" : "bash commands"}` : "",
+    agents > 0 ? `${agents} ${agents === 1 ? "subagent" : "subagents"}` : "",
+  ].filter(Boolean).join(", ");
+  const one = pending.length === 1;
+  return `${PENDING_POINTER_PREFIX}${pending.length} ${one ? "result" : "results"} waiting (${kinds}). Read ${one ? "it" : "them"} with ${PENDING_TOOL_NAME}.`;
 }
