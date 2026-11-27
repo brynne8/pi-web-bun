@@ -37,9 +37,9 @@ import {
   mcpSuggestedVariableName,
   type McpAddDraft,
   type McpAddSubmitBlock,
-} from "./mcp-add-helpers";
-import type { McpActionFailure, McpActionRequest } from "./mcp-config-helpers";
-import { scopeLabel } from "./settings-ui-helpers";
+} from "./mcp-add-helpers.ts";
+import type { McpActionFailure, McpActionRequest } from "./mcp-config-helpers.ts";
+import { scopeLabel } from "./settings-ui-helpers.ts";
 import type { Translate } from "@/lib/i18n/types";
 
 export type McpAddActionRequest = Extract<McpActionRequest, { action: "add" }>;

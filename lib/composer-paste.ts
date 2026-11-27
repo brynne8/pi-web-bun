@@ -32,6 +32,7 @@ export interface ComposerPasteDeps<Target extends ComposerPasteTarget = Composer
   setValue: (value: string) => void;
   setHistoryMenuOpen: (open: boolean) => void;
   updateAtQuery: (value: string, caret: number) => void;
+  updateHashQuery: (value: string, caret: number) => void;
   scrollTextareaCaretIntoView: (ta: Target) => void;
   setTimeout: (callback: () => void, delay: number) => void;
   requestAnimationFrame: (callback: () => void) => void;
@@ -95,6 +96,7 @@ export function handleComposerPaste<Target extends ComposerPasteTarget>(
   deps.setValue(nextValue);
   deps.setHistoryMenuOpen(false);
   deps.updateAtQuery(nextValue, start + markdown.length);
+  deps.updateHashQuery(nextValue, start + markdown.length);
   deps.requestAnimationFrame(() => {
     ta.focus();
     ta.setSelectionRange(start + markdown.length, start + markdown.length);

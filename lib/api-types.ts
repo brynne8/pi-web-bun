@@ -1,6 +1,6 @@
 import type { McpExposure, ResourceDiagnostic } from "@earendil-works/pi-coding-agent";
-import type { McpImportNote } from "./mcp-import-core";
-import type { SubagentProfile } from "./subagents";
+import type { McpImportNote } from "./mcp-import-core.ts";
+import type { SubagentProfile } from "./subagents.ts";
 
 export interface SubagentProfilesResponse {
   profiles: SubagentProfile[];

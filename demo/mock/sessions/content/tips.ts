@@ -1,6 +1,6 @@
-import { PROJECT_ROOT } from "../../paths";
-import { SESSION_IDS } from "../ids";
-import type { SessionScript } from "../types";
+import { PROJECT_ROOT } from "../../paths.ts";
+import { SESSION_IDS } from "../ids.ts";
+import type { SessionScript } from "../types.ts";
 
 const GIT_LOG_OUTPUT = `79c2a44 chore(deps): trim the production install and bump next, semver, undici (#948)
 040fadd Release v0.9.2

@@ -15,7 +15,7 @@ import {
   type FetchLike,
   type McpActionFailure,
   type McpTestBlock,
-} from "./mcp-config-helpers";
+} from "./mcp-config-helpers.ts";
 
 // Pure helpers and requests for Settings › MCP's sign-in (components/McpSignIn.tsx):
 // what a flow says at each phase, why Sign in or Sign out cannot be used, and

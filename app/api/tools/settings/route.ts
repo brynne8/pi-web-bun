@@ -145,7 +145,7 @@ export async function PUT(req: Request) {
   if ("builtinTools" in changes) {
     // The built-in tools new sessions start with; every other defaultTools entry is kept.
     const tools = changes.builtinTools;
-    if (!Array.isArray(tools) || !tools.every((name) => SETTINGS_BUILTIN_TOOLS.includes(name as never))) {
+    if (!Array.isArray(tools) || !tools.every((name) => SETTINGS_BUILTIN_TOOLS.includes(name))) {
       return mcpRefusalResponse(400, "invalid-request", `builtinTools must list names from ${SETTINGS_BUILTIN_TOOLS.join(", ")}`);
     }
     try {

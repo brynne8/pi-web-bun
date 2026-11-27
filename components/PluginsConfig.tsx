@@ -47,7 +47,7 @@ import {
   ConfigSwitch,
   ConfigTrustNotice,
 } from "./SettingsUi";
-import { itemsToSwitch, projectTrustReloadKey, scopeLabel } from "./settings-ui-helpers";
+import { itemsToSwitch, projectTrustReloadKey, scopeLabel } from "./settings-ui-helpers.ts";
 import type { Translate } from "@/lib/i18n/types";
 import { readJsonOrThrow } from "@/lib/fetch-json";
 import { errorMessage } from "@/lib/errors";

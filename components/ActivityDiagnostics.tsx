@@ -3,7 +3,7 @@
 import { Component, Fragment, useMemo, type ReactNode } from "react";
 import type { DebugClientSession, DebugEventConnectionSnapshot, DebugSessionDetail, DebugSessionSummary, DebugSnapshotResponse } from "@/lib/debug-types";
 import type { SessionInfo } from "@/lib/types";
-import { MCP_SESSION_STATE_KEYS } from "./mcp-config-helpers";
+import { MCP_SESSION_STATE_KEYS } from "./mcp-config-helpers.ts";
 import { sessionRowTitle } from "./SessionTree";
 import { FolderIcon, SpinnerIcon } from "./SidebarIcons";
 import {
@@ -60,7 +60,7 @@ import {
   type DebugStatusState,
   type DebugTitleOf,
   type DebugTone,
-} from "./debug-panel-state";
+} from "./debug-panel-state.ts";
 import type { Translate } from "@/lib/i18n/types";
 
 /** Keeps a render error in the read-out from taking the page down with it. */

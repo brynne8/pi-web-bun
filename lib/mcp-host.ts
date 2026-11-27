@@ -10,8 +10,8 @@ import {
   type McpServerEntry,
   type McpTransportFactory,
 } from "@earendil-works/pi-coding-agent";
-import type { McpHostInactiveInfo, McpScope, McpSessionState, McpSessionStatus } from "./api-types";
-import type { DebugMcpHost } from "./debug-types";
+import type { McpHostInactiveInfo, McpScope, McpSessionState, McpSessionStatus } from "./api-types.ts";
+import type { DebugMcpHost } from "./debug-types.ts";
 import { isBuiltinMcpCommand, isMcpExtensionCommand } from "./mcp-command.ts";
 import { canonicalJson, mcpConfigKey, mcpEntryConfigKey } from "./mcp-config-key.ts";
 import { scrubMcpLoadError } from "./mcp-json-error.ts";
@@ -29,7 +29,7 @@ import {
 } from "./mcp-status.ts";
 import { aborted, createTestRedactor, maskStatusError, maskStatusStderr } from "./mcp-test.ts";
 import { hasParentDirectorySegment, isPathWithinRoots, resolveRealRoots } from "./path-security.ts";
-import type { McpTransport, PiSdkInternals } from "./pi-sdk-internals";
+import type { McpTransport, PiSdkInternals } from "./pi-sdk-internals.ts";
 import { mayReadProjectConfigNow } from "./project-trust.ts";
 import { cancellableDelay } from "./cancellable-delay.ts";
 import { errorMessage } from "./errors.ts";

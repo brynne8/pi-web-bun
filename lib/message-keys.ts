@@ -1,4 +1,4 @@
-import type { AgentMessage, CustomMessage } from "./types";
+import type { AgentMessage, CustomMessage } from "./types.ts";
 import { userMessageKey } from "./prompt-recovery.ts";
 
 /**

@@ -19,8 +19,8 @@ import {
   debugFaults,
   debugStreamSummary,
 } from "./ActivityDiagnostics";
-import { DEBUG_POLL_MS } from "./debug-panel-state";
-import { useDebugReadout } from "./debug-readout";
+import { DEBUG_POLL_MS } from "./debug-panel-state.ts";
+import { useDebugReadout } from "./debug-readout.ts";
 import { sessionRowTitle } from "./SessionTree";
 
 /** A task that has written nothing for this long is worth noticing. */

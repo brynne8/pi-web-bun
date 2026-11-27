@@ -1,6 +1,6 @@
 import { getLiveRpcSession } from "./rpc-manager.ts";
 import { readSessionEntry, resolveSessionPath } from "./session-reader.ts";
-import type { SessionEntry } from "./types";
+import type { SessionEntry } from "./types.ts";
 
 /**
  * One entry of a session by id, as the deferred thinking and tool-result image routes read it.

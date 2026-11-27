@@ -9,7 +9,7 @@ import {
   type AgentSession,
   type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
-import type { AgentSessionLike } from "./pi-types";
+import type { AgentSessionLike } from "./pi-types.ts";
 import {
   subagentNotificationText,
   subagentToolDetails,
@@ -36,14 +36,14 @@ import {
   type SubagentResultMetadata,
   type SubagentRunInfo,
 } from "./subagents.ts";
-import type { SessionEntry, SessionInfo } from "./types";
-import type { DebugParentNotification, DebugSubagentRun } from "./debug-types";
+import type { SessionEntry, SessionInfo } from "./types.ts";
+import type { DebugParentNotification, DebugSubagentRun } from "./debug-types.ts";
 import { buildSubagentPromptPlan } from "./subagent-prompt.ts";
 import { appendSystemPromptSources } from "./append-system-prompt.ts";
 import { createSubagentSkillsBinding } from "./subagent-skills.ts";
 import { getProjectTrustStatus } from "./project-trust.ts";
 import { createSubagentCodemodeExtension, createSubagentMcpExtensions } from "./builtin-extensions.ts";
-import type { McpHost } from "./mcp-host";
+import type { McpHost } from "./mcp-host.ts";
 import { createSubagentMcpPolicyExtension } from "./mcp-read-only-policy.ts";
 import { createOmitEmptyToolsExtension } from "./omit-empty-tools.ts";
 import { createBashCommandNormalizeExtension } from "./bash-command-normalize.ts";
@@ -53,7 +53,7 @@ import { resolveShellTools } from "./powershell-settings.ts";
 import { isBuiltInSubagentsEnabled, readSubagentSettings } from "./subagent-settings.ts";
 import { pendingTitleFrom } from "./pending-notifications.ts";
 import { subagentFetchHint } from "./get-result-tool.ts";
-import type { SettledReportHandoff, SettledReportSink } from "./settled-report-note";
+import type { SettledReportHandoff, SettledReportSink } from "./settled-report-note.ts";
 import { SETTLED_REPORTS_CUSTOM_TYPE } from "./settled-report.ts";
 import { SubagentQueue } from "./subagent-queue.ts";
 import { isShortSessionId, shortSessionId } from "./session-short-id.ts";
@@ -70,6 +70,7 @@ interface HostSession {
   isAlive(): boolean;
   isRunning(): boolean;
   waitUntilReady(): Promise<void>;
+  waitForCompactionContinuation?(): Promise<void> | undefined;
   /**
    * Connect the session's MCP servers before a run prompts the SDK session directly, past the
    * wrapper's `send()`; false when Stop or `signal` ended the wait and the run must not start.
@@ -91,8 +92,8 @@ export interface SubagentRuntimeDependencies {
   /** The session catalogue `list_subagent_runs` reads; live runs are overlaid on it. */
   listSessions?(): Promise<readonly SessionInfo[]>;
   isBuiltInSubagentsEnabled?(): boolean;
-  /** Where a settled run's report is queued for its parent. */
-  settledReports: SettledReportSink;
+  /** Where a settled run's report is queued for its parent; a caller with no sink only loses the batch. */
+  settledReports?: SettledReportSink;
 }
 
 export interface SubagentController {
@@ -987,6 +988,8 @@ export function createSubagentController(
           const skillCatalogMessage = skillsBinding.getSkillCatalogMessage();
           if (skillCatalogMessage) await inner.prompt(skillCatalogMessage, { source: "rpc" });
           await inner.prompt(delegatedTask, { source: "rpc" });
+          const continuation = childSession?.waitForCompactionContinuation?.();
+          if (continuation) await continuation;
           const text = runResultText(sessionManager, runStart);
           const stop = stored.abortRequested ? undefined : lastAssistantStop(sessionManager);
           const aborted = stored.abortRequested || stop?.aborted === true;
@@ -1192,6 +1195,8 @@ export function createSubagentController(
         // history and stays quiet.
         if (existing.toolsWithheld) announceToolsRestored(wrapper);
         await wrapper!.inner.prompt(request.task, { source: "rpc" });
+        const continuation = wrapper!.waitForCompactionContinuation?.();
+        if (continuation) await continuation;
         const text = runResultText(manager, runStart);
         const stop = stored.abortRequested ? undefined : lastAssistantStop(manager);
         const aborted = stored.abortRequested || stop?.aborted === true;
@@ -1486,7 +1491,7 @@ export function createSubagentController(
   function markResultConsumed(run: SubagentRunInfo): void {
     recordResultConsumed(run);
     if (!run.completedAt) return;
-    dependencies.settledReports.withdraw(run.parentSessionId, "subagent", run.sessionId);
+    dependencies.settledReports?.withdraw(run.parentSessionId, "subagent", run.sessionId);
   }
 
   async function deliverParentNotification(run: SubagentRunInfo, handoff: SettledReportHandoff): Promise<void> {
@@ -1514,6 +1519,7 @@ export function createSubagentController(
     // The report joins the batch already in the parent's queue: several subagents finishing
     // together reach the model as one message, not one message each. A parent already running
     // stands for this result with its own turn, which is what the batch rides in on.
+    if (!dependencies.settledReports) return;
     await dependencies.settledReports.deliver(run.parentSessionId, {
       kind: "subagent",
       id: run.sessionId,

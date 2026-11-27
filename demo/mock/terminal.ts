@@ -2,12 +2,12 @@
  * A pretend terminal for the right-hand panel: echoes keystrokes, supports
  * basic line editing and runs the simulated shell from ./shell.
  */
-import type { MockEventSource } from "./event-source";
-import type { MockRequest } from "./http";
-import { error, json } from "./http";
-import { currentDemoLocale } from "./locale";
-import { HOME } from "./paths";
-import { runShellCommand } from "./shell";
+import type { MockEventSource } from "./event-source.ts";
+import type { MockRequest } from "./http.ts";
+import { error, json } from "./http.ts";
+import { currentDemoLocale } from "./locale.ts";
+import { HOME } from "./paths.ts";
+import { runShellCommand } from "./shell.ts";
 
 interface FakeTerminal {
   cwd: string;

@@ -3,10 +3,15 @@
 // `!` command runs beside the run, and whether a run is streaming — so they live here
 // together, away from the component's JSX.
 
+import type { SessionReferenceTarget } from "./session-reference-target.ts";
+import { withSessionReferences } from "./session-reference-target.ts";
+
 export interface ComposerSendDeps<Image = unknown> {
   value: string;
   attachedImages: Image[];
   isStreaming: boolean;
+  /** The sessions quoted with `#`, which the message carries as tokens (lib/session-reference.ts). */
+  attachedReferences?: readonly SessionReferenceTarget[];
   /** Whether the session can run a `/command` at all right now. */
   onBuiltinCommand?: unknown;
   onAudioUnlock?: () => void;
@@ -23,17 +28,23 @@ export interface ComposerSendDeps<Image = unknown> {
   onFollowUp?: (message: string, images?: Image[]) => void;
 }
 
+/** The text that goes out: the composer's own, with the quoted sessions' tokens behind it. */
+function submittedText<Image>(deps: ComposerSendDeps<Image>): string {
+  const msg = deps.value.trim();
+  return withSessionReferences(msg, deps.attachedReferences ?? []);
+}
+
 /** The send button: a `/command` the composer owns takes the message, a `!` command runs beside the run, anything else queues. */
 export async function handleComposerSend<Image>(deps: ComposerSendDeps<Image>): Promise<void> {
   const msg = deps.value.trim();
-  if (!msg && !deps.attachedImages.length) return;
+  if (!msg && !deps.attachedImages.length && !deps.attachedReferences?.length) return;
   deps.onAudioUnlock?.();
   const builtinAllowed = !deps.isStreaming || deps.offersBuiltinSlashCommandWhileStreaming(msg);
   if (builtinAllowed && await deps.runBuiltinCommand(msg)) return;
   // A `!` command runs beside the run, as in pi's TUI; anything else queues.
   if (deps.isStreaming && !(msg.startsWith("!") && !deps.attachedImages.length)) return;
   deps.clearInput();
-  deps.onSend?.(msg, deps.attachedImages.length ? deps.attachedImages : undefined);
+  deps.onSend?.(submittedText(deps), deps.attachedImages.length ? deps.attachedImages : undefined);
 }
 
 /** Steer or follow-up: a `/command` the composer owns runs first, another one queues with its behavior named. */
@@ -41,9 +52,11 @@ export function handleComposerSendQueued<Image>(
   mode: "steer" | "followup",
   deps: ComposerSendDeps<Image>,
 ): void {
-  const msg = deps.value.trim();
+  const text = deps.value.trim();
+  // A steer or follow-up carries the quoted sessions too: clearInput() drops them.
+  const msg = withSessionReferences(text, deps.attachedReferences ?? []);
   if (!msg && !deps.attachedImages.length) return;
-  if (msg.startsWith("!") && !deps.attachedImages.length) {
+  if (text.startsWith("!") && !deps.attachedImages.length) {
     // A shell command is never steered into the run as text.
     void deps.handleSend?.();
     return;

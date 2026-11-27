@@ -1,6 +1,6 @@
 /** Sample plugin packages and skills.sh search results for the settings panels. */
 import type { PluginsResponse, SkillSearchResult } from "@/lib/api-types";
-import { AGENT_DIR, PROJECT_ROOT } from "../paths";
+import { AGENT_DIR, PROJECT_ROOT } from "../paths.ts";
 
 const notifyPath = `${AGENT_DIR}/npm/node_modules/@demo/pi-notify`;
 const reviewPath = `${PROJECT_ROOT}/.pi/git/github.com/demo/pi-review-kit`;

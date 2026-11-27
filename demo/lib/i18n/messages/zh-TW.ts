@@ -1,4 +1,4 @@
-import type { LocalePlugin } from "../types";
+import type { LocalePlugin } from "../types.ts";
 
 /** Pi Web 內建繁體中文語系。 */
 export const zhTWLocale: LocalePlugin = {

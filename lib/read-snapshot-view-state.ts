@@ -1,4 +1,4 @@
-import type { FileViewerDisplayMode } from "./file-viewer-state";
+import type { FileViewerDisplayMode } from "./file-viewer-state.ts";
 
 /**
  * What one read card's panel was last showing: Source or Preview, wrapped or

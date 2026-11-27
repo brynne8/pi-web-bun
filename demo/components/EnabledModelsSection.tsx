@@ -9,7 +9,7 @@ import {
   filterEnabledModels,
   findProviderView,
   isLastEnabledModel,
-} from "./enabled-models-helpers";
+} from "./enabled-models-helpers.ts";
 import { ConfigButton, ConfigSwitch } from "./SettingsUi";
 
 /**

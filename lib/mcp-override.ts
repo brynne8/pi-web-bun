@@ -1,4 +1,4 @@
-import type { McpOverrideKey } from "./api-types";
+import type { McpOverrideKey } from "./api-types.ts";
 import { isRecord } from "./is-record.ts";
 
 // Project overrides of global MCP servers (pi 1.0.1): a project `.pi/mcp.json`

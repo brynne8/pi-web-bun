@@ -48,7 +48,7 @@ import { sessionPathKey } from "./session-path.ts";
 import { forgetSessionUiState } from "./session-ui-state.ts";
 import { readSubagentRun, SUBAGENT_META_TYPE } from "./subagents.ts";
 import { readSideRelation } from "./side-session.ts";
-import type { SessionEntry, SessionHeader } from "./types";
+import type { SessionEntry, SessionHeader } from "./types.ts";
 import { errorMessage } from "./errors.ts";
 
 /** Most ids one POST /api/sessions/delete takes; the sidebar sends a bigger project in parts. */

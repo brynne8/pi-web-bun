@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { McpScope } from "./api-types";
+import type { McpScope } from "./api-types.ts";
 
 // What Settings › MCP's Undo needs after a Remove (ADR 0006: "Remove is
 // undoable for 60 seconds; the removed entry is held server-side and never

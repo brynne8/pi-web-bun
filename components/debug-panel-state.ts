@@ -17,7 +17,7 @@ import { listTrackedEventSources, readHttpProtocol, readPageVisibility, readRunn
 import { projectNameOf } from "@/lib/session-tree";
 import type { SessionInfo, SubagentSessionStatus } from "@/lib/types";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
-import { MCP_SESSION_STATE_KEYS } from "./mcp-config-helpers";
+import { MCP_SESSION_STATE_KEYS } from "./mcp-config-helpers.ts";
 import type { Translate } from "@/lib/i18n/types";
 import { isRecord } from "@/lib/is-record";
 

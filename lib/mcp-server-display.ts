@@ -1,4 +1,4 @@
-import type { McpConfigFieldRef, McpConfigFileProblem, McpOverrideKey, McpServerInfo, McpVariableReference } from "./api-types";
+import type { McpConfigFieldRef, McpConfigFileProblem, McpOverrideKey, McpServerInfo, McpVariableReference } from "./api-types.ts";
 import { shortenPath } from "./display-path.ts";
 
 // Display helpers for MCP server descriptions (`McpServerInfo`), shared by the

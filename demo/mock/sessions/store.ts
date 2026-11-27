@@ -9,11 +9,11 @@ import { getThinkingPreview } from "@/lib/message-display";
 import { computeSessionStats } from "@/lib/session-stats";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
 import { projectTreeForResponse, toSummaryTree } from "@/lib/project-tree";
-import { readSessionToolSelectionFromEntries } from "./tool-selection";
-import { currentDemoLocale, type DemoLocale } from "../locale";
-import { PROJECT_BRANCH, PROJECT_ROOT, SCRATCH_ROOT, WORKTREE_BRANCH, WORKTREE_ROOT, sessionFilePath } from "../paths";
-import { buildSession } from "./builder";
-import { SESSION_SCRIPTS } from "./scripts";
+import { readSessionToolSelectionFromEntries } from "./tool-selection.ts";
+import { currentDemoLocale, type DemoLocale } from "../locale.ts";
+import { PROJECT_BRANCH, PROJECT_ROOT, SCRATCH_ROOT, WORKTREE_BRANCH, WORKTREE_ROOT, sessionFilePath } from "../paths.ts";
+import { buildSession } from "./builder.ts";
+import { SESSION_SCRIPTS } from "./scripts.ts";
 
 export interface LiveState {
   model: { provider: string; modelId: string };

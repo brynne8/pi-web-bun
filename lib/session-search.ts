@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
-import type { SessionInfo } from "./types";
+import type { SessionInfo } from "./types.ts";
 
 // Kept as literals: this module imports nothing at run time, so its test loads
 // it with Node's type stripping alone. Canonical definitions: session-family.ts.

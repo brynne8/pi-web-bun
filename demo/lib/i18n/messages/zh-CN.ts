@@ -1,4 +1,4 @@
-import type { LocalePlugin } from "../types";
+import type { LocalePlugin } from "../types.ts";
 
 /** Pi Web 内置简体中文语言包。 */
 export const zhCNLocale: LocalePlugin = {

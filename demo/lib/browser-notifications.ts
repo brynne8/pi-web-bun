@@ -1,4 +1,4 @@
-import type { BlockingExtensionUiRequest, ExtensionUiRequest } from "./types";
+import type { BlockingExtensionUiRequest, ExtensionUiRequest } from "./types.ts";
 
 interface WindowNotificationLike {
   onclick: Notification["onclick"];

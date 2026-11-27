@@ -9,7 +9,7 @@ import {
   filterEnabledModels,
   findProviderView,
   isLastEnabledModel,
-} from "./enabled-models-helpers";
+} from "./enabled-models-helpers.ts";
 import { ConfigButton, ConfigSwitch } from "./SettingsUi";
 import { ModelContextWindow, type ModelContextSettings } from "./ModelContextWindow";
 import { readJsonOrThrow } from "@/lib/fetch-json";

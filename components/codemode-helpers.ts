@@ -14,7 +14,7 @@ import {
   type FetchLike,
   type McpLoadFailure,
   type McpNoticeText,
-} from "./mcp-config-helpers";
+} from "./mcp-config-helpers.ts";
 
 // What Settings › Tools shows of Code mode: the choice, the mode and the
 // budget, the sandbox and the settings file that turns the built-in off.

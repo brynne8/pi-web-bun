@@ -1,4 +1,4 @@
-import type { BlockingExtensionUiRequest, ExtensionUiRequest } from "./types";
+import type { BlockingExtensionUiRequest, ExtensionUiRequest } from "./types.ts";
 
 /**
  * Blocking extension UI waits in arrival order, one entry per request id: the

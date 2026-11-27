@@ -21,7 +21,7 @@ import {
 import type { TerminalEvent } from "@/lib/terminal-manager";
 import { TERMINAL_XTERM_THEMES } from "@/lib/terminal-theme";
 import { TerminalExtraKeys, useTerminalExtraKeysVisible } from "./TerminalExtraKeys";
-import type { TerminalTab } from "./terminal-tab-state";
+import type { TerminalTab } from "./terminal-tab-state.ts";
 
 interface Props {
   tab: TerminalTab;

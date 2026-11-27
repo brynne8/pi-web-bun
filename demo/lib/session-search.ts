@@ -1,6 +1,6 @@
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
-import type { SessionInfo } from "./types";
+import type { SessionInfo } from "./types.ts";
 
 const MAX_FILES = 500;
 const MAX_RESULTS = 30;

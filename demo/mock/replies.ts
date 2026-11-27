@@ -3,9 +3,9 @@
  * prompt, optionally run one read-only tool so the stream shows a tool call,
  * and always explain that this is a static demo.
  */
-import type { DemoLocale } from "./locale";
-import { MODELS_RESPONSE } from "./data/models";
-import { buildContext, type MockSession } from "./sessions/store";
+import type { DemoLocale } from "./locale.ts";
+import { MODELS_RESPONSE } from "./data/models.ts";
+import { buildContext, type MockSession } from "./sessions/store.ts";
 
 export interface ReplyPlan {
   thinking?: string;

@@ -1,5 +1,5 @@
 import { stripAnsi } from "./ansi.ts";
-import type { AgentMessage, AssistantContentBlock, AssistantMessage, ThinkingContent } from "./types";
+import type { AgentMessage, AssistantContentBlock, AssistantMessage, ThinkingContent } from "./types.ts";
 
 interface DisplayOptions {
   isStreaming?: boolean;

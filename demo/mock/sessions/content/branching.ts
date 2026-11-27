@@ -1,6 +1,6 @@
-import { PROJECT_ROOT } from "../../paths";
-import { SESSION_IDS } from "../ids";
-import type { SessionScript, Step } from "../types";
+import { PROJECT_ROOT } from "../../paths.ts";
+import { SESSION_IDS } from "../ids.ts";
+import type { SessionScript, Step } from "../types.ts";
 
 const question: Step = {
   kind: "user",

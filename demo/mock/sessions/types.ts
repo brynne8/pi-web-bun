@@ -1,4 +1,4 @@
-import type { Localized } from "../locale";
+import type { Localized } from "../locale.ts";
 import type { SessionInfo } from "@/lib/types";
 
 export type Text = Localized | string;

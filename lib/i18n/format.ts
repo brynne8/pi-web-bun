@@ -1,4 +1,4 @@
-import type { Locale, TranslationParams } from "./types";
+import type { Locale, TranslationParams } from "./types.ts";
 
 type MessagesByLocale = Record<string, Record<string, string>>;
 

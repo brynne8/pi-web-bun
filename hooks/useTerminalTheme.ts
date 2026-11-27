@@ -4,7 +4,7 @@ import {
   TERMINAL_THEME_STORAGE_KEY,
   type TerminalTheme,
 } from "@/lib/terminal-theme";
-import { createStoredChoice } from "./useStoredChoice";
+import { createStoredChoice } from "./useStoredChoice.ts";
 
 const theme = createStoredChoice(TERMINAL_THEME_STORAGE_KEY, parseTerminalTheme, TERMINAL_THEME_DEFAULT);
 

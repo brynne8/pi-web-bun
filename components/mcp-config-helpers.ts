@@ -22,7 +22,7 @@ import type {
   ProjectTrustStatus,
 } from "@/lib/api-types";
 import type { McpImportFieldValue, McpImportNote } from "@/lib/mcp-import";
-import { itemsToSwitch } from "./settings-ui-helpers";
+import { itemsToSwitch } from "./settings-ui-helpers.ts";
 import { errorMessage } from "@/lib/errors";
 
 // Pure helpers for Settings › MCP (components/McpConfig.tsx): what each row

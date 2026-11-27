@@ -1,6 +1,6 @@
-import { PROJECT_ROOT } from "../../paths";
-import { SESSION_IDS } from "../ids";
-import type { SessionScript } from "../types";
+import { PROJECT_ROOT } from "../../paths.ts";
+import { SESSION_IDS } from "../ids.ts";
+import type { SessionScript } from "../types.ts";
 
 export const modelsSession: SessionScript = {
   id: SESSION_IDS.models,

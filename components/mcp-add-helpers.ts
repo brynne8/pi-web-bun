@@ -31,7 +31,7 @@ import {
 import { findWebPasswordField, resolvedConfigValues, WEB_PASSWORD_VARIABLE, type McpResolvedConfigValue } from "@/lib/mcp-config-values";
 import { SECRET_MASK } from "@/lib/mcp-secrets";
 import { formatMcpCommandLine, revealHiddenCharacters } from "@/lib/mcp-server-display";
-import { isBlockingFileProblem, mcpProjectTrustable, mcpWritesOff } from "./mcp-config-helpers";
+import { isBlockingFileProblem, mcpProjectTrustable, mcpWritesOff } from "./mcp-config-helpers.ts";
 import type { Translate } from "@/lib/i18n/types";
 
 // The add pane of Settings › MCP (`components/McpAddServer.tsx`): what a paste

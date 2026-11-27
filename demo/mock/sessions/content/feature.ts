@@ -1,7 +1,7 @@
-import { PROJECT_ROOT } from "../../paths";
-import { FORMAT_DURATION_TEST_OUTPUT } from "../../data/project-files";
-import { SESSION_IDS } from "../ids";
-import type { SessionScript } from "../types";
+import { PROJECT_ROOT } from "../../paths.ts";
+import { FORMAT_DURATION_TEST_OUTPUT } from "../../data/project-files.ts";
+import { SESSION_IDS } from "../ids.ts";
+import type { SessionScript } from "../types.ts";
 
 const RG_OUTPUT = `components/AppShell.tsx:2102:                    const formatDuration = (ms: number) => {
 components/AppShell.tsx:2118:                       ...(totalActiveMs > 0 ? [{ label: translate("session.totalActive"), value: formatDuration(totalActiveMs), copyField: null }] : []),

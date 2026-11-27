@@ -1,6 +1,6 @@
 import { realpathSync } from "fs";
 import path from "path";
-import { isWindowsAbsolutePath } from "./paths";
+import { isWindowsAbsolutePath } from "./paths.ts";
 
 /**
  * Lexical containment check. Accepts either canonical form on both sides: it

@@ -3,10 +3,10 @@
  * terminal panel. It understands a handful of read-only commands against the
  * virtual project files and explains the demo for everything else.
  */
-import { currentDemoLocale } from "./locale";
-import { listDirectory, lookup, readFileText } from "./files";
-import { changedFiles } from "./git";
-import { HOME, PROJECT_BRANCH, PROJECT_ROOT } from "./paths";
+import { currentDemoLocale } from "./locale.ts";
+import { listDirectory, lookup, readFileText } from "./files.ts";
+import { changedFiles } from "./git.ts";
+import { HOME, PROJECT_BRANCH, PROJECT_ROOT } from "./paths.ts";
 
 export interface ShellResult {
   output: string;

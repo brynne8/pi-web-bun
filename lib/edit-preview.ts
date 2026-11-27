@@ -1,4 +1,4 @@
-import type { SplitDiffCell, SplitDiffFile, SplitDiffRow } from "./patch";
+import type { SplitDiffCell, SplitDiffFile, SplitDiffRow } from "./patch.ts";
 
 /**
  * A diff preview of an `edit` call built from its arguments alone, for the

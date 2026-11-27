@@ -7,7 +7,7 @@ import { shortenPath } from "@/lib/display-path";
 import { revealHiddenCharacters } from "@/lib/mcp-server-display";
 import { focusIfLost } from "@/lib/stacked-dialog";
 import type { ToolEntry } from "@/lib/tool-presets";
-import type { McpLoadFailure, McpNoticeText } from "./mcp-config-helpers";
+import type { McpLoadFailure, McpNoticeText } from "./mcp-config-helpers.ts";
 import {
   CODEMODE_MODE_DESCRIPTION_KEYS,
   CODEMODE_MODE_KEYS,
@@ -26,7 +26,7 @@ import {
   saveCodemodeMode,
   saveCodemodePreference,
   type CodemodeSaveState,
-} from "./codemode-helpers";
+} from "./codemode-helpers.ts";
 import { ConfigButton, ConfigScopeSwitch } from "./SettingsUi";
 
 type Translate = ReturnType<typeof useI18n>["t"];

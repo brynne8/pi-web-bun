@@ -5,10 +5,10 @@
  * overrides on top so the explorer, viewer and Git panel tell one story.
  */
 import { TEXT_PREVIEW_MAX_BYTES, documentPreviewKind, getAudioMime, getDocumentMime, getImageMime, getVideoMime } from "@/lib/file-types";
-import { demoAssetPath } from "./base-path";
-import { PROJECT_ROOT, SCRATCH_ROOT, WORKTREE_ROOT, relativeToProject } from "./paths";
-import { getRealFetch } from "./runtime";
-import { PROJECT_FILE_EDITS, PROJECT_FILE_OVERRIDES, SCRATCH_FILES } from "./data/project-files";
+import { demoAssetPath } from "./base-path.ts";
+import { PROJECT_ROOT, SCRATCH_ROOT, WORKTREE_ROOT, relativeToProject } from "./paths.ts";
+import { getRealFetch } from "./runtime.ts";
+import { PROJECT_FILE_EDITS, PROJECT_FILE_OVERRIDES, SCRATCH_FILES } from "./data/project-files.ts";
 
 export interface VirtualFile {
   path: string;

@@ -2,6 +2,7 @@
 
 import { Fragment, useState } from "react";
 import { copyText } from "@/lib/clipboard";
+import type { FileLinkTarget } from "@/lib/file-links";
 import { useI18n } from "@/hooks/useI18n";
 import { formatTurnDuration } from "@/lib/turn-duration";
 import { formatTime, formatUsage, UsagePart, type StatPart } from "./MessageView";
@@ -28,7 +29,7 @@ export function TurnFooter({ usage, timestamp, durationMs, text, writtenFiles = 
   writtenFiles?: WrittenFile[];
   /** The turn was cut off by Stop, which pi's TUI marks as the turn ends. */
   aborted?: boolean;
-  onOpenFile?: (filePath: string, page?: number) => void;
+  onOpenFile?: (filePath: string, target?: FileLinkTarget) => void;
 }) {
   const { t, locale } = useI18n();
   const [copied, setCopied] = useState(false);

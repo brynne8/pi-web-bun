@@ -1,4 +1,4 @@
-import type { SessionInfo } from "./types";
+import type { SessionInfo } from "./types.ts";
 
 /** The fork route's refusals of a side chat, as translated notices. */
 export const SIDE_REFUSAL_MESSAGES = {

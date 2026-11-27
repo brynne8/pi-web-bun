@@ -7,6 +7,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { usePrismLanguages } from "@/hooks/usePrismLanguages";
 import { useI18n } from "@/hooks/useI18n";
 import { getLanguage } from "@/lib/file-types";
+import type { FileLinkTarget } from "@/lib/file-links";
 import { getFileDirectory } from "@/lib/file-paths";
 import { isDelimitedTablePath } from "@/lib/delimited-table";
 import { resolveInitialWrapLines, type FileViewerDisplayMode } from "@/lib/file-viewer-state";
@@ -31,7 +32,7 @@ interface Props extends ReadSnapshot {
   /** The card this panel belongs to: it owns the Source/Preview and wrap choices. */
   toolCallId?: string;
   /** Following a link opens the live file: the snapshot itself is never re-read. */
-  onOpenFile?: (filePath: string, page?: number) => void;
+  onOpenFile?: (filePath: string, target?: FileLinkTarget) => void;
 }
 
 /**

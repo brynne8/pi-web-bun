@@ -3,7 +3,7 @@ import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { getCurrentSystemPrompt } from "@earendil-works/pi-ai";
 import { randomUUID } from "crypto";
-import { existsSync } from "fs";
+import { existsSync, statSync } from "fs";
 import { isDeepStrictEqual } from "util";
 import { validateAgentImages } from "./image-attachments.ts";
 import { writeSessionFileAtomicSync } from "./atomic-file.ts";
@@ -22,15 +22,16 @@ import {
   preferUserBashExtension,
   preferUserPowerShellExtension,
 } from "./project-command-env.ts";
-import { cacheSessionPath, catalogFirstMessage, findSessionIdsByShortId, getLatestModelChange, invalidateSessionListCache, invalidateSessionManagerCache, invalidateSessionPathCache, listAllSessions, readLatestSessionEntryId, resolveSessionPath } from "./session-reader.ts";
+import { cacheSessionPath, catalogFirstMessage, findSessionIdsByShortId, getLatestModelChange, invalidateSessionListCache, invalidateSessionManagerCache, invalidateSessionPathCache, listAllSessions, openSessionManager, readLatestSessionEntryId, resolveSessionPath } from "./session-reader.ts";
 import { appendSessionNameSource } from "./session-name-source.ts";
+import { expandSessionReferences, resolveSessionReferenceForSend } from "./session-reference.ts";
 import { computeLiveSessionTotalActiveMs } from "./session-timing.ts";
 import { realPathOrResolved } from "./paths.ts";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust.ts";
 import { notifySessionComplete } from "./web-push.ts";
 import { hasActiveSessionLivenessProvider } from "./session-liveness.ts";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
-import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
+import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types.ts";
 import type {
   ExtensionUiRequest,
   ExtensionUiResponse,
@@ -44,7 +45,7 @@ import type {
 import { extensionUiTheme } from "./extension-ui-theme.ts";
 import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS, type HeadlessCustomUiTui } from "./custom-ui-terminal.ts";
 import { createSettledReportSink } from "./settled-report-note.ts";
-import type { RailNotificationEvent } from "./background-notifications";
+import type { RailNotificationEvent } from "./background-notifications.ts";
 import { createPendingNotificationsExtension } from "./pending-notifications-extension.ts";
 import { pendingNotificationsFor } from "./pending-notifications.ts";
 import { createGetResultExtension } from "./get-result-extension.ts";
@@ -80,8 +81,8 @@ import { createExactSystemPromptExtension } from "./exact-system-prompt.ts";
 import { createPlatformInfoExtension } from "./platform-info.ts";
 import { computeForcedSystemPrompt } from "./effective-system-prompt.ts";
 import { createPiWebBuiltinExtensions, createSubagentCodemodeExtension, createSubagentMcpExtensions } from "./builtin-extensions.ts";
-import type { McpHost } from "./mcp-host";
-import type { DebugMcpHost, DebugPendingReport, DebugSessionLifecycle, DebugWrapperSnapshot } from "./debug-types";
+import type { McpHost } from "./mcp-host.ts";
+import type { DebugMcpHost, DebugPendingReport, DebugSessionLifecycle, DebugWrapperSnapshot } from "./debug-types.ts";
 import { mcpPromptPreparation, type McpCommandCandidate } from "./mcp-command.ts";
 import { createReadOnlyMcpPolicyExtension, createSubagentMcpPolicyExtension } from "./mcp-read-only-policy.ts";
 import { createOmitEmptyToolsExtension } from "./omit-empty-tools.ts";
@@ -95,7 +96,7 @@ import { retryHttp2StreamDrops } from "./retry-http2-stream-drops.ts";
 import { onServerShutdown } from "./server-shutdown.ts";
 import { recordRuntimeDiagnostic } from "./runtime-diagnostics.ts";
 import { collectStartupIssues, extensionErrorMessage, limitStartupNotices, type StartupIssue } from "./startup-issues.ts";
-import { collectLiveAssistantNotices, readShowCacheMissNotices, withSessionPrices } from "./transcript-notices-server.ts";
+import { collectLiveAssistantNotices, readNoticeSettings, shownNotices, withSessionPrices } from "./transcript-notices-server.ts";
 import {
   appendClearedSessionToolSelection,
   appendSessionToolSelection,
@@ -428,6 +429,10 @@ export class AgentSessionWrapper {
   // get_state calls waiting for the binding, released early by a blocking dialog (waitForStateRead()).
   private blockingUiWaiters = new Set<() => void>();
   private readonly exactSystemPrompt?: () => string;
+  // The manual compactions this session is running, and the compact() that leaves the
+  // continuation to the wrapper (pi 1.6.1): a turn that resumes after one waits for it.
+  private readonly manualCompactionWork = new Set<Promise<void>>();
+  private readonly compactWithoutContinuation: AgentSessionLike["compact"] | undefined;
   // The prompt a plugin forced, computed from the session's extension runner.
   private forcedSystemPrompt?: { toolNames: string; prompt: string | undefined };
   private readonly chatOnly: boolean;
@@ -504,6 +509,56 @@ export class AgentSessionWrapper {
     this.builtOnThinkingLevel = inner.agent?.state?.thinkingLevel;
     this.startupNotices = options.startupIssues ? [] : null;
     for (const issue of options.startupIssues ?? []) this.notifyIssue(issue);
+
+    // An extension's ctx.compact() calls the public SDK method, and its onComplete may
+    // start the next turn. Observe the call itself: agent_settled and the interrupted
+    // prompt can finish before compaction_start, so neither can tell us whether the
+    // abort is terminal. The wrapper's own `compact` command has no completion callback
+    // and keeps the untracked method: prompts parked meanwhile report their own prompt_done.
+    const compact = inner.compact?.bind(inner);
+    this.compactWithoutContinuation = compact;
+    if (compact) inner.compact = (...args) => this.trackManualCompactionWork(compact(...args));
+    const prompt = inner.prompt?.bind(inner);
+    if (prompt) inner.prompt = (...args) => {
+      // A completion callback can submit a prompt whose async input/auth preflight
+      // has not set isStreaming yet. Follow that promise as well as active runs.
+      const duringCompaction = this.manualCompactionWork.size > 0 && !inner.isCompacting;
+      const operation = prompt(...args);
+      return duringCompaction ? this.trackManualCompactionWork(operation) : operation;
+    };
+  }
+
+  private trackManualCompactionWork<T>(operation: Promise<T>): Promise<T> {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    this.manualCompactionWork.add(promise);
+    const finish = () => {
+      this.manualCompactionWork.delete(promise);
+      resolve();
+      this.notifyAgentRunCompleteIfIdle();
+      this.checkExtensionShutdown();
+    };
+    // Attach after the caller: the SDK's await in ctx.compact() must get to run
+    // onComplete (or onError) before we decide whether its session will continue.
+    queueMicrotask(() => { void operation.then(finish, finish); });
+    return operation;
+  }
+
+  waitForCompactionContinuation(): Promise<void> | undefined {
+    if (this.manualCompactionWork.size === 0) return;
+    return this.drainManualCompactionWork();
+  }
+
+  private async drainManualCompactionWork(): Promise<void> {
+    for (;;) {
+      if (this.manualCompactionWork.size > 0) {
+        await Promise.all(this.manualCompactionWork);
+      } else if (this.inner.isStreaming) {
+        // sendCustomMessage({ triggerTurn: true }) starts a run without prompt().
+        await this.inner.waitForIdle();
+      } else {
+        return;
+      }
+    }
   }
 
   get sessionId(): string {
@@ -573,7 +628,8 @@ export class AgentSessionWrapper {
   }
 
   isRunning(): boolean {
-    return this._alive && (this.pendingPromptCount > 0 || this.inner.isStreaming || this.inner.isCompacting || this.shellRunning);
+    return this._alive && (this.pendingPromptCount > 0 || this.inner.isStreaming || this.inner.isCompacting
+      || this.manualCompactionWork.size > 0 || this.shellRunning);
   }
 
   /**
@@ -778,8 +834,8 @@ export class AgentSessionWrapper {
   }
 
   /**
-   * An assistant `message_end` with the notices pi's TUI shows under
-   * `showCacheMissNotices` (#1265), as `transcriptNotices` beside the message.
+   * An assistant `message_end` with the notices pi's TUI shows under its
+   * `notices.*` settings (#1265), as `transcriptNotices` beside the message.
    * The message itself is left alone: pi writes that object to the file.
    */
   private withTranscriptNotices(event: AgentEvent): AgentEvent {
@@ -787,14 +843,16 @@ export class AgentSessionWrapper {
     if (this.listeners.size === 0 || message?.role !== "assistant") return event;
     try {
       const manager = this.inner.sessionManager;
-      if (!readShowCacheMissNotices(manager.getCwd())) return event;
+      const settings = readNoticeSettings(manager.getCwd());
+      // The only two kinds a reply carries.
+      if (!settings.cacheMisses && !settings.reasoningDrops) return event;
       const entries = manager.getEntries() as unknown as SessionEntry[];
-      const notices = collectLiveAssistantNotices(
+      const notices = shownNotices(collectLiveAssistantNotices(
         entries,
         manager.getBranch() as unknown as SessionEntry[],
         message,
         withSessionPrices(entries, this.inner.modelRuntime),
-      );
+      ), settings);
       return notices.length > 0 ? { ...event, transcriptNotices: notices } : event;
     } catch (error) {
       console.warn("[pi-web] transcript notices failed:", error instanceof Error ? error.message : error);
@@ -976,6 +1034,8 @@ export class AgentSessionWrapper {
           release();
         },
       });
+      const continuation = this.waitForCompactionContinuation();
+      if (continuation) await continuation;
     } catch (error) {
       failure = error;
     }
@@ -1634,6 +1694,31 @@ export class AgentSessionWrapper {
         // this submission starts a run or joins its streaming queue.
         const releaseAdmission = await this.acquirePromptAdmission();
         try {
+          // The composer's # session references (`[title](#session:uuid)`) expand
+          // here, once: the model, a parked prompt and the transcript all see the
+          // same expanded content (lib/session-reference.ts). Protected tokens
+          // (inside code or escaped) stay as text. After admission, so a prompt
+          // whose referenced file is still being read is never overtaken by one
+          // sent after it; inside the try, so a failed read releases admission.
+          const promptMessage = await expandSessionReferences(
+            command.message as string,
+            (id, maxChars) => resolveSessionReferenceForSend(
+              id,
+              {
+                openSessionManager,
+                // A cached path can outlive its file: opening it would quote an
+                // empty new session instead of saying the file is gone.
+                resolveSessionPath: async (id) => {
+                  const filePath = await resolveSessionPath(id);
+                  return filePath && existsSync(filePath) ? filePath : null;
+                },
+                // The block's tooltip reads this, so it matches the sidebar's own
+                // "last changed" for the same session.
+                modifiedAt: async (filePath) => statSync(filePath).mtime.toISOString(),
+              },
+              maxChars,
+            ),
+          );
           // A steer or follow-up joins the run beside a `!` command, as pi's TUI
           // queues it; only a prompt that would start a run waits for the command.
           if (this.shellRunning && !(command.streamingBehavior && this.inner.isStreaming)) {
@@ -1746,7 +1831,7 @@ export class AgentSessionWrapper {
           if (!streamingBehavior) this.lastRunAborted = false;
           let prompt: Promise<void>;
           try {
-            prompt = this.inner.prompt(command.message as string, {
+            prompt = this.inner.prompt(promptMessage, {
               ...(promptImages?.length ? { images: promptImages } : {}),
               ...(streamingBehavior ? { streamingBehavior } : {}),
               source: "rpc",
@@ -1769,6 +1854,11 @@ export class AgentSessionWrapper {
             // the internal callback. This waits for the run, but never acks early.
             acceptPreflight();
             await finishDirectRun({ aborted: this.lastRunAborted });
+            // A manual compaction that started while this direct prompt ran resumes the turn
+            // afterwards (pi 1.6.1's wait, lib/subagent-runtime.ts): settle it before the
+            // prompt is called done.
+            const continuation = this.waitForCompactionContinuation();
+            if (continuation) await continuation;
             finishPrompt();
             if (!streamingBehavior) this.emit(this.promptDoneEvent());
           }, async (error) => {
@@ -1780,7 +1870,7 @@ export class AgentSessionWrapper {
             // so the wrapper cannot idle out from under it.
             if (!preflightAccepted && isCompactionInProgressError(error)) {
               this.parkDuringCompaction({
-                message: command.message as string,
+                message: promptMessage,
                 images: promptImages,
                 streamingBehavior,
                 settle: finishPrompt,
@@ -2117,7 +2207,7 @@ export class AgentSessionWrapper {
         this.renewExtensionUiStop();
         try {
           return await this.withFinalIdleReset(() =>
-            this.inner.compact(command.customInstructions as string | undefined)
+            (this.compactWithoutContinuation ?? this.inner.compact.bind(this.inner))(command.customInstructions as string | undefined)
           );
         } finally {
           invalidateSessionListCache();

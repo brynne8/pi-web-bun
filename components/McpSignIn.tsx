@@ -7,7 +7,7 @@ import { revealHiddenCharacters } from "@/lib/mcp-server-display";
 import { focusIfLost } from "@/lib/stacked-dialog";
 import { OAuthPastePanel } from "./OAuthPastePanel";
 import { ConfigButton, ConfigDetailGridRow } from "./SettingsUi";
-import type { McpActionFailure, McpTestBlock } from "./mcp-config-helpers";
+import type { McpActionFailure, McpTestBlock } from "./mcp-config-helpers.ts";
 import {
   MCP_SIGN_IN_BLOCK_KEYS,
   MCP_SIGN_IN_PHASE_KEYS,
@@ -18,7 +18,7 @@ import {
   mcpSignInOutcomeTone,
   mcpSignInShared,
   type McpSignInRun,
-} from "./mcp-sign-in-helpers";
+} from "./mcp-sign-in-helpers.ts";
 import type { Translate } from "@/lib/i18n/types";
 
 /**

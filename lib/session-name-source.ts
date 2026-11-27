@@ -1,5 +1,5 @@
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
-import type { SessionEntry } from "./types";
+import type { SessionEntry } from "./types.ts";
 
 export const SESSION_NAME_SOURCE_TYPE = "pi-web:session-name";
 

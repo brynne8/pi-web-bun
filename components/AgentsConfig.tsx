@@ -37,7 +37,7 @@ import {
   ConfigSwitch,
 } from "./SettingsUi";
 import { ModelSelector } from "./ModelSelector";
-import { projectTrustReloadKey } from "./settings-ui-helpers";
+import { projectTrustReloadKey } from "./settings-ui-helpers.ts";
 import { readJsonOrThrow } from "@/lib/fetch-json";
 import { errorMessage } from "@/lib/errors";
 

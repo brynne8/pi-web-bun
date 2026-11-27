@@ -6,7 +6,7 @@ import { Terminal } from "@xterm/xterm";
 import { useI18n } from "@/hooks/useI18n";
 import { createTerminalWriter, terminalRequest } from "@/lib/terminal-client";
 import type { TerminalEvent } from "@/lib/terminal-manager";
-import type { TerminalTab } from "./terminal-tab-state";
+import type { TerminalTab } from "./terminal-tab-state.ts";
 
 interface Props {
   tab: TerminalTab;

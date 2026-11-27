@@ -1,4 +1,4 @@
-import type { AgentUsage, AssistantMessage } from "./types";
+import type { AgentUsage, AssistantMessage } from "./types.ts";
 
 /**
  * The copies a turn's segments render from, kept per stored message.

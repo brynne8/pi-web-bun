@@ -8,7 +8,7 @@ import { readSubagentRun } from "./subagents.ts";
 import { SIDE_SESSION_NAME } from "./session-family.ts";
 import { createSessionToolSelectionEntry, readSessionToolSelection } from "./session-tool-selection.ts";
 import { createSideBoundaryEntry, createSideMetadataEntry, readSideRelation } from "./side-session.ts";
-import type { SessionEntry } from "./types";
+import type { SessionEntry } from "./types.ts";
 
 /**
  * The sidebar's Fork: pi's `/clone` (a copy of the current branch, positioned

@@ -43,7 +43,7 @@ function fixture({ initial = {}, blocked = false, server = false } = {}) {
   });
   const require = (id) => {
     if (id === "react") return react;
-    if (id === "./useStoredChoice") return run(storeScript);
+    if (id === "./useStoredChoice.ts") return run(storeScript);
     throw new Error(`Unexpected import ${id}`);
   };
   const run = (moduleScript) => {

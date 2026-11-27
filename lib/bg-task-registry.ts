@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { BgTaskSummary } from "./bg-task-types";
+import type { BgTaskSummary } from "./bg-task-types.ts";
 
 /**
  * Live background bash tasks, readable by routes in another module graph.

@@ -554,7 +554,7 @@ test("a running poll cannot supersede a summary that has not answered yet", asyn
   const code = ts.transpileModule(`(async (initialSummaryStartedAtRef, data, sessionListVersionRef, loadSessions) => {\n${runningPollGuardSnippet()}\n})`, {
     compilerOptions: { target: ts.ScriptTarget.ES2020 },
   }).outputText;
-  const decide = vm.runInNewContext(code, { Date, INITIAL_SUMMARY_WAIT_MS: 15_000 });
+  const decide = vm.runInNewContext(code, { Date, INITIAL_SUMMARY_WAIT_MS: 15_000, applyRunning: () => {} });
   let loads = 0;
   const loadSessions = async () => { loads += 1; };
   const sessionListVersionRef = { current: 5 };

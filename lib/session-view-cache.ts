@@ -11,7 +11,7 @@
 //   active leaf, pagination cursor, summary tree, and display stats. Never
 //   streaming state, queued messages, run state, or SSE objects.
 
-import type { AgentMessage } from "./types";
+import type { AgentMessage } from "./types.ts";
 
 export interface SessionViewSnapshot {
 	sessionId: string;

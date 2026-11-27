@@ -3,12 +3,12 @@
  * with realistic ids, timestamps, token usage and cost.
  */
 import type { AgentUsage, SessionEntry, SessionMessage } from "@/lib/types";
-import { pick, type DemoLocale } from "../locale";
-import { originalText, readProjectText } from "../files";
-import { editToolDetails } from "../diff";
-import { PROJECT_FILE_EDITS, PROJECT_FILE_OVERRIDES } from "../data/project-files";
-import { MODEL_API, MODEL_PRICING } from "../data/models";
-import type { Round, SessionScript, Text, ToolUse } from "./types";
+import { pick, type DemoLocale } from "../locale.ts";
+import { originalText, readProjectText } from "../files.ts";
+import { editToolDetails } from "../diff.ts";
+import { PROJECT_FILE_EDITS, PROJECT_FILE_OVERRIDES } from "../data/project-files.ts";
+import { MODEL_API, MODEL_PRICING } from "../data/models.ts";
+import type { Round, SessionScript, Text, ToolUse } from "./types.ts";
 
 export interface BuiltSession {
   entries: SessionEntry[];

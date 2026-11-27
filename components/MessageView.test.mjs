@@ -922,16 +922,34 @@ test("marks persisted assistant messages with their source entry", () => {
   assert.match(html, /data-entry-id="assistant-entry"/);
 });
 
-test("renders a complete SDK skill expansion as a compact command", () => {
+test("renders a complete SDK skill expansion as a collapsed skill block, as pi's TUI does", () => {
   const html = renderMessage({
     role: "user",
     content: COMPLETE_SKILL_EXPANSION,
   });
 
-  assert.match(html, /\/skill:review/);
-  assert.match(html, /src\/main\.ts/);
+  assert.match(html, /Skill: /);
+  assert.match(html, />review</);
+  assert.match(html, /<p>src\/main\.ts<\/p>/);
   assert.match(html, /aria-expanded="false"/);
   assert.doesNotMatch(html, /Review the supplied files/);
+  assert.doesNotMatch(html, /&lt;skill/);
+});
+
+test("a session quoted in a skill's arguments shows as its own block", () => {
+  const html = renderMessage({
+    role: "user",
+    content: COMPLETE_SKILL_EXPANSION.replace(
+      "src/main.ts",
+      'src/main.ts\n\n<session-reference title="甲" id="01a1d03f-83b1-7311-b88e-4fa7a73ace2f" path="/x.jsonl" messages="2">\nUser: hi\n</session-reference>',
+    ),
+  });
+
+  assert.match(html, /<p>src\/main\.ts<\/p>/);
+  assert.match(html, />甲</);
+  assert.equal(html.split('aria-expanded="false"').length, 3);
+  assert.doesNotMatch(html, /session-reference/);
+  assert.doesNotMatch(html, /User: hi/);
 });
 
 test("does not collapse incomplete skill-looking user text", () => {
@@ -973,14 +991,13 @@ test("keeps assistant soft line breaks as Markdown paragraphs", () => {
   assert.doesNotMatch(html, /<br/);
 });
 
-test("renders lone carriage returns in compact command arguments as line breaks", () => {
+test("renders lone carriage returns in a skill's arguments as line breaks", () => {
   const html = renderMessage({
     role: "user",
     content: COMPLETE_SKILL_EXPANSION.replace("src/main.ts", "src/main.ts\rsrc/app.ts"),
   });
 
-  assert.match(html, /\/skill:review/);
-  assert.match(html, /src\/main\.ts\nsrc\/app\.ts/);
+  assert.match(html, /src\/main\.ts<br\/>src\/app\.ts/);
   assert.doesNotMatch(html, /\r/);
 });
 
@@ -1843,6 +1860,40 @@ test("keeps a deferred thought's preview out of the paragraph gate", () => {
     content: [{ type: "thinking", thinking: "Historical first line", deferred: true }],
   });
   assert.match(html, />Historical first line<\/span>/);
+});
+
+test("a read image the model saw as a placeholder says so under the card, collapsed or not", (t) => {
+  const block = { type: "toolCall", toolCallId: "read-image-unsupported", toolName: "read", input: { path: "red.png" } };
+  t.after(() => setToolCallExpanded(block.toolCallId, false));
+  const message = { role: "assistant", provider: "fake", model: "text-only", content: [block] };
+  // What pi 1.6's read tool returns for a model without image input.
+  const result = {
+    role: "toolResult",
+    toolCallId: block.toolCallId,
+    toolName: "read",
+    content: [{ type: "text", text: "Read image file [image/png]" }, { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" }],
+    details: { imageUnsupportedByModel: "text-only" },
+    isError: false,
+  };
+  const notice = "[text-only does not support images; it saw a placeholder instead]";
+  for (const expanded of [false, true]) {
+    setToolCallExpanded(block.toolCallId, expanded);
+    const html = renderMessage(message, { toolResults: new Map([[block.toolCallId, result]]) });
+    assert.ok(textOf(html).includes(notice), expanded ? "expanded" : "collapsed");
+    assert.match(html, /<img/, "the image still shows");
+  }
+
+  setToolCallExpanded(block.toolCallId, true);
+  const seen = renderMessage(message, { toolResults: new Map([[block.toolCallId, { ...result, details: undefined }]]) });
+  assert.ok(!textOf(seen).includes("does not support images"), "a vision model's read has no notice");
+});
+
+test("readImageUnsupportedModel reads only a read result's model name", () => {
+  assert.equal(readImageUnsupportedModel("read", { imageUnsupportedByModel: "m" }), "m");
+  assert.equal(readImageUnsupportedModel("bash", { imageUnsupportedByModel: "m" }), null);
+  assert.equal(readImageUnsupportedModel("read", { imageUnsupportedByModel: "" }), null);
+  assert.equal(readImageUnsupportedModel("read", { imageUnsupportedByModel: 3 }), null);
+  assert.equal(readImageUnsupportedModel("read", undefined), null);
 });
 
 test("a read image the model saw as a placeholder says so under the card, collapsed or not", (t) => {

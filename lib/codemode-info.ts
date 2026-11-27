@@ -1,4 +1,4 @@
-import type { CodemodeInfo, CodemodeSandboxStatus } from "./api-types";
+import type { CodemodeInfo, CodemodeSandboxStatus } from "./api-types.ts";
 import { peekCodemodeSandbox, type BuiltinExtensionSwitch } from "./builtin-extensions.ts";
 import {
   CODEMODE_INLINE_BUDGET_DEFAULT,

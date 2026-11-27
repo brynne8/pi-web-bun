@@ -9,7 +9,7 @@
  */
 
 import { SIDE_BOUNDARY_MESSAGE_TYPE } from "./session-family.ts";
-import type { SessionEntry } from "./types";
+import type { SessionEntry } from "./types.ts";
 
 export const SIDE_META_TYPE = "pi-web:side";
 

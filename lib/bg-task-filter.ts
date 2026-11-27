@@ -1,4 +1,4 @@
-import type { BgTaskSummary } from "./bg-task-types";
+import type { BgTaskSummary } from "./bg-task-types.ts";
 
 /**
  * The activity view's tasks: the current session's own, so a page shows the commands its own

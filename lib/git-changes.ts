@@ -22,6 +22,9 @@ import { resolveExistingPath } from "./paths.ts";
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 10_000;
 const GIT_STATUS_MAX_BUFFER = 8 * 1024 * 1024;
+// A diff is bounded by its own output, never by the size of the file it describes.
+// A 1 MiB patch is already far past what the viewer can usefully render.
+const GIT_DIFF_MAX_BYTES = 1024 * 1024;
 
 /** What one git child gets: a bigger buffer, and the request whose abort kills it. */
 interface GitRunOptions {
@@ -352,7 +355,7 @@ async function createTrackedFilePatch(
       "HEAD",
       "--",
       ...paths,
-    ], { maxBuffer: TEXT_PREVIEW_MAX_BYTES * 4 });
+    ], { maxBuffer: GIT_DIFF_MAX_BYTES });
   } catch {
     return null;
   }
@@ -454,6 +457,20 @@ async function findFileRepositoryRoot(cwd: string, filePath: string): Promise<st
   return (await findRepositoryRoot(directory)) ?? (await findRepositoryRoot(cwd));
 }
 
+/** Whether HEAD holds a blob at this path; a missing path or a failed git command holds none. */
+async function hasHeadBlob(
+  repositoryRoot: string,
+  gitPath: string,
+  gitConfig: readonly string[],
+): Promise<boolean> {
+  try {
+    const type = await git(repositoryRoot, [...gitConfig, "cat-file", "-t", `HEAD:${gitPath}`]);
+    return type.trim() === "blob";
+  } catch {
+    return false;
+  }
+}
+
 export async function getGitFileDiff(cwd: string, filePath: string): Promise<GitFileDiffResponse> {
   const repositoryRoot = await findFileRepositoryRoot(cwd, filePath);
   if (!repositoryRoot) return { supported: false };
@@ -471,24 +488,34 @@ export async function getGitFileDiff(cwd: string, filePath: string): Promise<Git
 
   const resolvedFilePath = path.resolve(filePath);
   const relativePath = toGitPath(path.relative(realRoot, realFilePath));
-  // A path that is not a file, or one past the preview's cap, has no diff to show. A
-  // deleted file has no stat at all and is answered from its patch, as it always was.
+  // A path that is not a file has no diff to show; a deleted file has no stat at all and is
+  // answered from its patch, as it always was.
   const onDisk = await fs.promises.lstat(resolvedFilePath).catch(() => null);
-  if (onDisk && (!onDisk.isFile() || onDisk.size > TEXT_PREVIEW_MAX_BYTES)) return { supported: false };
+  if (onDisk && !onDisk.isFile()) return { supported: false };
 
-  // Five questions about this one path, asked at once, none of which reads the rest of the
+  // Four questions about this one path, asked at once, none of which reads the rest of the
   // work tree. The listing that covers the whole repository instead — `git status` — stats
-  // every file in it, which for one file's answer is the whole cost of the request.
-  const [headDiff, indexChanges, inIndex, ignored, fileText] = await Promise.all([
+  // every file in it, which is the whole cost of one file's answer.
+  const [headDiff, indexChanges, inIndex, ignored] = await Promise.all([
     createTrackedFilePatch(repositoryRoot, relativePath, undefined, gitConfig),
     readIndexChanges(repositoryRoot, gitConfig),
     readPathInIndex(repositoryRoot, relativePath, gitConfig),
     readPathIgnored(repositoryRoot, relativePath, gitConfig),
-    // A NUL anywhere in a file is content no source view shows, and Git calls a file binary
-    // by its first bytes alone, so the file answers for itself here, once.
-    onDisk && onDisk.isFile() ? readDiffableFileText(resolvedFilePath) : Promise.resolve(null),
   ]);
   const indexChange = indexChanges?.get(relativePath);
+  // A path HEAD holds needs no working-copy bytes: `git diff HEAD` reads the blobs, its
+  // output is capped (GIT_DIFF_MAX_BYTES), and a binary answers "Binary files … differ"
+  // with no hunk — so a tracked file's diff shows however large the file is. A new file
+  // (untracked, a staged addition, a conflict with no HEAD blob) may need its bytes for an
+  // added-file patch, and only those are bounded by the preview's cap. `cat-file` is what
+  // tells the two apart: a both-added conflict also prints a "new file mode" header.
+  // A rename's blob lives under its old name in HEAD.
+  const headPath = indexChange?.originalPath ?? relativePath;
+  const needsWorkingCopy = !(headDiff !== null && await hasHeadBlob(repositoryRoot, headPath, gitConfig));
+  if (needsWorkingCopy && onDisk && onDisk.size > TEXT_PREVIEW_MAX_BYTES) return { supported: false };
+  // A NUL anywhere in a file is content no source view shows, and Git calls a file binary
+  // by its first bytes alone, so the file answers for itself here, once.
+  const fileText = needsWorkingCopy && onDisk ? await readDiffableFileText(resolvedFilePath) : null;
   const decision = classifyFileDiff({
     headDiff,
     indexChange,
@@ -500,7 +527,7 @@ export async function getGitFileDiff(cwd: string, filePath: string): Promise<Git
   if (!decision) return { supported: false };
   // The bytes of a file that is there have to be showable; a path the reader is told was
   // deleted is answered from its patch, as it always was.
-  if (onDisk && fileText === null && decision.status !== "deleted") return { supported: false };
+  if (needsWorkingCopy && onDisk && fileText === null && decision.status !== "deleted") return { supported: false };
 
   let patch: string | null;
   if (decision.source === "content") {

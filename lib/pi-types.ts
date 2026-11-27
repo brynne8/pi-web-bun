@@ -16,6 +16,7 @@ export interface BashResultLike {
   cancelled?: boolean;
   truncated?: boolean;
   fullOutputPath?: string;
+  fullOutputError?: string;
 }
 
 export interface ContextUsage {
@@ -223,6 +224,7 @@ export interface AgentSessionLike {
     deliverAs?: "steer" | "followUp" | "nextTurn";
   }): Promise<void>;
   abort(): Promise<void>;
+  waitForIdle(): Promise<void>;
   executeBash(command: string, onChunk?: (chunk: string) => void, options?: {
     excludeFromContext?: boolean;
     operations?: BashOperations;

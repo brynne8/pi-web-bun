@@ -1,6 +1,6 @@
 /** GET /api/sessions/search — every space-separated term (or "quoted phrase") in message text, else all in the session title. */
 import type { SessionEntry } from "@/lib/types";
-import { allSessions, sessionInfo } from "./sessions/store";
+import { allSessions, sessionInfo } from "./sessions/store.ts";
 
 function blocksOf(entry: SessionEntry): string[] {
   if (entry.type !== "message") return [];

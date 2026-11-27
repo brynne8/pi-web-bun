@@ -4,6 +4,7 @@ import test from "node:test";
 import React from "react";
 
 import { createJiti } from "jiti";
+import ts from "typescript";
 
 import { HTML_PREVIEW_MAX_BYTES, decideFileDisplay } from "../lib/file-viewer-display.ts";
 import { isDelimitedTablePath } from "../lib/delimited-table.ts";
@@ -20,6 +21,21 @@ const {
 } = await jiti.import("./FileViewer.tsx");
 
 const source = await readFile(new URL("./FileViewer.tsx", import.meta.url), "utf8");
+const sourceFile = ts.createSourceFile("FileViewer.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+
+/** The module's own top-level functions and constants of these names, as source text. */
+function declarations(...names) {
+  return names.map((name) => {
+    const node = sourceFile.statements.find((statement) =>
+      (ts.isFunctionDeclaration(statement) && statement.name?.text === name)
+      || (ts.isVariableStatement(statement) && statement.declarationList.declarations.some((declaration) =>
+        ts.isIdentifier(declaration.name) && declaration.name.text === name,
+      )),
+    );
+    assert.ok(node, `${name} is declared in the module`);
+    return node.getText(sourceFile);
+  }).join("\n");
+}
 
 test("the source view renders and highlights a window, never every line", () => {
   const large = { content: "line\n".repeat(50_000), language: "text" };
@@ -59,8 +75,9 @@ test("the source gutter stays pinned and shares the code line's height", () => {
   // is `overflow: auto` in both viewers) instead of sliding away with the text.
   assert.match(gutterBlock, /position: "sticky"/);
   assert.match(gutterBlock, /left: 0/);
-  // Sticky needs room to travel, so every row spans the widest line.
-  assert.match(source, /className="file-source-line"[\s\S]{0,160}minWidth: "100%"/);
+  // Sticky needs room to travel, so every row spans the widest line: the row's
+  // class comes from sourceLineClassName(), which is what marks a link's lines.
+  assert.match(source, /className=\{sourceLineClassName\(firstLine \+ lineIndex, targetLines\)\}[\s\S]{0,200}minWidth: "100%"/);
 
   // The gutter repeats its height in px, so a code-font change without it puts
   // the numbers off the line boxes they belong to.
@@ -96,7 +113,7 @@ test("the diff view wraps when the viewer wraps, and the key reaches the diff", 
 
   // The wrap control is offered for the diff as well as the source, never for a
   // rendered preview (markdown, HTML, table), where there are no lines to wrap.
-  assert.match(source, /\(effectiveDisplayMode === "source" \|\| effectiveDisplayMode === "diff"\) && !isBinary/);
+  assert.match(source, /\(effectiveDisplayMode === "source" \|\| \(effectiveDisplayMode === "diff" && diffLayout === "stacked"\)\) && !isBinary/);
   assert.match(source, /<DisplayModeSwitch\n\s*modes=\{displayModes\}/);
   assert.match(source, /export function DisplayModeSwitch/);
   assert.match(source, /export function WrapToggleButton/);
@@ -256,4 +273,62 @@ test("the Prism themes are imported where a default import is the theme itself",
       assert.match(line, /\/dist\/esm\/styles\/prism\//, `${name}: the theme must come from the esm build: ${line}`);
     }
   }
+});
+
+test("the split diff sets each old line beside the line that replaced it", async () => {
+  const { parseUnifiedPatch } = await import("../lib/patch.ts");
+  const { outputText } = ts.transpileModule(`
+    ${declarations("diffRows", "DIFF_CONTEXT", "collapseDiff", "DIFF_ADDED_BACKGROUND", "DIFF_REMOVED_BACKGROUND", "diffChangeBackground", "diffChangeBorder", "SplitDiffView")}
+    return SplitDiffView;
+  `, { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 } });
+  const SplitDiffView = new Function("React", "useI18n", "parseUnifiedPatch", "DiffGapMarker", "DiffLineCode", "SOURCE_HIGHLIGHT_MAX_LINES", "FILE_CODE_STYLE", "FILE_LINE_NUMBER_STYLE", outputText)(
+    React, () => ({ t: (key) => key }), parseUnifiedPatch, "gap", "code", 1_000, {}, {},
+  );
+  const patch = [
+    "--- a/app.ts",
+    "+++ b/app.ts",
+    "@@ -1,3 +1,4 @@",
+    " keep",
+    "-old one",
+    "-old two",
+    "+new one",
+    "+new two",
+    "+added",
+    " end",
+  ].join("\n");
+  const view = SplitDiffView({ patch, language: "text", prismReady: false, isDark: false });
+  const cells = view.props.children;
+  const text = (cell) => cell.props.children[2].props.children;
+  const number = (cell) => cell.props.children[0].props.children;
+  // Two cells a row: left the old file, right the new one.
+  assert.deepEqual(cells.map(text), ["keep", "keep", "old one", "new one", "old two", "new two", " ", "added", "end", "end"]);
+  assert.deepEqual(cells.map(number), [1, 1, 2, 2, 3, 3, "", 4, 4, 5]);
+
+  // Two equal halves of the box, lines wrapping inside them: an unwrapped
+  // column as wide as the longest line pushed the new side off a narrow panel.
+  assert.equal(view.props.style.gridTemplateColumns, "minmax(0, 1fr) minmax(0, 1fr)");
+  assert.equal(view.props.style.width, undefined);
+  assert.equal(cells[0].props.children[2].props.style.whiteSpace, "pre-wrap");
+});
+
+test("the diff takes two columns only where the viewer's own box has room for them", () => {
+  // The box's width decides, never the window's: a desktop window holds a file
+  // panel as narrow as a phone.
+  assert.match(source, /setLayout\(box\.clientWidth >= SPLIT_DIFF_MIN_WIDTH \? "split" : "stacked"\)/);
+  assert.match(source, /const diffLayout = useDiffLayout\(contentBox\);/);
+  assert.match(source, /ref=\{attachContentBox\}\s+className="file-viewer-content"/);
+  assert.match(source, /<MemoizedDiffView[\s\S]{0,400}layout=\{diffLayout\}[\s\S]{0,40}\/>/);
+  // The panel's default width on a desktop (at least 360px, 42% of the window:
+  // 538px at 1280) splits; a phone's 390px panel does not.
+  const [minWidth] = new Function(`${ts.transpileModule(declarations("SPLIT_DIFF_MIN_WIDTH"), {}).outputText}\nreturn [SPLIT_DIFF_MIN_WIDTH];`)();
+  assert.ok(minWidth <= 0.42 * 1280 && minWidth > 390);
+});
+
+test("a link's chunks stop loading by themselves once one fails", () => {
+  // Each failed chunk ends `loadingMore`, which re-runs the effect at the same
+  // offset: without the error guard it asked hundreds of times a second.
+  const effect = source.match(/\/\/ Load more by itself[\s\S]*?\}, \[[^\]]*\]\);/)?.[0];
+  assert.ok(effect, "the auto-load effect is found");
+  assert.match(effect, /if \([^)]*\berror\b[^)]*\) return;/);
+  assert.match(effect, /\}, \[[^\]]*\berror\b[^\]]*\]\);$/);
 });

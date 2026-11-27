@@ -1,4 +1,4 @@
-import type { TranslationParams } from "./i18n/types";
+import type { TranslationParams } from "./i18n/types.ts";
 
 export type SplitDiffCellType = "context" | "removed" | "added" | "empty";
 

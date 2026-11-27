@@ -6,7 +6,8 @@ import {
 import { closeSync, type Dirent, fstatSync, openSync, readSync, statSync } from "fs";
 import { open, readdir } from "fs/promises";
 import { isAbsolute, join, normalize as normalizePath, relative, resolve as resolvePath, sep } from "path";
-import type { AgentMessage, ImageContent, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
+import type { AgentMessage, ImageContent, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types.ts";
+import { sessionReferencesAsMentions } from "./session-reference-block.ts";
 import { normalizeToolCalls } from "./normalize.ts";
 import { withoutMessageSignatures } from "./message-signatures.ts";
 import { getClosedTurnCounts, getThinkingPreview, getTurnAnchors, type TurnAnchorMessage } from "./message-display.ts";
@@ -18,7 +19,7 @@ import { resolveProject, type ProjectInfo } from "./worktree.ts";
 import { readSideRelation } from "./side-session.ts";
 import { readSubagentRun, settleOrphanedSubagentStatus, SUBAGENT_META_TYPE } from "./subagents.ts";
 import { checkSessionMembership, listSessionsIncremental, scanSessionFileInfo, type ScannedSessionInfo } from "./session-list-scanner.ts";
-import { SESSION_ID_PATTERN } from "./session-ui-state-shared";
+import { SESSION_ID_PATTERN } from "./session-ui-state-shared.ts";
 import { isRecord } from "./is-record.ts";
 
 export { getAgentDir };
@@ -241,13 +242,14 @@ function resolveScannedSessionRelation(
  * The list's first message is for the row title and the subagent filter, never
  * the whole prompt: a pasted document or an expanded skill made one row 300 KB
  * and the list several MB, fetched again by every open tab after each run. A
- * skill expansion goes as the /skill: command its row shows; any other text is
- * cut to CATALOG_FIRST_MESSAGE_MAX code units, never splitting a surrogate pair.
+ * skill expansion goes as the /skill: command its row shows, a quoted session
+ * (`#` reference) as `#title` in place of its transcript; any other text is cut
+ * to CATALOG_FIRST_MESSAGE_MAX code units, never splitting a surrogate pair.
  */
 const CATALOG_FIRST_MESSAGE_MAX = 500;
 
 export function catalogFirstMessage(text: string): string {
-  const display = skillExpansionToCommand(text) ?? text;
+  const display = skillExpansionToCommand(text) ?? sessionReferencesAsMentions(text);
   if (display.length <= CATALOG_FIRST_MESSAGE_MAX) return display;
   const last = display.charCodeAt(CATALOG_FIRST_MESSAGE_MAX - 1);
   return display.slice(0, last >= 0xd800 && last <= 0xdbff ? CATALOG_FIRST_MESSAGE_MAX - 1 : CATALOG_FIRST_MESSAGE_MAX);

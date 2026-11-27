@@ -1,4 +1,4 @@
-import { createStoredChoice } from "./useStoredChoice";
+import { createStoredChoice } from "./useStoredChoice.ts";
 
 /** Where the desktop sidebar shows the file browser: under the sessions, or behind its own tab. Phones always use tabs. */
 export type FilesPlacement = "below" | "tab";

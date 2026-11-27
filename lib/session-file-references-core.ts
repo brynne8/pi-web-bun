@@ -1,4 +1,4 @@
-import type { SessionEntry, ToolResultMessage } from "./types";
+import type { SessionEntry, ToolResultMessage } from "./types.ts";
 
 // Spelled out rather than imported: subagents.ts loads the SDK, and this module stays
 // importable on its own. `get_result` is the subagent report's fetch tool, registered outside

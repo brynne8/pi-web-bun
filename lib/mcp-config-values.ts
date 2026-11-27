@@ -1,4 +1,4 @@
-import type { McpConfigFieldRef } from "./api-types";
+import type { McpConfigFieldRef } from "./api-types.ts";
 import { isRecord } from "./is-record.ts";
 
 // Which values of an `mcp.json` entry pi resolves before it connects, and the

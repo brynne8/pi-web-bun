@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentUsage, SessionEntry, SessionMessage } from "./types";
+import type { AgentMessage, AgentUsage, SessionEntry, SessionMessage } from "./types.ts";
 
 export interface SessionFileStats {
   userMessages: number;

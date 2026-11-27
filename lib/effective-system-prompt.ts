@@ -1,4 +1,4 @@
-import type { AgentSessionLike } from "./pi-types";
+import type { AgentSessionLike } from "./pi-types.ts";
 
 /**
  * The system prompt a plugin forced for the next run, or undefined when none

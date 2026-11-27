@@ -1,5 +1,5 @@
 import type { AgentPhase } from "@/hooks/useAgentSession";
-import type { Translate } from "./i18n/types";
+import type { Translate } from "./i18n/types.ts";
 
 /**
  * The phase a state read (`GET /api/sessions/[id]/state`, `GET /api/agent/[id]`)

@@ -21,7 +21,7 @@ import {
   type HeaderRow,
   type ModelCostDraft,
   type ModelCostKey,
-} from "./models-config-helpers";
+} from "./models-config-helpers.ts";
 import {
   ConfigButton,
   ConfigDetail,
@@ -48,7 +48,7 @@ import {
   useEnabledModels,
   type EnabledModelsController,
 } from "./EnabledModelsSection";
-import { providerBadgeLabel } from "./enabled-models-helpers";
+import { providerBadgeLabel } from "./enabled-models-helpers.ts";
 import { ProviderIcon } from "./ProviderIcon";
 import { ProviderUsageSummary } from "./ProviderUsageSummary";
 

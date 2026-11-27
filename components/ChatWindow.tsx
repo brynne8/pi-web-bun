@@ -24,6 +24,8 @@ import {
   uploadFiles,
   type DroppedItem,
 } from "@/lib/file-upload-client";
+import type { SessionReferenceTarget } from "@/lib/session-reference-target";
+import type { FileLinkTarget } from "@/lib/file-links";
 import { AssistantNotice, MessageView } from "./MessageView";
 import { MarkdownBody } from "./MarkdownBody";
 import { ChatInput, getUserMessageDraftImages, getUserMessageText, type ChatInputHandle } from "./ChatInput";
@@ -107,7 +109,7 @@ interface Props {
   /** Opens Settings on a section: a bare `/mcp` that pi's built-in MCP extension owns opens Settings › MCP. */
   onOpenSettings?: (section: SettingsSection) => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
-  onOpenFile?: (filePath: string, page?: number) => void;
+  onOpenFile?: (filePath: string, target?: FileLinkTarget) => void;
   /** Files dropped onto the chat were written into the working directory. */
   onFilesUploaded?: () => void;
   onOpenSubagent?: (sessionId: string, label: string) => void;
@@ -888,7 +890,13 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     onFilesUploaded,
   }), [addNotice, chatInputRef, newSessionCwd, onFilesUploaded, session?.cwd, t]);
 
-  const onDrop = useCallback((items: DroppedItem[]) => {
+  const onDrop = useCallback((items: DroppedItem[], session?: SessionReferenceTarget) => {
+    // A dragged session row quotes it: it joins the composer as a chip and its
+    // token is written when the message is sent (#1716).
+    if (session) {
+      chatInputRef?.current?.addSessionReference(session);
+      return;
+    }
     const { images, files, folders } = splitDroppedItems(items);
     if (images.length > 0) chatInputRef?.current?.addImages(images);
     if (folders.length > 0) {
@@ -1790,7 +1798,7 @@ const StreamingReply = memo(function StreamingReply({ store, onCommit, toolResul
   toolResults: Map<string, ToolResultMessage>;
   modelNames: Record<string, string>;
   cwd?: string;
-  onOpenFile?: (filePath: string, page?: number) => void;
+  onOpenFile?: (filePath: string, target?: FileLinkTarget) => void;
   onOpenSubagent?: (sessionId: string, label: string) => void;
   onOpenReadSnapshot?: (toolCallId: string, snapshot: ReadSnapshot) => void;
 }) {

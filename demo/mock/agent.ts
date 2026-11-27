@@ -4,16 +4,16 @@
  * with the same event sequence a real pi run produces.
  */
 import type { AgentMessage, AssistantMessage, SessionEntry, ToolResultMessage } from "@/lib/types";
-import type { MockEventSource } from "./event-source";
-import { currentDemoLocale } from "./locale";
-import { delay } from "./http";
-import { readProjectText } from "./files";
-import { PROJECT_ROOT } from "./paths";
-import { SYSTEM_PROMPT_TEMPLATE } from "./system-prompt";
+import type { MockEventSource } from "./event-source.ts";
+import { currentDemoLocale } from "./locale.ts";
+import { delay } from "./http.ts";
+import { readProjectText } from "./files.ts";
+import { PROJECT_ROOT } from "./paths.ts";
+import { SYSTEM_PROMPT_TEMPLATE } from "./system-prompt.ts";
 import toolsCatalog from "./captured/tools.json";
 import commandsCatalog from "./captured/commands.json";
-import { DEFAULT_MODEL, DEFAULT_THINKING_LEVEL, MODEL_API, contextWindowFor, modelExists } from "./data/models";
-import { estimateTokens, readToolOutput, usageFor } from "./sessions/builder";
+import { DEFAULT_MODEL, DEFAULT_THINKING_LEVEL, MODEL_API, contextWindowFor, modelExists } from "./data/models.ts";
+import { estimateTokens, readToolOutput, usageFor } from "./sessions/builder.ts";
 import {
   addSession,
   appendEntry,
@@ -24,11 +24,11 @@ import {
   randomUuid,
   type LiveState,
   type MockSession,
-} from "./sessions/store";
-import { readSessionToolSelectionFromEntries } from "./sessions/tool-selection";
-import { composeReply, type ReplyPlan } from "./replies";
-import { runShellCommand } from "./shell";
-import { settings } from "./settings-state";
+} from "./sessions/store.ts";
+import { readSessionToolSelectionFromEntries } from "./sessions/tool-selection.ts";
+import { composeReply, type ReplyPlan } from "./replies.ts";
+import { runShellCommand } from "./shell.ts";
+import { settings } from "./settings-state.ts";
 
 // ---------------------------------------------------------------------------
 // Event streams

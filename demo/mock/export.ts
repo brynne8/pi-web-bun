@@ -3,8 +3,8 @@
  * renders a simple standalone transcript of the active branch instead.
  */
 import type { AgentMessage } from "@/lib/types";
-import { currentDemoLocale } from "./locale";
-import { buildContext, ensureSessions, getSession } from "./sessions/store";
+import { currentDemoLocale } from "./locale.ts";
+import { buildContext, ensureSessions, getSession } from "./sessions/store.ts";
 
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);

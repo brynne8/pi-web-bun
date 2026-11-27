@@ -123,9 +123,9 @@ import {
   type McpTestBlock,
   type McpTestRun,
   type McpWriteBlock,
-} from "./mcp-config-helpers";
+} from "./mcp-config-helpers.ts";
 import { McpAddServer, type McpAddActionRequest } from "./McpAddServer";
-import { EMPTY_MCP_ADD_DRAFT, type McpAddDraft } from "./mcp-add-helpers";
+import { EMPTY_MCP_ADD_DRAFT, type McpAddDraft } from "./mcp-add-helpers.ts";
 import { McpSignInRow } from "./McpSignIn";
 import {
   MCP_SIGN_IN_POLL_MS,
@@ -142,8 +142,8 @@ import {
   pasteMcpSignIn,
   postMcpSignIn,
   type McpSignInRun,
-} from "./mcp-sign-in-helpers";
-import { projectTrustReloadKey, scopeLabel } from "./settings-ui-helpers";
+} from "./mcp-sign-in-helpers.ts";
+import { projectTrustReloadKey, scopeLabel } from "./settings-ui-helpers.ts";
 import type { Translate } from "@/lib/i18n/types";
 
 /** What the panel has loaded; a project the route refused leaves the global listing and `projectError`. */

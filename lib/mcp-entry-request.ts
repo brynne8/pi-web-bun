@@ -2,7 +2,7 @@ import { statSync } from "node:fs";
 import { homeDir } from "./home-dir.ts";
 import { isAbsolute, resolve } from "node:path";
 import { getAgentDir, type McpServerConfig } from "@earendil-works/pi-coding-agent";
-import type { McpErrorResponse, McpRefusalReason, McpScope } from "./api-types";
+import type { McpErrorResponse, McpRefusalReason, McpScope } from "./api-types.ts";
 import { isMcpDisabledByOperator, MCP_DISABLE_VARIABLE } from "./builtin-extensions.ts";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "./file-access.ts";
 import { readMcpServerDefinition, readMcpServerEntry } from "./mcp-config-read.ts";

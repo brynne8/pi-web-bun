@@ -4,13 +4,13 @@
  * and response shapes.
  */
 import { buildEntriesFromFiles, filterFileEntries } from "@/lib/file-fuzzy";
-import { MockEventSource } from "./event-source";
-import { MockRequest, delay, error, json } from "./http";
-import { setRealFetch } from "./runtime";
-import { HOME, PROJECT_ROOT, SCRATCH_ROOT, WORKTREE_BRANCH, WORKTREE_ROOT } from "./paths";
-import { fileMeta, isBinaryPath, listDirectory, lookup, primeAssetLookup, projectFiles, readFileText, textChunk, PROJECT_ROOTS } from "./files";
-import { gitDiff, gitStatus } from "./git";
-import { agentState, attachAgentStream, createRuntimeSession, runAgentCommand, runningSessionIds } from "./agent";
+import { MockEventSource } from "./event-source.ts";
+import { MockRequest, delay, error, json } from "./http.ts";
+import { setRealFetch } from "./runtime.ts";
+import { HOME, PROJECT_ROOT, SCRATCH_ROOT, WORKTREE_BRANCH, WORKTREE_ROOT } from "./paths.ts";
+import { fileMeta, isBinaryPath, listDirectory, lookup, primeAssetLookup, projectFiles, readFileText, textChunk, PROJECT_ROOTS } from "./files.ts";
+import { gitDiff, gitStatus } from "./git.ts";
+import { agentState, attachAgentStream, createRuntimeSession, runAgentCommand, runningSessionIds } from "./agent.ts";
 import {
   allSessions,
   buildContext,
@@ -22,12 +22,12 @@ import {
   sessionInfo,
   sessionListVersion,
   bumpSessionListVersion,
-} from "./sessions/store";
-import { searchSessions } from "./search";
-import { autoTitle } from "./replies";
-import { demoOnlyMessage } from "./unavailable";
-import { settingsRoutes } from "./settings-routes";
-import { attachTerminalStream, terminalRoutes } from "./terminal";
+} from "./sessions/store.ts";
+import { searchSessions } from "./search.ts";
+import { autoTitle } from "./replies.ts";
+import { demoOnlyMessage } from "./unavailable.ts";
+import { settingsRoutes } from "./settings-routes.ts";
+import { attachTerminalStream, terminalRoutes } from "./terminal.ts";
 
 type Handler = (request: MockRequest) => Promise<Response> | Response;
 

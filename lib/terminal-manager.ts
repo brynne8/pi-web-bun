@@ -1,10 +1,10 @@
 import { randomUUID } from "crypto";
 import { createRequire } from "node:module";
 import { getPowerShellConfig } from "@earendil-works/pi-coding-agent";
-import { homeDir } from "./home-dir";
-import { spawnBunPty, type PtyProcess, type PtySpawn } from "./terminal-bun-pty";
-import { samePath } from "./paths";
-import type { DebugServerGlobal } from "./debug-types";
+import { homeDir } from "./home-dir.ts";
+import { spawnBunPty, type PtyProcess, type PtySpawn } from "./terminal-bun-pty.ts";
+import { samePath } from "./paths.ts";
+import type { DebugServerGlobal } from "./debug-types.ts";
 
 // Keep node-pty lazy: vinext's CommonJS transform hoists plain require() calls.
 const requirePty = createRequire(import.meta.url);

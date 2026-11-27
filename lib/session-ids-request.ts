@@ -1,5 +1,5 @@
-import { hasJsonContentType, isApiRequestAllowed } from "./request-security";
-import { SESSION_ID_PATTERN } from "./session-ui-state-shared";
+import { hasJsonContentType, isApiRequestAllowed } from "./request-security.ts";
+import { SESSION_ID_PATTERN } from "./session-ui-state-shared.ts";
 
 export const NO_STORE = { "Cache-Control": "no-store" };
 

@@ -6,13 +6,13 @@
  */
 import skillsResponse from "./captured/skills.json";
 import subagentProfilesResponse from "./captured/subagent-profiles.json";
-import type { MockRequest } from "./http";
-import { delay, error, json } from "./http";
-import { currentDemoLocale } from "./locale";
-import { AUTH_PROVIDERS_RESPONSE, ENABLED_MODELS_RESPONSE, MODELS_CONFIG, MODELS_RESPONSE, MODEL_PRICING } from "./data/models";
-import { PLUGINS_RESPONSE, SKILL_SEARCH_RESULTS } from "./data/extensions";
-import { settings } from "./settings-state";
-import { demoOnlyMessage } from "./unavailable";
+import type { MockRequest } from "./http.ts";
+import { delay, error, json } from "./http.ts";
+import { currentDemoLocale } from "./locale.ts";
+import { AUTH_PROVIDERS_RESPONSE, ENABLED_MODELS_RESPONSE, MODELS_CONFIG, MODELS_RESPONSE, MODEL_PRICING } from "./data/models.ts";
+import { PLUGINS_RESPONSE, SKILL_SEARCH_RESULTS } from "./data/extensions.ts";
+import { settings } from "./settings-state.ts";
+import { demoOnlyMessage } from "./unavailable.ts";
 
 type EnabledView = typeof ENABLED_MODELS_RESPONSE;
 type EnabledProvider = EnabledView["providers"][number];

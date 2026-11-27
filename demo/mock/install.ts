@@ -3,11 +3,11 @@
  * `/api/...` fetch and EventSource is answered in the page by the mock
  * backend, so the untouched UI behaves as if a Pi Web server were running.
  */
-import { MockEventSource, setStreamResolver } from "./event-source";
-import { handleApiRequest, resolveApiStream, warmDemoAssets } from "./router";
-import { setRealFetch } from "./runtime";
-import { WELCOME_SESSION_ID } from "./sessions/ids";
-import { usageReport } from "./settings-routes";
+import { MockEventSource, setStreamResolver } from "./event-source.ts";
+import { handleApiRequest, resolveApiStream, warmDemoAssets } from "./router.ts";
+import { setRealFetch } from "./runtime.ts";
+import { WELCOME_SESSION_ID } from "./sessions/ids.ts";
+import { usageReport } from "./settings-routes.ts";
 
 declare global {
   interface Window {

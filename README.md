@@ -17,6 +17,7 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 - **Two ways to branch**: **New session** creates an independent session file from an earlier message; **Edit from here** creates a branch inside the current session.
 - **Background bash tasks** (off by default): a long-running command hands off to a background task and comes back as a settled card instead of holding the turn open.
 - **Background results that cannot be missed**: settled reports arrive as one batch that wakes the agent once, each keeping its own card, and `await_results` waits for the next one when nothing is waiting yet.
+- **Reference another session**: type `#` in the composer, choose a conversation, and include its bounded transcript as historical context in your message.
 - **Project file tools**: browse and upload files, inspect Git diffs, and preview source, Markdown, images, audio, PDFs, and DOCX files with automatic refresh.
 - **A file row's own menu**: right-click a row of the project tree to put its path in the chat, download the file, undo its uncommitted changes, delete a file Git has never committed, undo a whole folder's changed files, or show it in the OS file manager with the file itself selected — nothing is drawn over the name while you hover it.
 - **Reads and tables in the side panel**: a `read` tool call opens the exact slice it returned — Markdown rendered, or source with line numbers continuing from the read's offset — and a `.csv` or `.tsv` slice opens as a table with the file's own line numbers in the gutter.
@@ -275,6 +276,7 @@ For port and hostname, command-line options override the corresponding environme
 | `PI_WEB_APP_NAME` | PWA manifest `name` and `short_name`; surrounding whitespace is trimmed, empty values use the default | `Pi Web` |
 | `PI_WEB_SKIP_VERSION_CHECK=1` | Disable Pi Web update checks | Unset |
 | `PI_WEB_ALLOWED_HOSTS` | Additional exact proxy or custom hostnames, comma-separated | Unset |
+| `PI_WEB_FRAME_ANCESTORS` | Other origins allowed to embed Pi Web in an iframe, comma-separated CSP sources such as `https://portal.example` or `http://localhost:*` | Same origin only |
 | `PI_WEB_PASSWORD` | Enable browser password login; API clients may use Basic Auth with username `pi` | Authentication disabled |
 | `PI_WEB_IDLE_TIMEOUT_MS` | Session idle timeout in milliseconds, up to `2147483647`; `0` disables idle shutdown; invalid or out-of-range values use the default | `600000` (10 min) |
 | `PI_WEB_SHUTDOWN_DEADLINE_MS` | How long extensions get to handle `session_shutdown` before a closing session is disposed anyway, in milliseconds up to `2147483647`; `0`, invalid or out-of-range values use the default | `5000` (5 s) |

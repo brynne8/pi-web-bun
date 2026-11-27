@@ -17,7 +17,7 @@ import {
   type DebugPageReading,
   type DebugSamples,
   type DebugServerReading,
-} from "./debug-panel-state";
+} from "./debug-panel-state.ts";
 
 /** The three readings one render shows together. */
 export interface DebugReadoutReading {

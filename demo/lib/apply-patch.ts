@@ -28,7 +28,7 @@
  * render through the same split diff view as the built-in edit tool.
  */
 
-import type { SplitDiffCell, SplitDiffFile, SplitDiffRow } from "./patch";
+import type { SplitDiffCell, SplitDiffFile, SplitDiffRow } from "./patch.ts";
 
 export interface ApplyPatchPreviewFile {
   filePath?: string;

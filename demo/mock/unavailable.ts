@@ -1,4 +1,4 @@
-import { currentDemoLocale } from "./locale";
+import { currentDemoLocale } from "./locale.ts";
 
 /** Message for actions that need a real Pi Web server. */
 export function demoOnlyMessage(): string {

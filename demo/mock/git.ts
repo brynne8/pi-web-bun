@@ -3,10 +3,10 @@
  * edited are "modified", files they created are "untracked".
  */
 import type { GitFileDiffResponse, GitFileStatus, GitStatusResponse } from "@/lib/git-types";
-import { originalText, projectFiles, readFileText } from "./files";
-import { PROJECT_ROOT, WORKTREE_ROOT } from "./paths";
-import { PROJECT_FILE_EDITS, PROJECT_FILE_OVERRIDES } from "./data/project-files";
-import { diffOps, unifiedHunks } from "./diff";
+import { originalText, projectFiles, readFileText } from "./files.ts";
+import { PROJECT_ROOT, WORKTREE_ROOT } from "./paths.ts";
+import { PROJECT_FILE_EDITS, PROJECT_FILE_OVERRIDES } from "./data/project-files.ts";
+import { diffOps, unifiedHunks } from "./diff.ts";
 
 export interface ChangedFile {
   path: string;

@@ -1,4 +1,4 @@
-import type { TabOpen } from "./tab-session";
+import type { TabOpen } from "./tab-session.ts";
 
 export interface InitialNavigation {
   requestedCwd: string | null;

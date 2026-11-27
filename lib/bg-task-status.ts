@@ -1,4 +1,4 @@
-import type { BgTaskSummary } from "./bg-task-types";
+import type { BgTaskSummary } from "./bg-task-types.ts";
 
 /** What a task row should say about a task, beyond its clocks. */
 export type BgTaskState = "running" | "stopping" | "stopped" | "succeeded" | "failed" | "signal";

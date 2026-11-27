@@ -1,4 +1,4 @@
-import type { FileTreeHiddenReason } from "./file-tree-visibility";
+import type { FileTreeHiddenReason } from "./file-tree-visibility.ts";
 
 /** Why a listed entry is normally left out; only listings with `hidden=1` report it. */
 export type HiddenReason = Exclude<FileTreeHiddenReason, "always">;

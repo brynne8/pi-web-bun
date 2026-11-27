@@ -38,6 +38,7 @@ import { FILE_WATCH_HEARTBEAT_MS } from "@/lib/file-version";
 import { pageStreamLabel, registerPageStream } from "@/lib/page-stream-registry";
 import { contentDisposition } from "@/lib/content-disposition";
 import { errorMessage } from "@/lib/errors";
+import { frameAncestorsDirective } from "@/lib/frame-ancestors";
 
 const FILE_REQUEST_TYPES = ["list", "read", "download", "meta", "preview", "watch"] as const;
 type FileRequestType = typeof FILE_REQUEST_TYPES[number];
@@ -301,7 +302,7 @@ function streamFile(filePath: string, stat: fs.Stats, contentType: string, range
   // <img> preview embedding ignores them.
   if (contentType === "image/svg+xml") {
     headers["Content-Security-Policy"] =
-      "default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
+      `default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; ${frameAncestorsDirective()}`;
     headers["Referrer-Policy"] = "no-referrer";
   }
 
@@ -552,7 +553,7 @@ export async function GET(
         headers: {
           "Content-Type": "text/html; charset=utf-8",
           "Cache-Control": "no-cache",
-          "Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'",
+          "Content-Security-Policy": `default-src 'none'; img-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; ${frameAncestorsDirective()}`,
           "Referrer-Policy": "no-referrer",
           "X-Content-Type-Options": "nosniff",
         },

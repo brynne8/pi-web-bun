@@ -115,7 +115,7 @@ app/api/
   project-trust/route.ts           GET trust status + project .pi/mcp.json servers (files only) | POST trust, rebuild the cwd's wrappers
   tool_schema/[name]/route.ts      GET one live session's definition of a tool: description and JSON schema
   tools/settings/route.ts          GET/PUT defaultTools switches: PowerShell (Windows), Code mode automatic/always; codemode.mode, codemode.inlineBudget; bgTasksEnabled
-  cache-miss-notices/route.ts      GET/PUT pi's global showCacheMissNotices (Settings › General)
+  notices/route.ts                 GET/PUT { key, shown } pi's global notices.* (Settings › General)
   http-proxy/route.ts              GET global httpProxy state and sources | PUT { enabled, httpProxy? } save and apply
   queue-modes/route.ts             GET/PUT pi's global steeringMode and followUpMode (Settings › General), applied to open sessions
   models/route.ts                  GET ?cwd= { models, modelList, defaultModel, … }

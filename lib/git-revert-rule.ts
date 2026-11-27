@@ -1,4 +1,4 @@
-import type { GitFileStatus } from "./git-types";
+import type { GitFileStatus } from "./git-types.ts";
 
 /**
  * Which changed files the file row's Revert offers, and why the others are left

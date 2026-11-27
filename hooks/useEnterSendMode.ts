@@ -1,4 +1,4 @@
-import { createStoredChoice } from "./useStoredChoice";
+import { createStoredChoice } from "./useStoredChoice.ts";
 
 export type EnterSendMode = "enter" | "ctrlEnter";
 

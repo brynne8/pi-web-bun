@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, SettingsManager } from "@earendil-works/pi-coding-agent";
-import type { CodemodeInlineBudgetSetting, CodemodeMode, CodemodeModeSetting, CodemodePreference } from "./api-types";
+import type { CodemodeInlineBudgetSetting, CodemodeMode, CodemodeModeSetting, CodemodePreference } from "./api-types.ts";
 import {
   defaultToolEntries,
   getGlobalSettingsPath,

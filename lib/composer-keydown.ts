@@ -15,7 +15,7 @@ export interface ComposerKeyEvent {
   preventDefault(): void;
 }
 
-export interface ComposerKeyDownDeps<SlashCommand = unknown, AtMatch = unknown> {
+export interface ComposerKeyDownDeps<SlashCommand = unknown, AtMatch = unknown, HashMatch = unknown> {
   isMobile: boolean;
   enterSendMode: "enter" | "ctrlEnter";
   isStreaming: boolean;
@@ -48,6 +48,14 @@ export interface ComposerKeyDownDeps<SlashCommand = unknown, AtMatch = unknown> 
   setAtMenuOpen: (open: boolean) => void;
   cycleListIndex: (index: number, length: number, delta: number) => number;
   applyAtCompletion: (match: AtMatch) => void;
+  /** The `#` session menu: the @ menu's shape, over the sessions a quote can name. */
+  hashMenuOpen: boolean;
+  hashQuery: unknown;
+  hashMatches: HashMatch[];
+  hashActiveIndex: number;
+  setHashActiveIndex: (index: number | ((index: number) => number)) => void;
+  setHashMenuOpen: (open: boolean) => void;
+  applyHashCompletion: (session: HashMatch) => void;
   onAbort?: () => void;
   onSteer?: (...args: never[]) => void;
   onFollowUp?: (...args: never[]) => void;
@@ -55,9 +63,9 @@ export interface ComposerKeyDownDeps<SlashCommand = unknown, AtMatch = unknown> 
   handleSend: (...args: never[]) => void;
 }
 
-export function handleComposerKeyDown<SlashCommand, AtMatch>(
+export function handleComposerKeyDown<SlashCommand, AtMatch, HashMatch>(
   e: ComposerKeyEvent,
-  deps: ComposerKeyDownDeps<SlashCommand, AtMatch>,
+  deps: ComposerKeyDownDeps<SlashCommand, AtMatch, HashMatch>,
 ): void {
   const nativeEvent = e.nativeEvent;
   const enterKey = e.key === "Enter" && !e.shiftKey;
@@ -172,16 +180,41 @@ export function handleComposerKeyDown<SlashCommand, AtMatch>(
     }
   }
 
+  // # session menu — mirrors the @ file menu; skip while composing.
+  if (deps.hashMenuOpen && deps.hashQuery !== null && !deps.extensionUiOpen && !isComposing) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      deps.setHashActiveIndex((i) => deps.cycleListIndex(i, deps.hashMatches.length, 1));
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      deps.setHashActiveIndex((i) => deps.cycleListIndex(i, deps.hashMatches.length, -1));
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      deps.setHashMenuOpen(false);
+      return;
+    }
+    if ((e.key === "Tab" || acceptShortcut) && deps.hashMatches[deps.hashActiveIndex]) {
+      e.preventDefault();
+      deps.applyHashCompletion(deps.hashMatches[deps.hashActiveIndex]);
+      return;
+    }
+  }
+
   if (e.key === "ArrowUp" && !isComposing && !deps.isStreaming && deps.inputHistory.length > 0 && deps.value.trim().length === 0) {
     e.preventDefault();
     deps.setSlashMenuOpen(false);
     deps.setAtMenuOpen(false);
+    deps.setHashMenuOpen(false);
     deps.setHistoryActiveIndex(deps.inputHistory.length - 1);
     deps.setHistoryMenuOpen(true);
     return;
   }
 
-  // Esc stops the agent when no slash/@/history menu or IME composition is active.
+  // Esc stops the agent when no slash/@/#/history menu or IME composition is active.
   if (e.key === "Escape" && !isComposing && deps.isStreaming && deps.onAbort) {
     e.preventDefault();
     deps.onAbort();

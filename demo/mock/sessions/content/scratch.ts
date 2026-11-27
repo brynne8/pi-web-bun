@@ -1,6 +1,6 @@
-import { SCRATCH_ROOT } from "../../paths";
-import { SESSION_IDS } from "../ids";
-import type { SessionScript } from "../types";
+import { SCRATCH_ROOT } from "../../paths.ts";
+import { SESSION_IDS } from "../ids.ts";
+import type { SessionScript } from "../types.ts";
 
 export const scratchSession: SessionScript = {
   id: SESSION_IDS.scratch,
