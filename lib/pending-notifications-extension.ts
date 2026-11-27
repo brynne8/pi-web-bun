@@ -81,9 +81,10 @@ export function createPendingNotificationsExtension(options: PendingNotification
         name: PENDING_TOOL_NAME,
         label: "Pending background results",
         description:
-          "Read background results that finished but have not reached this conversation: commands and subagent runs. "
-          + "Waits for the next one while background work is still running. "
-          + "Never call this when you have other work to do.",
+          "Read background results that finished but have not reached this conversation. "
+          + "Call this only when all the work you have left needs a result that has not arrived yet. "
+          + "Otherwise keep working: reports reach you on their own when your run ends. "
+          + "The call is blocking: it returns only when a result arrives.",
         exposure: PENDING_TOOL_EXPOSURE,
         parameters: Type.Object({}),
         async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
