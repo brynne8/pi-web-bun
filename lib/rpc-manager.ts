@@ -49,6 +49,7 @@ import type { RailNotificationEvent } from "./background-notifications.ts";
 import { createPendingNotificationsExtension } from "./pending-notifications-extension.ts";
 import { pendingNotificationsFor } from "./pending-notifications.ts";
 import { createGetResultExtension } from "./get-result-extension.ts";
+import { createListBgRunsExtension } from "./bg-runs-extension.ts";
 import {
   createSubagentExtension,
   preferPiWebSubagentExtension,
@@ -4168,6 +4169,10 @@ export async function startRpcSession(
               ),
               createGetResultExtension({
                 withdraw: (sessionId, kind, id) => SETTLED_REPORT_SINK.withdraw(sessionId, kind, id),
+                ...(isBuiltInSubagentsEnabled() ? { subagents: SUBAGENT_CONTROLLER.extensionRuntime } : {}),
+                bgTasks: isBgTasksEnabled,
+              }),
+              createListBgRunsExtension({
                 ...(isBuiltInSubagentsEnabled() ? { subagents: SUBAGENT_CONTROLLER.extensionRuntime } : {}),
                 bgTasks: isBgTasksEnabled,
               }),

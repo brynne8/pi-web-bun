@@ -4,6 +4,7 @@ import { dump as stringifyYaml } from "js-yaml";
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync } from "fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 import { parseFrontmatter } from "./frontmatter.ts";
+import { LIST_BG_RUNS_TOOL_NAME } from "./bg-runs.ts";
 import { parseNpmSource } from "./npm-source.ts";
 import { writePrivateFileAtomicSync } from "./atomic-file.ts";
 import { isExistingPathWithinRoots } from "./path-security.ts";
@@ -18,7 +19,8 @@ import { isRecord } from "./is-record.ts";
 export const SUBAGENT_META_TYPE = "pi-web:subagent";
 export const SUBAGENT_STATUS_TYPE = "pi-web:subagent-status";
 export const SUBAGENT_RESULT_TYPE = "pi-web:subagent-result";
-export const SUBAGENT_CONTROL_TOOL_NAMES = ["Agent", "steer_subagent", "abort_subagent", "list_subagent_runs"] as const;
+// The listing tool is the parent's view of its own background work, so it stays out of a child too.
+export const SUBAGENT_CONTROL_TOOL_NAMES = ["Agent", "steer_subagent", "abort_subagent", LIST_BG_RUNS_TOOL_NAME] as const;
 
 export type SubagentStatus = SubagentSessionStatus;
 export type SubagentCodemode = "inherit" | "on" | "off";

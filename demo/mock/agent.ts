@@ -138,11 +138,14 @@ export async function agentState(session: MockSession) {
 
 // The subagent tools are one group: a session with subagents off hides all of them, and one
 // with no pinned selection has all of them active, as a real session registers them together.
-const SUBAGENT_TOOL_NAMES = ["Agent", "get_result", "steer_subagent", "abort_subagent", "list_subagent_runs"];
+// `list_bg_runs` is not in the group: background commands need it too, so a real session keeps
+// it with subagents off, and the demo has no background commands to hide it for.
+const SUBAGENT_TOOL_NAMES = ["Agent", "get_result", "steer_subagent", "abort_subagent"];
+const LIST_BG_RUNS_TOOL_NAME = "list_bg_runs";
 
 export function toolsFor(session: MockSession) {
   const pinned = readSessionToolSelectionFromEntries(session.entries);
-  const defaults = new Set(["read", "bash", "edit", "write", ...SUBAGENT_TOOL_NAMES]);
+  const defaults = new Set(["read", "bash", "edit", "write", LIST_BG_RUNS_TOOL_NAME, ...SUBAGENT_TOOL_NAMES]);
   return toolsCatalog
     .filter((tool) => settings.subagentsEnabled || !SUBAGENT_TOOL_NAMES.includes(tool.name))
     .map((tool) => ({

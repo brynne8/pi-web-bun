@@ -431,8 +431,8 @@
   "active": true
  },
  {
-  "name": "list_subagent_runs",
-  "description": "List the subagents this session delegated, as TSV: agent_id, profile, status, last_activity, description. Use it when you no longer remember which subagents exist. It does not wait for or fetch results. The default view is a process list: active runs, plus runs that failed, were stopped or were interrupted in the last hour, active ones first. Older exits and completed runs are counted in one note unless status asks for them.",
+  "name": "list_bg_runs",
+  "description": "List this session's background runs as TSV: id, kind, state, last_activity, description. Every row is a subagent run. Read it when you no longer remember which runs exist; its `id` is what `get_result` fetches with. The default view is a process list: runs still going, plus runs that ended badly in the last hour, active ones first. Finished runs and older exits are counted in one note, which `status` asks for.",
   "parameters": {
    "type": "object",
    "properties": {
@@ -443,7 +443,7 @@
    }
   },
   "sourceInfo": {
-   "path": "<inline:pi-web-subagents>",
+   "path": "<inline:pi-web-list-bg-runs>",
    "source": "inline",
    "scope": "temporary",
    "origin": "top-level"

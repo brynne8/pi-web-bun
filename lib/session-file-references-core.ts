@@ -3,11 +3,14 @@ import type { SessionEntry, ToolResultMessage } from "./types.ts";
 // Spelled out rather than imported: subagents.ts loads the SDK, and this module stays
 // importable on its own. `get_result` is the subagent report's fetch tool, registered outside
 // subagents.ts (it is also background bash's), so the list no longer shares that module's type.
+// `list_subagent_runs` is the name the listing tool had before it covered background commands too;
+// an old transcript still holds those calls, and their result text authorizes paths the same way.
 const SUBAGENT_TOOL_NAMES: readonly string[] = [
   "Agent",
   "get_result",
   "steer_subagent",
   "abort_subagent",
+  "list_bg_runs",
   "list_subagent_runs",
 ];
 
