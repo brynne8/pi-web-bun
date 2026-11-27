@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createJiti } from "jiti";
 
-import { droppedItems } from "./useDragDrop.ts";
+// The hook keeps its `@/lib` imports, which only the bundler and jiti resolve: Node has no
+// tsconfig `paths`, so a plain `import "./useDragDrop.ts"` dies before the first test there.
+const jiti = createJiti(import.meta.url, { tsconfigPaths: true, tryNative: false });
+const { droppedItems } = await jiti.import("./useDragDrop.ts");
 
 const file = (name) => new File(["x"], name);
 
