@@ -1576,18 +1576,20 @@ pre, code {
 /* A streaming thought is released a paragraph at a time (lib/thinking-flush.ts), so each
    one arrives as a finished block of height. Fading the body's last child lets it appear
    where it lands: the released checkpoint only ever grows, so a paragraph already shown
-   keeps its node and never plays the fade a second time. */
+   keeps its node and never plays the fade a second time. The live class is what scopes
+   it to a thought still being written — a finished card's last child is not an arrival,
+   and mounting one would otherwise replay the fade. */
 @keyframes thinking-paragraph-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
-.markdown-body.markdown-thinking > :last-child {
+.markdown-body.markdown-thinking-live > :last-child {
   animation: thinking-paragraph-in 180ms ease-out both;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .markdown-body.markdown-thinking > :last-child {
+  .markdown-body.markdown-thinking-live > :last-child {
     animation: none;
   }
 }

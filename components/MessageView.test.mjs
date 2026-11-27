@@ -296,10 +296,10 @@ test("a newly released thinking paragraph fades in where it lands", () => {
   // A streaming thought arrives a paragraph at a time (lib/thinking-flush.ts), so the body's
   // last child is the only new one: a paragraph already released keeps its node, and an
   // animation on the body itself would play it once per paragraph for all of them.
-  assert.match(css, /\.markdown-body\.markdown-thinking > :last-child\s*\{\s*animation:\s*thinking-paragraph-in/);
+  assert.match(css, /\.markdown-body\.markdown-thinking-live > :last-child\s*\{\s*animation:\s*thinking-paragraph-in/);
   const keyframes = css.slice(
     css.indexOf("@keyframes thinking-paragraph-in"),
-    css.indexOf(".markdown-body.markdown-thinking > :last-child"),
+    css.indexOf(".markdown-body.markdown-thinking-live > :last-child"),
   );
   assert.match(keyframes, /from \{ opacity: 0; \}\s*to \{ opacity: 1; \}/);
   // Only opacity: the tail follow is already moving the content up, and a shift of its own
@@ -307,7 +307,14 @@ test("a newly released thinking paragraph fades in where it lands", () => {
   assert.doesNotMatch(keyframes, /transform|translate/);
   assert.match(
     css,
-    /@media \(prefers-reduced-motion: reduce\) \{\s*\.markdown-body\.markdown-thinking > :last-child \{\s*animation: none;/,
+    /@media \(prefers-reduced-motion: reduce\) \{\s*\.markdown-body\.markdown-thinking-live > :last-child \{\s*animation: none;/,
+  );
+  // The live class, not the card's: a finished thought's last child is not an arrival, so a
+  // card the page mounts — one expanded, one scrolled to — would replay the fade.
+  assert.doesNotMatch(css, /\.markdown-body\.markdown-thinking > :last-child/);
+  assert.match(
+    readFileSync(new URL("./MessageView.tsx", import.meta.url), "utf8"),
+    /className=\{`markdown-thinking\$\{isStreaming \? " markdown-thinking-live" : ""\}`\}/,
   );
 });
 

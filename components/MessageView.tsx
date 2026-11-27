@@ -1231,7 +1231,7 @@ export function ThinkingBlock({ block, duration, isStreaming, cwd, onOpenFile, s
             <span style={{ whiteSpace: "pre-wrap" }}>{loading ? t("i18n.loadingThinking") : error}</span>
           ) : (
             <SafeMarkdownBody
-              className="markdown-thinking"
+              className={`markdown-thinking${isStreaming ? " markdown-thinking-live" : ""}`}
               isStreaming={isStreaming}
               cwd={cwd}
               onOpenFile={onOpenFile}
