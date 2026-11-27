@@ -911,7 +911,6 @@ type ContextSettings = Pick<SessionContext, "thinkingLevel" | "model">;
 const MAX_INDEXED_BRANCH_ENTRIES = 50_000;
 const branchIndexes = new WeakMap<SessionManager, {
   tip: SessionEntry;
-  entryCount: number;
   byId: ReturnType<typeof indexBranchContext>;
 }>();
 
@@ -927,8 +926,12 @@ export function buildSessionManagerContext(
   const entryCount = manager.getEntryCount();
   let index = tip ? branchIndexes.get(manager) : undefined;
   if (tip && entryCount <= MAX_INDEXED_BRANCH_ENTRIES && options.tail && options.tail < entryCount && leaf) {
-    if (index?.tip !== tip || index.entryCount !== entryCount) {
-      index = { tip, entryCount, byId: indexBranchContext(tip, lookup, entryCount) };
+    // A branch's entries above a given entry never change: appends go at the leaf, and an edit
+    // or a fork writes new ids, so the tip alone decides whether the index still holds. A
+    // session that keeps writing while its pages are being read therefore reuses it instead
+    // of rebuilding the whole branch for every page.
+    if (index?.tip !== tip) {
+      index = { tip, byId: indexBranchContext(tip, lookup, entryCount) };
       branchIndexes.set(manager, index);
     }
   } else {
