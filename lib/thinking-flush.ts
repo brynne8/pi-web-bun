@@ -19,13 +19,35 @@ export interface ThinkingFlushCheckpoint {
   released: number;
 }
 
-const PARAGRAPH_BREAK = /\n[ \t]*\r?\n/gu;
+/** A code fence's opening or closing line: up to three spaces, then ``` or ~~~. */
+const FENCE_LINE = /^[ \t]{0,3}(`{3,}|~{3,})/;
 
-/** Index just past the last blank line in `text`, or -1 when there is none. */
+/**
+ * Index just past the last blank line outside a fenced block, or -1 when there is none.
+ *
+ * A blank line inside a fence is the code's own, not the prose's: releasing there would
+ * show a half-written fence and its body as text while the command is still writing it.
+ */
 function lastParagraphBreakEnd(text: string): number {
   let end = -1;
-  for (const match of text.matchAll(PARAGRAPH_BREAK)) {
-    end = match.index + match[0].length;
+  let fenceChar: string | null = null;
+  let lineStart = 0;
+  while (lineStart <= text.length) {
+    const newline = text.indexOf("\n", lineStart);
+    const lineEnd = newline === -1 ? text.length : newline;
+    const line = text.slice(lineStart, lineEnd);
+    const fence = FENCE_LINE.exec(line);
+    if (fence) {
+      // The same character opens and closes, so a ``` block is closed by ``` and not by ~~~.
+      if (fenceChar === null) fenceChar = fence[1][0];
+      else if (fence[1][0] === fenceChar) fenceChar = null;
+    } else if (fenceChar === null && line.trim() === "" && newline !== -1) {
+      // Just past the blank line itself: the paragraph above it is finished. A blank line the
+      // text ends on is not one yet — the line it would end may still be being written.
+      end = lineEnd + 1;
+    }
+    if (newline === -1) break;
+    lineStart = newline + 1;
   }
   return end;
 }
