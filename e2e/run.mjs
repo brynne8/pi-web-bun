@@ -17,6 +17,7 @@ import { checkChatAppearance } from "./chat-appearance.mjs";
 import { checkComposerFocus } from "./composer-focus.mjs";
 import { checkCodeBackground } from "./code-background.mjs";
 import { checkStreamingMetrics } from "./streaming-metrics.mjs";
+import { checkToolRunIndentation } from "./tool-run.mjs";
 import { checkModelDiscovery, installModelDiscoveryStub } from "./model-discovery.mjs";
 import { checkModelOrder } from "./model-order.mjs";
 import { checkModelContext } from "./model-context.mjs";
@@ -608,8 +609,12 @@ try {
     await checkCodeBackground(page);
     await checkStreamingMetrics(page);
     await checkModelSelector(page, { base, project, artifacts });
+    // Last on this session: the merged run row this measures is the compacted session's, whose
+    // 48 shell calls are the longest run the suite holds, and whose own checks are done above.
+    await page.goto(`${base}/?session=${COMPACTED}`, { waitUntil: "domcontentloaded" });
+    await checkToolRunIndentation(page);
     assert.deepEqual(errors, [], `Browser errors at width ${viewport.width}`);
-    console.log(`PASS: ${viewport.width}px browser pagination, branch, markdown, code, tool call, and compaction navigation`);
+    console.log(`PASS: ${viewport.width}px browser pagination, branch, markdown, code, tool call, compaction and merged run indentation navigation`);
     await context.tracing.stop();
     await context.close();
     context = undefined;

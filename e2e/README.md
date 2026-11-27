@@ -69,6 +69,10 @@ Coverage:
 - Branch context follows the selected leaf and excludes the other branch. The
   leaf and root pages are a route test (`context-route.test.mjs`).
 - Markdown, code blocks, and real tool-call/tool-result blocks render.
+- A merged tool run reads as a level: its "bash ×N" header counts the calls, and opening it sets
+  those calls inside the header while the rows after the run come back on the header's own edge.
+  Measured on the compacted session's 48-call run; rows outside the viewport hold no content, so the
+  header is brought to the top first (`e2e/tool-run.mjs`).
 - Chat width and font size persist, existing drafts resize, and short settings
   panels keep every language option reachable on desktop and mobile.
 - Interface/chat and monospace font lists and weights apply live, survive

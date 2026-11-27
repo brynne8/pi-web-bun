@@ -168,7 +168,7 @@ pi SDK 会读取该设置，并按包管理器（`npm`、`pnpm`、`bun`）调整
 
 **`write` 卡片把路径和它写下的正文并排显示。** 参数都是单个值的工具卡片会一个参数一行地列出来，本身带换行的值保留成一块可以滚动的文本；这里连 `write` 也上表，它给出的两行就是文件路径和写下的正文。规则是全部参数都上表，否则一个也不上：只要有一个值是嵌套的，比如 MCP 参数里装着列表，这张卡片就照旧显示 JSON。行表本身是上游从本分支收走的（[#1324](https://github.com/agegr/pi-web/pull/1324)），而原版把 `write` 排除在外：那张卡片只显示文件正文，路径不跟在旁边。（[说明](./agents/sessions.md#tool-execution-events-on-the-sse-stream)）
 
-**模型写下的文字留在屏幕上，只折叠中间的过程。** 一次运行按片段渲染：它写的文字就在写下的位置显示，中间连着的思考块和工具调用各自折进自己那一组「处理详情」。最后一组下面只有一个结尾，写着这次运行的事：token 数与耗时、这一轮改过的文件、交出全部文字的「复制」；运行停在 Provider 报错或输出上限上时，那句原因就写在它上面一行（[#906](https://github.com/agegr/pi-web/issues/906)）。原版把一次运行的过程折进一个「处理详情」组，并把数字、改动文件清单和失败原因挂到那条回复消息上。（[说明](./agents/sessions.md#a-turn-shows-every-word-it-wrote-only-the-workings-fold-processdetailsgroup-componentschatwindowtsx)）
+**模型写下的文字留在屏幕上，只折叠中间的过程。** 一次运行按片段渲染：它写的文字就在写下的位置显示，中间连着的思考块和工具调用各自折进自己那一组「处理详情」。同一个工具连着调用几次的行只写一次（`bash ×4`），展开后它的那些调用往行内缩进一格。最后一组下面只有一个结尾，写着这次运行的事：token 数与耗时、这一轮改过的文件、交出全部文字的「复制」；运行停在 Provider 报错或输出上限上时，那句原因就写在它上面一行（[#906](https://github.com/agegr/pi-web/issues/906)）。原版把一次运行的过程折进一个「处理详情」组，并把数字、改动文件清单和失败原因挂到那条回复消息上。（[说明](./agents/sessions.md#a-turn-shows-every-word-it-wrote-only-the-workings-fold-processdetailsgroup-componentschatwindowtsx)）
 
 **子代理的报告按 Markdown 渲染。** `Agent` 或 `get_result` 的结果会把标题、列表、表格和围栏代码真的渲染出来，字号仍是这张卡片自己那一号，不再把子代理写下的标记符号直接摆给你看。其他工具的输出仍是原始文本——在那里 `*` 和 `#` 只是字符，不是标题。后台运行的通知和子代理自己的标签页本来就已经按 Markdown 渲染，这一份报告在两处读起来是同一个样子。原版是把报告原样打印。（[说明](./agents/subagents.md#the-report-on-screen)）
 

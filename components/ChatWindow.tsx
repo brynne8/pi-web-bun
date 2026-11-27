@@ -327,6 +327,8 @@ interface SegmentView {
 const TOOL_RUN_BORDER = "1px solid rgba(34,197,94,0.25)";
 const TOOL_RUN_BACKGROUND = "rgba(34,197,94,0.04)";
 const TOOL_RUN_NAME_COLOR = "#16a34a";
+/** How far an expanded run's calls sit inside its header. */
+const TOOL_RUN_INDENT = 16;
 
 function ToolRunRow({ count, toolName, durationMs, forceOpen, children, t, locale }: { count: number; toolName: string; durationMs?: number; forceOpen?: boolean; children: ReactNode; t: (key: string) => string; locale: Locale }) {
   const [open, setOpen] = useState(Boolean(forceOpen));
@@ -385,7 +387,7 @@ function ToolRunRow({ count, toolName, durationMs, forceOpen, children, t, local
         </div>
       </div>
       </div>
-      {open && <>{children}</>}
+      {open && <div style={{ paddingLeft: TOOL_RUN_INDENT }}>{children}</div>}
     </>
   );
 }
