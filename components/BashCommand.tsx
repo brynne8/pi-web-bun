@@ -18,8 +18,8 @@ const TOKEN_STYLE: Record<Exclude<BashTokenKind, "plain">, CSSProperties> = {
  * readily as a block of its own — and uncoloured words inherit the colour of
  * whatever contains it.
  */
-export const BashCommand = memo(function BashCommand({ command, limit }: { command: string; limit?: number }) {
-  const tokens = useMemo(() => tokenizeBash(command, limit), [command, limit]);
+export const BashCommand = memo(function BashCommand({ command }: { command: string }) {
+  const tokens = useMemo(() => tokenizeBash(command), [command]);
   return (
     <>
       {tokens.map((token, index) =>

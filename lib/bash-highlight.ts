@@ -211,12 +211,10 @@ function pushHeredocBody(
 }
 
 /**
- * `command` split into tokens, cut at `limit` characters for a one-line
- * preview. The kept pieces concatenate back to the command.
+ * `command` split into tokens; the tokens concatenate back to the command.
  */
-export function tokenizeBash(command: string, limit = Number.POSITIVE_INFINITY): BashToken[] {
+export function tokenizeBash(command: string): BashToken[] {
   const tokens: BashToken[] = [];
-  let length = 0;
   let index = 0;
   // The first word of a line, and of a `|`, `&&`, `;` or subshell group, runs a
   // command; every other word is an argument.
@@ -226,13 +224,11 @@ export function tokenizeBash(command: string, limit = Number.POSITIVE_INFINITY):
   const heredocs: HeredocRedirect[] = [];
 
   function push(kind: BashTokenKind, text: string): void {
-    const kept = text.slice(0, Math.max(0, limit - length));
-    if (!kept) return;
-    length += kept.length;
-    tokens.push({ kind, text: kept });
+    if (!text) return;
+    tokens.push({ kind, text });
   }
 
-  while (index < command.length && length < limit) {
+  while (index < command.length) {
     const char = command[index];
 
     if (WHITESPACE.has(char)) {
