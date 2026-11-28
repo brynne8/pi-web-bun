@@ -1145,6 +1145,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
 
   // Offered only where the server can raise a window for this browser (not
   // from another computer, not on a platform without one).
+  const fileManagerUnavailable = fileManager?.supported === false;
+  const fileManagerErrorMessage = fileManagerUnavailable && fileManager?.reason
+    ? t(FILE_MANAGER_ERROR_KEYS[fileManager.reason] ?? fileManager.reason)
+    : null;
   const fileManagerPlatformName = fileManager?.supported ? fileManager.platform : null;
   const fileManagerLabel = t(
     fileManagerPlatformName === "darwin"
@@ -3028,7 +3032,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
       icon: <RevealIcon />,
       // Only the server can raise a file-manager window, and only for a browser on
       // that machine: a phone on the LAN is told why the item does nothing.
-      disabled: fileManagerPlatformName === null,
+      // Only the server can raise a window, and only for a browser on that machine: a
+      // phone on the LAN is told why the item does nothing.
+      disabled: fileManagerUnavailable,
+      disabledReason: fileManagerErrorMessage ?? undefined,
       onSelect: () => {
         void openInFileManager({ reveal: target.path }).then((error) => { if (error) showToast(error); });
       },

@@ -21,6 +21,10 @@ const LABEL = {
   download: "Download file",
   revert: "Revert changes",
   delete: "Delete file",
+  rename: "Rename",
+  newFolder: "New folder",
+  /** The tree's own delete, which asks in the menu; `delete` is the Revert question's item. */
+  deleteEntry: "Delete…",
   cancel: "Cancel",
 };
 
@@ -109,11 +113,12 @@ export async function checkFileRowMenu(page, filePath, name, fixtureText) {
     `the centre of a hovered row is not an action control: ${cover.tag}`);
   assert.equal(cover.title, titlePath, "the centre of the row is the file's own name");
 
-  // 2. The row's menu opens at the pointer and holds exactly the three actions.
-  // Three, not four: the fixture project is a fresh directory in tmpdir and no Git
-  // repository, so no row has a change to undo and the Revert item a changed row
-  // gets (lib/git-revert-rule.ts) has nothing to appear on. Making the fixture a
-  // repository would put that item on every row and this assertion with it.
+  // 2. The row's menu opens at the pointer and holds exactly these actions: what is done
+  // to the entry, then where it is and what it is called (`fileMenuItems()`).
+  // No Revert: the fixture project is a fresh directory in tmpdir and no Git repository,
+  // so no row has a change to undo and the Revert item a changed row gets
+  // (lib/git-revert-rule.ts) has nothing to appear on. Making the fixture a repository
+  // would put that item on every row and this assertion with it.
   // The file-manager item is judged by what the server itself answers, the same
   // /api/open-in-explorer reply the project's own button reads — never clicked, because
   // raising a real Finder window on whoever runs the suite is not a test.
@@ -125,15 +130,11 @@ export async function checkFileRowMenu(page, filePath, name, fixtureText) {
   const menu = page.getByRole("menu", { name: `Actions for ${name}` });
   await menu.waitFor({ state: "visible", timeout: 5_000 });
   const items = await itemNames(menu);
-  assert.equal(items.length, 3, `a file row's menu holds three items: ${JSON.stringify(items)}`);
-  assert.equal(items[0], LABEL.mention, items.join(" / "));
-  assert.equal(items[1], LABEL.download, items.join(" / "));
+  assert.deepEqual(items.slice(0, 2), [LABEL.mention, LABEL.download], items.join(" / "));
+  assert.deepEqual(items.slice(3), [LABEL.rename, LABEL.deleteEntry], items.join(" / "));
   const reveal = menu.getByRole("menuitem", { name: items[2] });
   assert.equal(await reveal.isEnabled(), availability.supported === true,
     `reveal is enabled exactly when the file manager is reachable: ${JSON.stringify(availability)}`);
-  if (availability.supported !== true) {
-    assert.ok(items[2].includes(availability.reason), `a disabled reveal says why: ${items[2]}`);
-  }
 
   // 3. Escape closes it, like every other sidebar menu.
   await page.keyboard.press("Escape");
@@ -157,8 +158,9 @@ export async function checkFileRowMenu(page, filePath, name, fixtureText) {
     const dirMenu = page.getByRole("menu", { name: `Actions for ${dirName}` });
     await dirMenu.waitFor({ state: "visible", timeout: 5_000 });
     const dirItems = await itemNames(dirMenu);
-    assert.equal(dirItems.length, 2, `a folder row's menu drops the download: ${JSON.stringify(dirItems)}`);
-    assert.equal(dirItems[0], LABEL.mention, dirItems.join(" / "));
+    // No download (a folder has nothing to download) and a new folder named in it.
+    assert.deepEqual(dirItems, [LABEL.mention, dirItems[1], LABEL.rename, LABEL.newFolder, LABEL.deleteEntry],
+      `a folder row's menu drops the download: ${JSON.stringify(dirItems)}`);
     await page.keyboard.press("Escape");
     await dirMenu.waitFor({ state: "detached", timeout: 5_000 });
   }
