@@ -257,3 +257,104 @@ test("switching to another branch without a full read drops the stale snapshot o
     env.cleanup();
   }
 });
+
+test("a revisit whose only change is a non-message entry keeps the paged-in window", async () => {
+  const env = setup();
+  let mounted;
+  try {
+    // The window as a reader left it: 50 entries paged in, the leaf the session's own tail.
+    setSessionViewSnapshot({
+      sessionId: "A",
+      revision: "runtime-revision",
+      messages: [user("one"), assistant("two"), user("three"), assistant("four")],
+      entryIds: ["e1", "e2", "e3", "e4"],
+      leafId: "e4",
+      oldestEntryId: "e1",
+      hasMore: false,
+      turnsBefore: 0,
+      summaryTree: [],
+      thinkingLevel: "off",
+      model: null,
+      loadedEntryIds: ["e1", "e2", "e3", "e4"],
+    });
+    // Coming back reads through the disk (the idle wrapper was released) after opening the
+    // session appended a `thinking_level_change`: another revision, another leaf, and the
+    // same entries the window already holds.
+    env.server.entries = [["e3", user("three")], ["e4", assistant("four")]];
+
+    mounted = await env.mount();
+    assert.deepEqual(env.texts(mounted.hook), ["one", "two", "three", "four"], "the wider window stands");
+    assert.deepEqual(mounted.hook.result.entryIds, ["e1", "e2", "e3", "e4"]);
+
+    const kept = getSessionViewSnapshot("A");
+    assert.deepEqual(kept?.entryIds, ["e1", "e2", "e3", "e4"]);
+    assert.deepEqual(kept?.loadedEntryIds, ["e1", "e2", "e3", "e4"]);
+  } finally {
+    mounted?.hook.unmount();
+    env.cleanup();
+  }
+});
+
+test("a revisit that brings a message the window does not hold collapses to the fresh window", async () => {
+  const env = setup();
+  let mounted;
+  try {
+    setSessionViewSnapshot({
+      sessionId: "A",
+      revision: "runtime-revision",
+      messages: [user("one"), assistant("two"), user("three"), assistant("four")],
+      entryIds: ["e1", "e2", "e3", "e4"],
+      leafId: "e4",
+      oldestEntryId: "e1",
+      hasMore: false,
+      turnsBefore: 0,
+      summaryTree: [],
+      thinkingLevel: "off",
+      model: null,
+      loadedEntryIds: ["e1", "e2", "e3", "e4"],
+    });
+    // A message arrived while the session was closed: the read's last window holds one the
+    // cached window never had, so the view is the server's again.
+    env.server.entries = [["e3", user("three")], ["e4", assistant("four")], ["e5", user("five")]];
+
+    mounted = await env.mount();
+    assert.deepEqual(env.texts(mounted.hook), ["four", "five"]);
+    assert.deepEqual(mounted.hook.result.entryIds, ["e4", "e5"]);
+  } finally {
+    mounted?.hook.unmount();
+    env.cleanup();
+  }
+});
+
+test("a branch switch replaces the window even when its entries sit in the cache", async () => {
+  const env = setup();
+  let mounted;
+  try {
+    setSessionViewSnapshot({
+      sessionId: "A",
+      revision: "r:e1,e2,e3,e4",
+      messages: [user("one"), assistant("two"), user("three"), assistant("four")],
+      entryIds: ["e1", "e2", "e3", "e4"],
+      leafId: "e4",
+      oldestEntryId: "e1",
+      hasMore: false,
+      turnsBefore: 0,
+      summaryTree: [],
+      thinkingLevel: "off",
+      model: null,
+      loadedEntryIds: ["e1", "e2", "e3", "e4"],
+    });
+    mounted = await env.mount();
+    await mounted.flush();
+    // The branch moved to a leaf whose tail the cached window happens to hold: the
+    // view is that branch's window, not the wider one the cache kept.
+    env.server.entries = [["e3", user("three")], ["e4", assistant("four")]];
+    env.server.leafId = "e4";
+    await mounted.hook.result.handleNavigate("e4");
+    await mounted.flush();
+    assert.deepEqual(mounted.hook.result.entryIds, ["e3", "e4"]);
+  } finally {
+    mounted?.hook.unmount();
+    env.cleanup();
+  }
+});

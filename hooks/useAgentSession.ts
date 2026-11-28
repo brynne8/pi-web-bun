@@ -943,7 +943,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [applyLiveUsage]);
 
-  const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false, options?: { force?: boolean }) => {
+  const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false, options?: {
+    force?: boolean;
+    /** False for a read that moves the branch: its window is the branch's, never the one paged in. */
+    keepPagedWindow?: boolean;
+  }) => {
     // Single-flight: concurrent reads for the same session (mount + SSE settle +
     // reconcile) share one request unless the caller forces a fresh read.
     const flightKey = options?.force ? `force:${sid}` : sid;
@@ -985,11 +989,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // collapsing back to the fresh 50-entry window. The state hooks then
       // only need the server's tree/leaf/stats — never a history reset.
       const cached = getSessionViewSnapshot(sid);
+      const freshEntryIds = d.context.entryIds ?? [];
+      // The revision names the read source as well as the file (`lib/session-revision.ts`), and
+      // opening a session appends a non-message entry (a `thinking_level_change`), so the token
+      // changes although no message arrived: every entry this read returned already sits in the
+      // cached window. That says what the token would have said — nothing new to collapse for —
+      // and keeps a paged-in window (and the reading position restored into it) standing.
+      const freshInsideCached = Boolean(options?.keepPagedWindow !== false
+        && d.snapshotRevision && cached && d.treeFormat === "summary"
+        && freshEntryIds.length > 0
+        && freshEntryIds.every((id) => cached.entryIds.includes(id) || cached.loadedEntryIds.includes(id)));
       const revisionUnchanged = Boolean(
         d.snapshotRevision
         && cached?.revision === d.snapshotRevision
         && cached.entryIds.length >= (d.context.entryIds ?? []).length,
-      );
+      ) || freshInsideCached;
       const persistedMessages = revisionUnchanged ? messagesRef.current : d.context.messages;
       setData(revisionUnchanged
         ? {
@@ -2840,7 +2854,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         targetId: entryId,
       });
       if (result?.cancelled || sessionIdRef.current !== sid) return false;
-      await loadSession(sid);
+      // The branch moved: its window is what the reader is shown, not the one paged in under
+      // the branch they left.
+      await loadSession(sid, false, false, { keepPagedWindow: false });
       return sessionIdRef.current === sid;
     } catch (e) {
       console.error("Failed to navigate:", e);
