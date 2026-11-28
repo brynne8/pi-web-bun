@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
 import { isIP } from "net";
-import { dirname } from "path";
+import { posix } from "path";
 
 const FILE_MANAGER_BY_PLATFORM = new Map<string, string>([
   ["win32", "explorer.exe"],
@@ -13,15 +13,15 @@ export function isFileManagerSupported(platform: string): boolean {
   return FILE_MANAGER_BY_PLATFORM.has(platform);
 }
 
-/** The distro name is in the environment of every process WSL starts; "" off WSL. */
+/** The distro name WSL puts in the environment of every process it starts; "" off WSL. */
 export function wslDistroName(env: NodeJS.ProcessEnv = process.env): string {
   return env.WSL_DISTRO_NAME?.trim() ?? "";
 }
 
 /**
- * Which platform's file manager answers for this one: inside WSL it is Windows,
- * reached through the interop PATH, because a Linux desktop opener is both
- * usually absent there and blind to paths the Windows shell can show.
+ * Whose file manager answers on this platform. Inside WSL `process.platform` is
+ * "linux", but `xdg-open` is usually not installed there; Windows' Explorer is,
+ * through WSL's interop PATH.
  */
 export function fileManagerPlatform(
   platform: string = process.platform,
@@ -31,72 +31,68 @@ export function fileManagerPlatform(
 }
 
 /**
- * The Windows form of a path inside WSL: a mounted drive keeps its letter, the
- * rest of the distro is reached through the `\\wsl$\<distro>` root, which
- * Windows 10 and 11 both serve.
+ * The Windows name of a path inside WSL: `/mnt/c/dev` is `C:\dev`, and the
+ * rest of the distro is reached through `\\wsl$\<distro>`, which Windows 10
+ * and 11 both serve.
  */
 export function windowsPathForWsl(posixPath: string, distro: string): string {
   const trimmed = posixPath.replace(/\/+$/, "") || "/";
   const mount = /^\/mnt\/([a-zA-Z])(?:\/(.*))?$/.exec(trimmed);
-  if (mount) {
-    const rest = (mount[2] ?? "").replaceAll("/", "\\");
-    return `${mount[1].toUpperCase()}:${rest ? `\\${rest}` : "\\"}`;
-  }
-  return `\\\\wsl$\\${distro}${trimmed.replaceAll("/", "\\")}`;
+  if (mount) return `${mount[1].toUpperCase()}:\\${(mount[2] ?? "").replaceAll("/", "\\")}`;
+  return `\\\\wsl$\\${distro}${trimmed === "/" ? "\\" : trimmed.replaceAll("/", "\\")}`;
 }
 
 /**
- * What to ask the file manager for: show a folder's contents, or show one file
- * inside the folder that holds it. Receiving a reveal is what a reader means by
- * "look at this file" — the folder alone does not say which of its entries the
- * row was.
- */
-export type FileManagerView = "open" | "reveal";
-
-/**
- * Whether to reveal one path or open it. A reveal of a folder opens that folder:
- * a right-clicked directory wants its contents, not its icon in its parent.
- * Null is a path neither view can show (a socket, a device).
- */
-export function fileManagerViewFor(
-  revealFile: boolean,
-  stats: { isDirectory(): boolean; isFile(): boolean },
-): FileManagerView | null {
-  if (revealFile && !stats.isDirectory()) return stats.isFile() ? "reveal" : null;
-  return stats.isDirectory() ? "open" : null;
-}
-
-/**
- * Builds the command that shows something in the OS file manager: the directory to open, or
- * the file to reveal among its folder's contents, or null on an unsupported platform. A reveal
- * selects one file where the platform can (`open -R`, `explorer /select,`) and falls back to
- * its folder where it cannot: no Linux file manager has a reveal-from-the-terminal command,
- * and opening the folder still answers the question the reader asked.
+ * Builds the command that opens a directory in the OS file manager.
+ * @param platform A Node `process.platform` value
+ * @param target The directory to open
+ * @returns The command and its arguments, or null on an unsupported platform
  */
 export function fileManagerCommand(
   platform: string,
   target: string,
-  view: FileManagerView = "open",
 ): { command: string; args: string[] } | null {
   const command = FILE_MANAGER_BY_PLATFORM.get(platform);
-  if (!command) return null;
-  if (view !== "reveal") return { command, args: [target] };
-  if (platform === "darwin") return { command, args: ["-R", target] };
-  // explorer.exe takes the switch and the path as one argument, in its own
-  // separator: `explorer /select,C:\work\repo\file.ts`. A WSL caller reaches this
-  // branch too: it passes `win32` and the Windows form of the path
-  // (`fileManagerPlatform()`, `windowsPathForWsl()`).
-  if (platform === "win32") return { command, args: [`/select,${target.replaceAll("/", "\\")}`] };
-  return { command, args: [dirname(target)] };
+  return command ? { command, args: [target] } : null;
 }
 
 /**
- * Whether the request's Host header names a loopback address; a missing header is remote.
+ * Builds the command that shows an entry selected in its folder: a file
+ * tree's "Show in Finder". Finder and Explorer select it; xdg-open has no
+ * selection, so Linux opens the folder that holds it. Never opens the entry
+ * itself, so a folder that is an `.app` bundle is shown, not launched.
+ * @param platform A Node `process.platform` value
+ * @param target The file or folder to show
+ * @returns The command and its arguments, or null on an unsupported platform
+ */
+export function fileManagerRevealCommand(
+  platform: string,
+  target: string,
+): { command: string; args: string[] } | null {
+  switch (platform) {
+    case "darwin":
+      return { command: "open", args: ["-R", target] };
+    case "win32":
+      // `/select,` then the path as its own argument: quoted when it has
+      // spaces, which Explorer reads there (not inside `/select,"…"` as one).
+      return { command: "explorer.exe", args: ["/select,", target] };
+    case "linux":
+      return { command: "xdg-open", args: [posix.dirname(target)] };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Whether the request's Host header points at this machine.
  *
- * `Host` is client-controlled, so this is a usability guard rather than access control: it
- * keeps a phone or another computer on the LAN from raising a window on the server. The real
- * boundaries are the default 127.0.0.1 bind (only `dev:lan` / `start:lan` listen publicly)
- * and the caller's path allow-list.
+ * `Host` is client-controlled, so this is a usability guard rather than access
+ * control: it keeps a phone or another computer on the LAN from raising a
+ * window on the server. The real boundaries are the default 127.0.0.1 bind
+ * (only `dev:lan` / `start:lan` listen publicly) and the caller's path
+ * allow-list. A missing Host header is treated as remote.
+ * @param host The Host header
+ * @returns Whether it names a loopback address
  */
 export function isLoopbackHost(host: string | null | undefined): boolean {
   if (!host) return false;
@@ -111,26 +107,30 @@ export function isLoopbackHost(host: string | null | undefined): boolean {
 }
 
 /**
- * Opens a directory, or reveals a file, in the OS file manager.
- * @param target The directory to open, or the file to reveal (the caller checks access)
+ * Opens a directory in the OS file manager, or with `reveal` shows an entry
+ * selected in its folder (fileManagerRevealCommand).
+ *
+ * On macOS, `open` launches an `.app` bundle instead of showing it, so callers
+ * opening a directory should only pass project directories such as the
+ * explorer root; anything else is revealed.
+ * @param target The directory to open, or the entry to reveal (the caller checks access)
  * @param platform A Node `process.platform` value
- * @param view Whether to reveal one file rather than open a folder
+ * @param env The environment that tells WSL apart from other Linux
+ * @param reveal Show `target` selected in its folder instead of opening it
  * @returns Resolves once the command has started
  */
 export function launchFileManager(
   target: string,
   platform: string = process.platform,
-  view: FileManagerView = "open",
   env: NodeJS.ProcessEnv = process.env,
+  reveal = false,
 ): Promise<void> {
-  const managerPlatform = fileManagerPlatform(platform, env);
   const distro = platform === "linux" ? wslDistroName(env) : "";
-  const asked = distro ? windowsPathForWsl(target, distro) : target;
-  const spec = fileManagerCommand(managerPlatform, asked, view);
+  const build = reveal ? fileManagerRevealCommand : fileManagerCommand;
+  const spec = distro
+    ? build("win32", windowsPathForWsl(target, distro))
+    : build(platform, target);
   if (!spec) return Promise.reject(new Error(`Unsupported platform: ${platform}`));
-  // On macOS `open` launches an `.app` bundle instead of showing it, so the default
-  // `open` view is for project directories such as the explorer root; only a `reveal`
-  // passes `open -R`, which shows the bundle in Finder without running it.
   return new Promise((resolve, reject) => {
     const child = spawn(spec.command, spec.args, { detached: true, stdio: "ignore" });
     // explorer.exe can exit with code 1 even on success, so only a failed spawn counts.

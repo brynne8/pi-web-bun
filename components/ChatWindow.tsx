@@ -17,13 +17,9 @@ import { getTurnPart, type TurnPartCache } from "@/lib/turn-views";
 import { getTurnUsage } from "@/lib/turn-usage";
 import { formatTurnDuration, getTurnDurationMs } from "@/lib/turn-duration";
 import { TurnFooter } from "./TurnFooter";
-import {
-  dropMentionText,
-  splitDroppedItems,
-  uploadDroppedFiles as uploadDroppedFilesToCwd,
-  uploadFiles,
-  type DroppedItem,
-} from "@/lib/file-upload-client";
+import { collectDroppedItems, dropMentionText, MAX_UPLOAD_TOTAL_BYTES, splitDroppedItems, summarizeNames, uploadFiles, uploadTotalBytes, type DroppedItem } from "@/lib/file-upload-client";
+import { formatImageBytes } from "@/lib/model-image-limits";
+import { errorMessage } from "@/lib/errors";
 import type { SessionReferenceTarget } from "@/lib/session-reference-target";
 import type { FileLinkTarget } from "@/lib/file-links";
 import { AssistantNotice, MessageView } from "./MessageView";
@@ -482,7 +478,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     dismissCompactError,
     handleRecallQueue,
     handleBuiltinSlashCommand,
-    handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, loadSlashCommands, loadAllModels, scrollUserMsgToTop,
+    handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, loadSlashCommands, requestArgumentCompletions, loadAllModels, scrollUserMsgToTop,
     loadContext, activeLeafId, scrollToBottom, scrollToMessage,
   } = useAgentSession({
     session, sessionRunning, newSessionCwd, newSessionDraftKey, initialNewSessionChoices, onNewSessionChoicesChange, onAgentEnd: wrappedOnAgentEnd, onSessionEnded, onToolEnd, onAttentionNeeded, onSessionCreated, onSessionForked, onSideSession,
@@ -878,34 +874,67 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   }, [ctxKey, onContextUsageChange]);
   useEffect(() => () => { onContextUsageChange?.(null); }, [onContextUsageChange]);
 
-  // Images attach to the prompt. Other files go through the file explorer's
-  // upload into the working directory, never replacing a file already there,
-  // and come back as @mentions. The composer's attach button takes the same
-  // path, for phones that cannot drop files.
-  const uploadDroppedFiles = useCallback((files: File[]) => uploadDroppedFilesToCwd(files, {
-    cwd: session?.cwd ?? newSessionCwd,
-    uploadFiles,
-    dropMentionText,
-    addNotice,
-    t,
-    insertText: (text) => chatInputRef?.current?.insertText(text),
-    onFilesUploaded,
-  }), [addNotice, chatInputRef, newSessionCwd, onFilesUploaded, session?.cwd, t]);
+  // Images attach to the prompt. Other files and folders go through the file
+  // explorer's upload into the working directory, never replacing a file
+  // already there, and come back as @mentions (a folder as `@folder/`). The
+  // composer's attach button takes the same path, for phones that cannot drop files.
+  const uploadDroppedItems = useCallback(async (dropped: DroppedItem[]) => {
+    const cwd = session?.cwd ?? newSessionCwd;
+    if (!cwd) {
+      addNotice({ type: "warning", message: t("chat.dropNeedsCwd") });
+      return;
+    }
+    const names = (list: string[]) => summarizeNames(list, (count) => t("files.moreNames", { count }));
+    try {
+      const { items, empty, failed } = await collectDroppedItems(dropped);
+      if (failed.length > 0) {
+        addNotice({ type: "error", message: t("chat.dropFailed", { message: names(failed.map((item) => `${item.name}: ${item.error}`)) }) });
+      }
+      if (empty.length > 0) addNotice({ type: "warning", message: t("files.folderEmpty", { names: empty.join(", ") }) });
+      if (items.length === 0) return;
+      const total = uploadTotalBytes(items);
+      if (total > MAX_UPLOAD_TOTAL_BYTES) {
+        addNotice({ type: "error", message: t("files.uploadTooLarge", { size: formatImageBytes(total), limit: formatImageBytes(MAX_UPLOAD_TOTAL_BYTES) }) });
+        return;
+      }
+      const { status, data } = await uploadFiles(cwd, items, "skip");
+      if (status !== 200 && status !== 207) throw new Error(data.error ?? `HTTP ${status}`);
+      const uploaded = data.uploaded ?? [];
+      const skipped = data.skipped ?? [];
+      const mentions = dropMentionText(items, [...uploaded, ...skipped]);
+      if (mentions) chatInputRef?.current?.insertText(mentions);
+      if (uploaded.length > 0) {
+        addNotice({ type: "success", message: t("chat.dropUploaded", { count: uploaded.length }) });
+        onFilesUploaded?.();
+      }
+      if (skipped.length > 0) {
+        addNotice({ type: "warning", message: t("chat.dropAlreadyExists", { names: names(skipped) }) });
+      }
+      const errors = data.errors ?? [];
+      if (errors.length > 0) {
+        addNotice({ type: "error", message: t("chat.dropFailed", { message: names(errors.map((failure) => `${failure.name}: ${failure.error}`)) }) });
+      }
+    } catch (uploadError) {
+      addNotice({ type: "error", message: t("chat.dropFailed", { message: errorMessage(uploadError) }) });
+    }
+  }, [addNotice, chatInputRef, newSessionCwd, onFilesUploaded, session?.cwd, t]);
 
-  const onDrop = useCallback((items: DroppedItem[], session?: SessionReferenceTarget) => {
+  const onDrop = useCallback((items: DroppedItem[], session?: SessionReferenceTarget, mention?: string) => {
     // A dragged session row quotes it: it joins the composer as a chip and its
     // token is written when the message is sent (#1716).
     if (session) {
       chatInputRef?.current?.addSessionReference(session);
       return;
     }
-    const { images, files, folders } = splitDroppedItems(items);
-    if (images.length > 0) chatInputRef?.current?.addImages(images);
-    if (folders.length > 0) {
-      addNotice({ type: "warning", message: t("chat.dropFoldersUnsupported", { names: folders.join(", ") }) });
+    // A dragged explorer row: its @ mention, as the row's Mention button inserts it.
+    if (mention) {
+      chatInputRef?.current?.insertText(mention);
+      return;
     }
-    if (files.length > 0) void uploadDroppedFiles(files);
-  }, [addNotice, chatInputRef, t, uploadDroppedFiles]);
+    const { images, uploads } = splitDroppedItems(items);
+    if (images.length > 0) chatInputRef?.current?.addImages(images);
+    if (uploads.length > 0) void uploadDroppedItems(uploads);
+  }, [chatInputRef, uploadDroppedItems]);
 
   const onAttachFiles = useCallback((files: File[]) => {
     onDrop(files.map((file) => ({ kind: "file", file })));
@@ -1522,6 +1551,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       slashCommands={slashCommands}
       slashCommandsLoading={slashCommandsLoading}
       onLoadSlashCommands={loadSlashCommands}
+      onGetArgumentCompletions={requestArgumentCompletions}
       extensionUiOpen={Boolean(extensionDialog || extensionCustomUi)}
       onBuiltinCommand={handleBuiltinSlashCommand}
       soundEnabled={soundEnabled}

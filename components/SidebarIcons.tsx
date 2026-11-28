@@ -170,6 +170,15 @@ export function FolderIcon(props: SidebarIconProps) {
   return <SidebarIcon {...props}><path d="M3 8a2 2 0 0 1 2-2h3.4l1.9 1.9H19a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></SidebarIcon>;
 }
 
+export function FileIcon(props: SidebarIconProps) {
+  return (
+    <SidebarIcon {...props}>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+      <path d="M14 3v5h5" />
+    </SidebarIcon>
+  );
+}
+
 export function FolderPlusIcon(props: SidebarIconProps) {
   return (
     <SidebarIcon {...props}>
@@ -206,6 +215,16 @@ export function RevertIcon(props: SidebarIconProps) {
     <SidebarIcon {...props}>
       <path d="M9 14 4 9l5-5" />
       <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H10" />
+    </SidebarIcon>
+  );
+}
+
+/** The folder with an arrow out of it: in the OS file manager, outside Pi Web. */
+export function FolderOpenIcon(props: SidebarIconProps) {
+  return (
+    <SidebarIcon {...props}>
+      <path d="M21 12.5V9.9a2 2 0 0 0-2-2h-8.7L8.4 6H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h7" />
+      <path d="M16 19h5m0 0v-5m0 5-6-6" />
     </SidebarIcon>
   );
 }

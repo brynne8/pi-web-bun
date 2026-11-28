@@ -51,6 +51,23 @@ export interface FlatTreeRow {
   /** Set when this directory is a symlink leaving the roots that has not been allowed yet. */
   pendingLink?: { target: string; encloses: boolean } | null;
   block?: FileRowBlock;
+  /** The row's name is being typed here: its own (rename) or a new folder's. */
+  edit?: FileRowEdit;
+}
+
+/** A name being edited in place. */
+export type FileRowEdit =
+  | { kind: "rename"; initial: string }
+  | { kind: "create"; directory: string };
+
+/** Where the tree's edit rows go; both paths are the explorer's own (lexical) ones. */
+export interface FlatTreeEditOptions {
+  /** The tree's root directory, above whose entries a new folder is named. */
+  root: string;
+  /** A directory whose children begin with a row naming a new folder. */
+  creatingIn?: string | null;
+  /** The entry whose name is being edited. */
+  renamingPath?: string | null;
 }
 
 /** An open directory's load state, read while flattening. */
@@ -73,8 +90,19 @@ export function flattenFileTree(
   expandedPaths: ReadonlySet<string>,
   getChildren: (node: FileTreeNode) => readonly FileTreeNode[] | null,
   resolve: (node: FileTreeNode) => DirResolve,
+  edit?: FlatTreeEditOptions,
 ): FlatTreeRow[] {
   const rows: FlatTreeRow[] = [];
+  const createRow = (directory: string, depth: number): FlatTreeRow => ({
+    key: `new:${directory}`,
+    node: { name: "", fullPath: directory, isDir: true, size: 0 },
+    depth,
+    expanded: false,
+    loading: false,
+    edit: { kind: "create", directory },
+  });
+  // A new folder named at the top of the tree sits above the root's entries.
+  if (edit?.creatingIn && edit.creatingIn === edit.root) rows.push(createRow(edit.root, 0));
   const walk = (nodes: readonly FileTreeNode[], depth: number, parentHidden?: HiddenReason): void => {
     for (const node of nodes) {
       const hidden = node.hidden ?? parentHidden;
@@ -104,8 +132,14 @@ export function flattenFileTree(
         loading: expanded && state.loading,
         pendingLink: state.pendingLink,
         block,
+        edit: edit?.renamingPath === node.fullPath ? { kind: "rename", initial: node.name } : undefined,
       });
-      if (children && children.length > 0) walk(children, depth + 1, hidden);
+      if (expanded && !state.pendingLink) {
+        if (edit?.creatingIn === node.fullPath) {
+          rows.push(createRow(node.fullPath, depth + 1));
+        }
+        if (children && children.length > 0) walk(children, depth + 1, hidden);
+      }
     }
   };
   walk(roots, 0);

@@ -106,19 +106,18 @@ import {
 import { isPageAttended, subscribePageAttention } from "@/lib/user-attention";
 import { useFilesPlacement } from "@/hooks/useFilesPlacement";
 import { useI18n } from "@/hooks/useI18n";
-import { useIsMobile } from "@/hooks/useIsMobile";
+import { useIsMobile, useTouchRows } from "@/hooks/useIsMobile";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useScrollbarVisibility } from "@/hooks/useScrollbarVisibility";
 import { useSessionUiState } from "@/hooks/useSessionUiState";
 import { archiveViewState, filesFoldState, useSidebarMotion } from "@/hooks/useSidebarMotion";
 import { DirectoryPicker } from "./DirectoryPicker";
-import { DismissButton } from "./DismissButton";
-import { FileExplorer, type FileExplorerHandle, type FileRowTarget } from "./FileExplorer";
+import { FileExplorer, type FileExplorerHandle, type FileExplorerToast, type FileRowTarget } from "./FileExplorer";
 import { PiWebTitle } from "./PiWebTitle";
 import { ProjectWorktreePicker, type ProjectWorktreePickerHandle, type WorktreeRemoval } from "./ProjectWorktreePicker";
 import { SessionSearch } from "./SessionSearch";
 import { SessionTree, sessionRowTitle, type SessionTreeReveal } from "./SessionTree";
-import { SidebarMenu, type SidebarMenuAnchor, type SidebarMenuItem, type SidebarMenuSelectEvent } from "./SidebarMenu";
+import { SidebarMenu, SidebarMenuQuestion, type SidebarMenuAnchor, type SidebarMenuItem, type SidebarMenuSelectEvent } from "./SidebarMenu";
 import { SidebarToast, type SidebarToastAction, type SidebarToastData } from "./SidebarToast";
 import {
   ArchiveIcon,
@@ -131,6 +130,9 @@ import {
   DownloadIcon,
   EyeIcon,
   FolderIcon,
+  FileIcon,
+  FolderOpenIcon,
+  FolderPlusIcon,
   MentionIcon,
   MessageIcon,
   MoreIcon,
@@ -193,6 +195,7 @@ function ToolbarIconButton({
   pressed,
   expanded,
   controls,
+  menu,
   done,
   className,
   children,
@@ -207,6 +210,8 @@ function ToolbarIconButton({
   expanded?: boolean;
   /** The id of what it opens. */
   controls?: string;
+  /** It opens a menu (the Upload key's files or folder): `expanded` says whether it is open. */
+  menu?: boolean;
   /** Brief confirmation after an action (refresh). */
   done?: boolean;
   className?: string;
@@ -223,6 +228,7 @@ function ToolbarIconButton({
       aria-pressed={pressed}
       aria-expanded={expanded}
       aria-controls={controls}
+      aria-haspopup={menu ? "menu" : undefined}
       className={`sidebar-tool-button${pressed || expanded ? " is-active" : ""}${done ? " is-done" : ""}${className ? ` ${className}` : ""}`}
     >
       {children}
@@ -269,11 +275,14 @@ interface Props {
     projectKey?: string | null,
   ) => void;
   onOpenFile?: (filePath: string, fileName: string, options?: { sourceSessionId?: string | null; modeHint?: "diff" }) => void;
+  /** The explorer moved or renamed an entry (lexical paths, as tabs hold them). */
+  onFileEntryMoved?: (from: string, to: string) => void;
+  onFileEntryDeleted?: (path: string) => void;
   onOpenTerminal?: (cwd: string) => void;
   explorerRefreshKey?: number;
   onExplorerRefresh?: () => void;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
-  onAtMentions?: (relativePaths: string[]) => void;
+  onAtMentions?: (entries: Array<{ path: string; isDir: boolean }>) => void;
   /** Fired when sessions that are not currently selected finish running.
    *  Lets the app play a cross-workspace completion tone. `since`: no earlier
    *  than the poll that last saw them running (a chime claim's bound, #1688). */
@@ -352,9 +361,11 @@ type SidebarMenuState =
   | { kind: "row"; row: SessionRow; anchor: SidebarMenuAnchor; opener: HTMLElement | null }
   | { kind: "group"; project: SidebarProject; olderCount: number; anchor: SidebarMenuAnchor; opener: HTMLElement; askDelete?: boolean }
   /** A row of the file tree or the changed list, opened at the pointer by a right-click. */
-  | { kind: "file"; target: FileRowTarget; anchor: SidebarMenuAnchor; opener: HTMLElement | null; askRevert?: boolean }
+  | { kind: "file"; target: FileRowTarget; anchor: SidebarMenuAnchor; opener: HTMLElement | null; askRevert?: boolean; askDelete?: boolean }
   | { kind: "archive-group"; project: SidebarProject; anchor: SidebarMenuAnchor; opener: HTMLElement; askDelete?: boolean }
-  | { kind: "archive"; anchor: SidebarMenuAnchor; opener: HTMLElement; askDelete?: ArchiveDeleteScope };
+  | { kind: "archive"; anchor: SidebarMenuAnchor; opener: HTMLElement; askDelete?: ArchiveDeleteScope }
+  /** The files' Upload key: files, or a folder with its subfolders. */
+  | { kind: "upload"; anchor: SidebarMenuAnchor; opener: HTMLElement };
 
 /** The archive bar's deletes: every archived session, or those archived over 30 days ago. */
 type ArchiveDeleteScope = "all" | "old";
@@ -584,9 +595,12 @@ function buttonAnchor(element: HTMLElement, align: "start" | "end"): SidebarMenu
   return { kind: "rect", rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }, align };
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSideChat, onNewSession, controlRef, onNewSessionContextChange, initialSessionId, initialSessionLinked, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onOpenTerminal, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onInsertSessionReference, onBackgroundTaskDone, hiddenFinishedSessionIds, onRunningSessionIdsChange, onSessionsChange }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSideChat, onNewSession, controlRef, onNewSessionContextChange, initialSessionId, initialSessionLinked, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, onFileEntryMoved, onFileEntryDeleted, onOpenTerminal, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions, onInsertSessionReference, onBackgroundTaskDone, hiddenFinishedSessionIds, onRunningSessionIdsChange, onSessionsChange }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
+  // The session list's touch layout (tall rows, ⋯ always shown) follows a
+  // finger, not only a phone's width: the CSS row sizes' switch.
+  const touchRows = useTouchRows();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   // Tracked in a ref only: the version is compared against the polled value to
   // decide whether the list needs reloading, and no render reads it.
@@ -631,7 +645,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
   const [showIgnoredFiles, setShowIgnoredFiles] = useState(false);
   const [explorerRefreshDone, setExplorerRefreshDone] = useState(false);
   const [fileManager, setFileManager] = useState<FileManagerAvailability | null>(null);
-  const [fileManagerError, setFileManagerError] = useState<string | null>(null);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const [awaitingInputSessionIds, setAwaitingInputSessionIds] = useState<Set<string>>(() => new Set());
   // Sessions whose subagents can still report back with a run there: not done yet (#1434).
@@ -660,6 +673,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
   const detailsHydrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const explorerRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileExplorerRef = useRef<FileExplorerHandle>(null);
+  const uploadButtonRef = useRef<HTMLButtonElement>(null);
 
   // The files below the sessions (desktop, by default: both in view, a
   // separator between them, the files section foldable to its header row),
@@ -743,6 +757,30 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
     toastIdRef.current += 1;
     setToast({ id: toastIdRef.current, message, ...(tail ? { tail } : {}), actions });
   }, []);
+  // The file explorer's notices (a move's Undo, an upload's result): the same
+  // toast, at the bottom of the files rather than the sessions. A question
+  // (Replace or Skip) waits for its answer: later notices queue behind it
+  // instead of replacing it, which would drop its upload unanswered.
+  const [fileToast, setFileToast] = useState<SidebarToastData | null>(null);
+  const fileQuestionShownRef = useRef(false);
+  const fileToastQueueRef = useRef<FileExplorerToast[]>([]);
+  const putFileToast = useCallback((next: FileExplorerToast | null) => {
+    fileQuestionShownRef.current = next?.question === true;
+    if (!next) {
+      setFileToast(null);
+      return;
+    }
+    toastIdRef.current += 1;
+    const sticky = next.sticky || next.question;
+    setFileToast({ id: toastIdRef.current, message: next.message, actions: next.actions ?? [], ...(sticky ? { sticky: true } : {}) });
+  }, []);
+  const showFileToast = useCallback((next: FileExplorerToast) => {
+    if (fileQuestionShownRef.current) fileToastQueueRef.current.push(next);
+    else putFileToast(next);
+  }, [putFileToast]);
+  const dismissFileToast = useCallback(() => {
+    putFileToast(fileToastQueueRef.current.shift() ?? null);
+  }, [putFileToast]);
   const [uiWriteFailures, setUiWriteFailures] = useState(0);
   const shownUiWriteFailuresRef = useRef(0);
   // Focus to hand to the files once they show (revealFiles): the control
@@ -1044,41 +1082,26 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
     return () => { cancelled = true; };
   }, []);
 
-  // A failure belongs to the project it happened on.
-  useEffect(() => {
-    setFileManagerError(null);
-  }, [selectedCwd, selectedCwdProp]);
-
-  /** Resolves true when it failed: the message is then in the files' body. */
-  const askFileManager = useCallback(async (body: { cwd?: string; revealFile?: string }): Promise<boolean> => {
+  /**
+   * Opens a folder (`cwd`: a project's menu) or shows a file or folder
+   * selected in its own (`reveal`: a file row's menu) in the OS file manager.
+   * Resolves the message to show where it was asked, or null.
+   */
+  const openInFileManager = useCallback(async (request: { cwd: string } | { reveal: string }): Promise<string | null> => {
     try {
       const res = await fetch("/api/open-in-explorer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(request),
       });
-      if (res.ok) {
-        setFileManagerError(null);
-        return false;
-      }
+      if (res.ok) return null;
       const data = await res.json().catch(() => ({})) as { error?: string };
-      setFileManagerError(data.error ?? `HTTP ${res.status}`);
+      const code = data.error ?? `HTTP ${res.status}`;
+      return t(FILE_MANAGER_ERROR_KEYS[code] ?? code);
     } catch (error) {
-      setFileManagerError(errorMessage(error));
+      return errorMessage(error);
     }
-    return true;
-  }, []);
-
-  const openInFileManager = useCallback((): Promise<boolean> => {
-    const dir = selectedCwd ?? selectedCwdProp;
-    return dir ? askFileManager({ cwd: dir }) : Promise.resolve(false);
-  }, [askFileManager, selectedCwd, selectedCwdProp]);
-
-  /** A row's reveal: the file manager shows this file among its folder's contents. */
-  const revealFileInManager = useCallback(
-    (filePath: string): Promise<boolean> => askFileManager({ revealFile: filePath }),
-    [askFileManager],
-  );
+  }, [t]);
 
   /** A row's download: the same hand-off to the browser its hover link used to make. */
   const downloadFile = useCallback((filePath: string) => {
@@ -1115,17 +1138,31 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
     setMenu((current) => (current?.kind === "file" ? { ...current, askRevert } : current));
   }, []);
 
+  /** The row's menu turned into, or back from, its delete question. */
+  const askFileDelete = useCallback((askDelete: boolean) => {
+    setMenu((current) => (current?.kind === "file" ? { ...current, askDelete } : current));
+  }, []);
+
+  // Offered only where the server can raise a window for this browser (not
+  // from another computer, not on a platform without one).
+  const fileManagerPlatformName = fileManager?.supported ? fileManager.platform : null;
   const fileManagerLabel = t(
-    fileManager?.platform === "darwin"
+    fileManagerPlatformName === "darwin"
       ? "sidebar.openInFinder"
-      : fileManager?.platform === "win32"
+      : fileManagerPlatformName === "win32"
         ? "sidebar.openInExplorer"
         : "sidebar.openInFileManager",
   );
-  const fileManagerUnavailable = fileManager?.supported === false;
-  const fileManagerErrorMessage = fileManagerError
-    ? t(FILE_MANAGER_ERROR_KEYS[fileManagerError] ?? fileManagerError)
-    : null;
+  const fileManagerReveal = useMemo(() => fileManagerPlatformName === null ? undefined : {
+    label: t(
+      fileManagerPlatformName === "darwin"
+        ? "sidebar.showInFinder"
+        : fileManagerPlatformName === "win32"
+          ? "sidebar.showInExplorer"
+          : "sidebar.showInFileManager",
+    ),
+    reveal: (path: string) => openInFileManager({ reveal: path }),
+  }, [fileManagerPlatformName, openInFileManager, t]);
 
   // Persist unread markers so they survive a browser refresh before the user
   // has actually opened the completed session.
@@ -2826,6 +2863,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
         shortcut: "T",
         onSelect: () => openProjectInNewTab(project),
       },
+      ...(fileManagerPlatformName === null ? [] : [{
+        type: "item" as const,
+        id: "open-in-file-manager",
+        label: fileManagerLabel,
+        icon: <FolderOpenIcon />,
+        onSelect: () => {
+          void openInFileManager({ cwd: project.root }).then((error) => {
+            if (error) showToast(error);
+          });
+        },
+      }]),
       { type: "separator", id: "separator-layout" },
       {
         type: "item",
@@ -2902,20 +2950,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
     onConfirm: () => void;
     onCancel: () => void;
   }): ReactNode => (
-    <div className="sidebar-menu-question">
-      <div className="sidebar-menu-header" title={headingTitle}>{heading}</div>
-      {notes.map((note) => <p key={note} className="sidebar-menu-question-text">{note}</p>)}
-      <div className="sidebar-menu-question-buttons">
-        <button type="button" className="sidebar-menu-question-confirm" disabled={count === 0} onClick={onConfirm}>
-          {t("sidebar.deleteCount", { count })}
-        </button>
-        {!isMobile && (
-          <button type="button" className="sidebar-menu-question-cancel" data-sidebar-menu-autofocus="" onClick={onCancel}>
-            {t("sidebar.cancel")}
-          </button>
-        )}
-      </div>
-    </div>
+    <SidebarMenuQuestion
+      heading={heading}
+      headingTitle={headingTitle}
+      notes={notes}
+      confirmLabel={t("sidebar.deleteCount", { count })}
+      confirmDisabled={count === 0}
+      cancelLabel={t("sidebar.cancel")}
+      sheet={isMobile}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
   );
 
   const projectDeleteBody = (project: SidebarProject): ReactNode => {
@@ -2983,11 +3028,50 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
       icon: <RevealIcon />,
       // Only the server can raise a file-manager window, and only for a browser on
       // that machine: a phone on the LAN is told why the item does nothing.
-      disabled: fileManagerUnavailable,
-      disabledReason: fileManagerUnavailable && fileManagerErrorMessage
-        ? fileManagerErrorMessage
-        : undefined,
-      onSelect: () => { void revealFileInManager(target.path); },
+      disabled: fileManagerPlatformName === null,
+      onSelect: () => {
+        void openInFileManager({ reveal: target.path }).then((error) => { if (error) showToast(error); });
+      },
+    },
+    { type: "separator", id: "separator-edit" },
+    {
+      type: "item",
+      id: "rename",
+      label: t("files.rename"),
+      icon: <PencilIcon />,
+      shortcut: "R",
+      onSelect: () => {
+        // The tree shows only without a search query; an open folder stays open.
+        setFileSearchOpen(false);
+        setChangesCollapsed(true);
+        fileExplorerRef.current?.startRename(target.path);
+      },
+    },
+    ...(target.isDir ? [{
+      type: "item" as const,
+      id: "new-folder",
+      label: t("files.newFolder"),
+      icon: <FolderPlusIcon />,
+      shortcut: "N",
+      onSelect: () => {
+        setFileSearchOpen(false);
+        setChangesCollapsed(true);
+        fileExplorerRef.current?.startCreateFolder(target.path);
+      },
+    }] : []),
+    {
+      type: "item",
+      id: "delete-entry",
+      label: `${t("files.delete")}…`,
+      icon: <TrashIcon />,
+      shortcut: "D",
+      danger: true,
+      // As a session's Delete: Shift says the reader knows what it does.
+      onSelect: ({ shiftKey, keepOpen }: SidebarMenuSelectEvent) => {
+        if (shiftKey) { fileExplorerRef.current?.deleteEntry(target.path); return; }
+        keepOpen();
+        askFileDelete(true);
+      },
     },
   ];
 
@@ -3031,6 +3115,41 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
       </div>
     );
   };
+  // The question behind a row's Delete. Nothing is kept of what it removes, so the
+  // item that does it is answered here, with Cancel holding the focus.
+  const fileDeleteBody = (target: FileRowTarget): ReactNode => (
+    <div className="sidebar-menu-question">
+      <div className="sidebar-menu-header" title={target.path}>
+        {t("files.deleteHeading", { name: target.name })}
+      </div>
+      <p className="sidebar-menu-question-text">
+        {t(target.isDir ? "files.deleteFolderNote" : "files.deleteNote")}
+      </p>
+      <div className="sidebar-menu-question-buttons">
+        <button
+          type="button"
+          className="sidebar-menu-question-confirm"
+          onClick={() => {
+            setMenu(null);
+            fileExplorerRef.current?.deleteEntry(target.path);
+          }}
+        >
+          {t("files.delete")}
+        </button>
+        {!isMobile && (
+          <button
+            type="button"
+            className="sidebar-menu-question-cancel"
+            data-sidebar-menu-autofocus=""
+            onClick={() => askFileDelete(false)}
+          >
+            {t("sidebar.cancel")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
   const archiveGroupMenuItems = (project: SidebarProject): SidebarMenuItem[] => {
     const ids = archiveDeleteIds({ projectKey: project.key });
     return [
@@ -3149,8 +3268,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
     menuLabel = t("files.rowActions", { name: menu.target.name });
     menuItems = fileMenuItems(menu.target);
     if (menu.askRevert) menuBody = fileRevertBody(menu.target);
+    if (menu.askDelete) menuBody = fileDeleteBody(menu.target);
     // Room for the question's sentence about what the revert discards.
-    menuWidth = menu.askRevert ? 264 : undefined;
+    menuWidth = menu.askRevert || menu.askDelete ? 264 : undefined;
   } else if (menu?.kind === "archive-group") {
     const project = archiveGroups.find((row) => row.project.key === menu.project.key)?.project ?? menu.project;
     menuTitle = project.name;
@@ -3158,6 +3278,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
     menuItems = archiveGroupMenuItems(project);
     if (menu.askDelete) menuBody = archiveDeleteBody({ projectKey: project.key }, project);
     menuWidth = 248;
+  } else if (menu?.kind === "upload") {
+    menuLabel = t("sidebar.uploadFilesTitle");
+    // Picked from the menu's click, so the browser still opens its file dialog.
+    const pick = (kind: "files" | "folder") => {
+      // The upload's progress and summary are the tree's: a folded section opens.
+      if (stacked && filesCollapsed) setFilesSectionCollapsed(false);
+      fileExplorerRef.current?.openUploadPicker(kind);
+    };
+    menuItems = [
+      { type: "item", id: "upload-files", label: t("sidebar.uploadFiles"), icon: <FileIcon />, onSelect: () => pick("files") },
+      { type: "item", id: "upload-folder", label: t("sidebar.uploadFolder"), icon: <FolderIcon />, onSelect: () => pick("folder") },
+    ];
   } else if (menu?.kind === "archive") {
     menuTitle = t("sidebar.archived");
     menuLabel = t("sidebar.archiveActions");
@@ -3172,7 +3304,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
     : menu?.kind === "group" ? `group:${menu.project.key}`
     : menu?.kind === "archive-group" ? `archive:${menu.project.key}` : null;
 
-  const treeLayout = isMobile ? "mobile" : "desktop";
+  const treeLayout = touchRows ? "mobile" : "desktop";
   // Until pins and archive have loaded, archived rows would flash in.
   const treeLoading = loading || !uiStateLoaded;
   const treeProps = {
@@ -3267,35 +3399,34 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
       <TerminalIcon size={keyIconSize} />
     </ToolbarIconButton>
   );
-  const fileManagerButton = (
-    <ToolbarIconButton
-      onClick={() => {
-        void openInFileManager().then((failed) => {
-          // Its failure shows in the files' body. Below the sessions this key
-          // is in the header row, there while the section is folded too: a
-          // folded section opens, else the message would wait unseen.
-          if (failed && stacked) setFilesSectionCollapsed(false);
-        });
-      }}
-      disabled={!explorerCwd || fileManagerUnavailable}
-      title={fileManagerUnavailable
-        ? t(fileManager?.reason === "remote" ? "sidebar.openInExplorerRemoteOnly" : "sidebar.openInExplorerUnsupported")
-        : fileManagerLabel}
-    >
-      <FolderIcon size={keyIconSize} />
-    </ToolbarIconButton>
-  );
   const uploadButton = (
     <ToolbarIconButton
+      ref={uploadButtonRef}
       onClick={() => {
-        // The upload's progress and summary are the tree's: a folded section opens.
-        if (stacked && filesCollapsed) setFilesSectionCollapsed(false);
-        fileExplorerRef.current?.openUploadPicker();
+        const opener = uploadButtonRef.current;
+        if (!opener) return;
+        setMenu((current) => (current?.kind === "upload" ? null : { kind: "upload", anchor: buttonAnchor(opener, "end"), opener }));
       }}
       disabled={!explorerCwd || explorerUploadBusy}
+      menu
+      expanded={menu?.kind === "upload"}
       title={t("sidebar.uploadFilesTitle")}
     >
       <UploadIcon size={keyIconSize} />
+    </ToolbarIconButton>
+  );
+  const newFolderButton = (
+    <ToolbarIconButton
+      onClick={() => {
+        if (stacked && filesCollapsed) setFilesSectionCollapsed(false);
+        // The new folder's row is in the tree: the changes view gives way.
+        setChangesCollapsed(true);
+        fileExplorerRef.current?.createFolder();
+      }}
+      disabled={!explorerCwd}
+      title={t("files.newFolder")}
+    >
+      <FolderPlusIcon size={keyIconSize} />
     </ToolbarIconButton>
   );
   const refreshButton = (
@@ -3623,8 +3754,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
             </button>
             <div className="sidebar-files-keys" role="group" aria-label={t("sidebar.fileActions")}>
               {terminalButton}
-              {fileManagerButton}
               {uploadButton}
+              {newFolderButton}
               {refreshButton}
               {ignoredFilesButton()}
               {changesButton}
@@ -3694,8 +3825,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
             {!stacked && explorerCwd && (
               <div className="sidebar-files-actions" role="group" aria-label={t("sidebar.fileActions")}>
                 {onOpenTerminal && terminalButton}
-                {fileManagerButton}
                 {uploadButton}
+                {newFolderButton}
                 {refreshButton}
                 {ignoredFilesButton("sidebar-files-views-start")}
                 {changesButton}
@@ -3703,12 +3834,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
             )}
           </div>
 
-          {explorerCwd && fileManagerErrorMessage && (
-            <div role="alert" className="sidebar-files-error">
-              <span className="sidebar-files-error-text">{fileManagerErrorMessage}</span>
-              <DismissButton onClick={() => setFileManagerError(null)} title={t("files.dismissError")} />
-            </div>
-          )}
           {/* Mounted whenever there is a cwd, also while the tab or the folded
               section hides it, so the expanded tree, a search and an upload in
               progress survive a switch. */}
@@ -3718,6 +3843,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
                 ref={fileExplorerRef}
                 cwd={explorerCwd}
                 onOpenFile={onOpenFile ?? (() => {})}
+                onToast={showFileToast}
+                fileManager={fileManagerReveal}
+                mobile={isMobile}
+                onEntryMoved={onFileEntryMoved}
+                onEntryDeleted={onFileEntryDeleted}
                 refreshKey={explorerKey}
                 onRowMenu={(target, position) => {
                   setMenu({
@@ -3741,6 +3871,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onSelectSid
             )}
           </div>
         </div>
+        <SidebarToast
+          toast={fileToast}
+          onDismiss={dismissFileToast}
+          dismissLabel={t("sidebar.dismiss")}
+          regionClassName="sidebar-files-toast-region"
+        />
       </div>
 
       <SidebarMenu

@@ -4,7 +4,6 @@ import { NextResponse } from "vinext/shims/server";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import {
   fileManagerPlatform,
-  fileManagerViewFor,
   isFileManagerSupported,
   isLoopbackHost,
   launchFileManager,
@@ -30,7 +29,10 @@ export async function GET(request: Request) {
   return NextResponse.json({ supported, reason, platform });
 }
 
-/** Opens the session workspace, or reveals one file in it, in the OS file manager. */
+/**
+ * `{ cwd }` opens the session workspace in the OS file manager; `{ reveal }`
+ * shows a file or folder selected in its folder (a file row's menu).
+ */
 export async function POST(request: Request) {
   try {
     const { supported, reason } = availabilityFor(request);
@@ -38,16 +40,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: reason }, { status: 403 });
     }
 
-    const body = await request.json() as { cwd?: unknown; revealFile?: unknown };
-    // `revealFile` asks for one file to be selected among its folder's contents;
-    // without it the target is a directory to open, as before.
-    const revealFile = typeof body.revealFile === "string" && body.revealFile.trim()
-      ? body.revealFile
-      : null;
-    if (!revealFile && (typeof body.cwd !== "string" || !body.cwd.trim())) {
+    const body = await request.json() as { cwd?: unknown; reveal?: unknown };
+    // `reveal` shows one entry selected in its folder (a row's menu); without it
+    // the target is a directory to open.
+    const reveal = typeof body.reveal === "string" && body.reveal.trim() !== "";
+    const requested = reveal ? body.reveal : body.cwd;
+    if (typeof requested !== "string" || !requested.trim()) {
       return NextResponse.json({ error: "cwd-required" }, { status: 400 });
     }
-    const target = resolve(revealFile ?? body.cwd as string);
+    const target = resolve(requested);
     // Authorize before touching the path, so a location outside the allowed
     // roots answers 403 whether or not it exists.
     const roots = await getAllowedFileRoots();
@@ -55,17 +56,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "access-denied" }, { status: 403 });
     }
     const stats = await stat(target);
-    // A row that turned out to be a folder opens that folder, and nothing that is
-    // neither file nor folder is asked of the file manager at all.
-    const view = fileManagerViewFor(revealFile !== null, stats);
-    if (!view) {
+    // A reveal shows any file or folder; without one the target must be a
+    // directory, and nothing that is neither file nor folder is asked of the
+    // file manager at all.
+    if (reveal ? !stats.isFile() && !stats.isDirectory() : !stats.isDirectory()) {
       return NextResponse.json(
-        { error: revealFile ? "not-a-file" : "not-a-directory" },
+        { error: reveal ? "not-a-file" : "not-a-directory" },
         { status: 400 },
       );
     }
 
-    await launchFileManager(target, process.platform, view);
+    await launchFileManager(target, process.platform, process.env, reveal);
     return NextResponse.json({ opened: true });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 500 });

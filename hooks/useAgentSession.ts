@@ -1017,7 +1017,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           oldestEntryId: historyCursorRef.current,
           hasMore: hasEarlierMessagesRef.current,
           turnsBefore: earlierTurnCountRef.current,
-          summaryTree: d.tree,
+          summaryTree: d.treeFormat === "summary" ? d.tree : cached?.summaryTree,
           thinkingLevel: d.context.thinkingLevel,
           model: d.context.model,
           stats: d.stats,
@@ -1043,11 +1043,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setCurrentModelOverride((current) => modelSwitchPendingRef.current ? current : null);
       setCurrentThinkingOverride(null);
       setError(null);
-      if (d.treeFormat === "summary" && d.snapshotRevision) {
+      if (!revisionUnchanged && d.treeFormat === "summary" && d.snapshotRevision) {
         setSessionViewSnapshot({
           sessionId: sid,
           revision: d.snapshotRevision,
-          messages: persistedMessages,
+          messages: d.context.messages,
           entryIds: d.context.entryIds ?? [],
           leafId: d.leafId,
           oldestEntryId: d.context.oldestEntryId,
@@ -1145,6 +1145,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // Older page: prepend so scroll position stays anchored.
         setMessages((prev) => [...d.context.messages, ...prev]);
         setEntryIds((prev) => [...d.context.entryIds, ...prev]);
+        // Record the paged-in ids in the cached view so the unmount check
+        // (`snapshotCoversLoadedEntries`) keeps the wider window instead of
+        // dropping the snapshot.
+        const addedEntryIds = d.context.entryIds ?? [];
+        const snapshot = getSessionViewSnapshot(sid);
+        if (snapshot && addedEntryIds.length > 0) {
+          setSessionViewSnapshot({
+            ...snapshot,
+            loadedEntryIds: [...addedEntryIds, ...snapshot.loadedEntryIds],
+          });
+        }
       } else {
         setMessages(d.context.messages);
         setEntryIds(d.context.entryIds ?? []);
@@ -1353,6 +1364,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [ensureNewSession, replaceSlashCommands, withSessionStartStream]);
 
   const loadSlashCommands = useCallback(async () => (await requestSlashCommands()) ?? [], [requestSlashCommands]);
+
+  const requestArgumentCompletions = useCallback(async (name: string, prefix: string, signal: AbortSignal) => {
+    const sid = sessionIdRef.current ?? await ensureNewSession();
+    if (!sid || signal.aborted || sid !== sessionIdRef.current) return null;
+    const data = await withSessionStartStream(sid, () => sendAgentCommand<Array<{ value: string; label: string; description?: string }> | null>(sid, {
+      type: "get_argument_completions",
+      name,
+      prefix,
+    }, { signal }));
+    return signal.aborted || sid !== sessionIdRef.current ? null : data;
+  }, [ensureNewSession, withSessionStartStream]);
 
   // The list a bare /mcp is decided by: the request under way (the palette starts
   // one as "/mcp" is typed, often still unanswered at Enter), else the list already
@@ -3643,6 +3665,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           },
           stats: cached.stats as SessionData["stats"],
         });
+        activeLeafIdRef.current = cached.leafId;
+        messagesRef.current = cached.messages;
+        entryIdsRef.current = cached.entryIds;
+        historyCursorRef.current = cached.oldestEntryId;
+        hasEarlierMessagesRef.current = cached.hasMore;
+        earlierTurnCountRef.current = cached.turnsBefore;
         setActiveLeafId(cached.leafId);
         setMessages(cached.messages);
         setEntryIds(cached.entryIds);
@@ -3917,7 +3945,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     cancelEdit: editEntryId ? cancelEdit : undefined,
     addNotice,
     setNoticePaused: setPausedNoticeId,
-    handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, loadTools, loadSlashCommands, loadAllModels, setActiveLeafId, setData, setMessages, loadContext,
+    handleToolPresetChange, handleThinkingLevelChange, handleSetDefaultModel, handleSetDefaultThinkingLevel, loadTools, loadSlashCommands, requestArgumentCompletions, loadAllModels, setActiveLeafId, setData, setMessages, loadContext,
     scrollToBottom, scrollUserMsgToTop, scrollToMessage,
     dispatch, setAgentRunning, setForkingEntryId,
     bashRunning, pendingBash, railReports,

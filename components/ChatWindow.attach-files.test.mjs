@@ -1,38 +1,85 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { Script } from "node:vm";
 import { createJiti } from "jiti";
+import ts from "typescript";
 
-// Through jiti: `lib/file-upload-client.ts` imports its siblings by their extensionless
-// names, which only a loader that fills the extension in resolves (docs/agents/tests.md).
+// Through jiti with `tryNative` off: the module under test is ChatWindow's own
+// callback, and the graph it reads must be the one this file stubs.
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true, tryNative: false });
-const { dropMentionText, splitDroppedItems, uploadDroppedFiles } = await jiti.import("../lib/file-upload-client.ts");
+const uploadClient = await jiti.import("../lib/file-upload-client.ts");
+const { formatImageBytes } = await jiti.import("../lib/model-image-limits.ts");
+const { errorMessage } = await jiti.import("../lib/errors.ts");
+
+const sourceText = readFileSync(new URL("./ChatWindow.tsx", import.meta.url), "utf8");
+const source = ts.createSourceFile("ChatWindow.tsx", sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+
+/** Runs one of ChatWindow's useCallback bodies against the given scope. */
+function chatWindowCallback(name, context) {
+  function findCallback(node) {
+    if (ts.isVariableDeclaration(node) && node.name.getText(source) === name) {
+      return node.initializer.arguments[0];
+    }
+    return ts.forEachChild(node, findCallback);
+  }
+  return new Script(ts.transpileModule(findCallback(source).getText(source), {
+    compilerOptions: { target: ts.ScriptTarget.ES2020 },
+  }).outputText).runInNewContext(context);
+}
 
 const photo = new File(["x"], "photo.png", { type: "image/png" });
 const report = new File(["x"], "report.pdf", { type: "application/pdf" });
 const log = new File(["x"], "server.log", { type: "" });
 
-/** Picks files with the composer's attach button, through the chat drop path. */
-async function attach(files, { cwd = "/project", response } = {}) {
+/** Runs ChatWindow's real drop path, as the composer's attach button or a drop does. */
+async function drop(items, { cwd = "/project", response } = {}) {
   const calls = { images: [], uploads: [], mentions: [], notices: [], refreshed: 0 };
-  const items = files.map((file) => ({ kind: "file", file }));
-  // The chat's drop path: images to the composer, and the rest to the upload.
-  const { images, files: others } = splitDroppedItems(items);
-  calls.images.push(...images);
-  if (others.length === 0) return calls;
-  await uploadDroppedFiles(others, {
-    cwd,
-    uploadFiles: async (target, uploads, strategy) => {
-      calls.uploads.push([target, uploads.map((file) => file.name), strategy]);
-      return { ...response, status: response.status, data: response.data };
+  const scope = {
+    session: null,
+    newSessionCwd: cwd,
+    chatInputRef: {
+      current: {
+        addImages: (images) => calls.images.push(...images),
+        insertText: (text) => calls.mentions.push(text),
+      },
     },
-    dropMentionText,
     addNotice: (notice) => calls.notices.push([notice.type, notice.message]),
     t: (key, vars) => (vars ? `${key} ${JSON.stringify(vars)}` : key),
-    insertText: (text) => calls.mentions.push(text),
     onFilesUploaded: () => { calls.refreshed += 1; },
-  });
+    ...uploadClient,
+    formatImageBytes,
+    errorMessage,
+    uploadFiles: async (target, uploads, strategy) => {
+      calls.uploads.push([target, uploads.map((item) => item.path), strategy]);
+      return response;
+    },
+  };
+  scope.uploadDroppedItems = chatWindowCallback("uploadDroppedItems", scope);
+  scope.onDrop = chatWindowCallback("onDrop", scope);
+  if (items.every((item) => item instanceof File)) chatWindowCallback("onAttachFiles", scope)(items);
+  else scope.onDrop(items);
   await new Promise((resolve) => setImmediate(resolve));
   return calls;
+}
+
+/** Picks files with the composer's attach button. */
+const attach = (files, options) => drop(files, options);
+
+function folder(name, children) {
+  return {
+    name,
+    isFile: false,
+    isDirectory: true,
+    createReader() {
+      const entries = Object.entries(children).map(([childName, value]) => (
+        value instanceof File
+          ? { name: childName, isFile: true, isDirectory: false, file: (resolve) => resolve(value) }
+          : folder(childName, value)
+      ));
+      return { readEntries: (resolve) => resolve(entries.splice(0, entries.length)) };
+    },
+  };
 }
 
 test("the attach button sends picked files down the chat drop path (#1101)", async () => {
@@ -62,10 +109,28 @@ test("without a working directory, picked files behave like a drop there (#1101)
   assert.deepEqual(calls.notices, [["warning", "chat.dropNeedsCwd"]]);
 });
 
+test("a dropped folder uploads with its subfolders and is mentioned once (#1786)", async () => {
+  const entry = folder("data", { "a.csv": report, sub: { "b.csv": log }, ".DS_Store": log, "photo.png": photo });
+  const calls = await drop([{ kind: "folder", name: "data", entry }, { kind: "file", file: photo }], {
+    response: { status: 200, data: { uploaded: ["data/a.csv", "data/sub/b.csv", "data/photo.png"], skipped: [] } },
+  });
+  // A top-level image still attaches; one inside the folder is part of the folder.
+  assert.deepEqual(calls.images, [photo]);
+  assert.deepEqual(calls.uploads, [["/project", ["data/a.csv", "data/sub/b.csv", "data/photo.png"], "skip"]]);
+  assert.deepEqual(calls.mentions, ["@data/ "]);
+});
+
+test("a drop over the upload limit is refused before anything is sent (#1786)", async () => {
+  const big = new File([new Uint8Array(60 * 1024 * 1024)], "big.bin");
+  const other = new File([new Uint8Array(41 * 1024 * 1024)], "other.bin");
+  const calls = await drop([{ kind: "folder", name: "data", entry: folder("data", { "big.bin": big, "other.bin": other }) }]);
+  assert.deepEqual(calls.uploads, []);
+  assert.deepEqual(calls.notices, [["error", 'files.uploadTooLarge {"size":"101 MiB","limit":"100 MiB"}']]);
+});
+
 test("the composer's attach button takes the chat's own drop path", () => {
-  // `attach()` above plays the drop path itself, so the wiring from the picker into it is
-  // what these two links carry: ChatInput gets `onAttachFiles`, and that callback hands its
-  // files to `onDrop` — the callback that sends images to the composer and the rest up.
-  // That the composer's attach button reaches this drop path is wiring a server render cannot
-  // see: the path itself is what the cases above exercise.
+  // What a server render cannot see: ChatInput gets `onAttachFiles`, and that
+  // callback hands its files to `onDrop` — the one path a drop takes as well.
+  assert.match(sourceText, /onAttachFiles=\{onAttachFiles\}/);
+  assert.match(sourceText, /const onAttachFiles = useCallback\(\(files: File\[\]\) => \{\n\s+onDrop\(files\.map\(\(file\) => \(\{ kind: "file", file \}\)\)\);/);
 });

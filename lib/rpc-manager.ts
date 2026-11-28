@@ -323,6 +323,7 @@ const COMMANDS_ALLOWED_DURING_SESSION_REPLACEMENT = new Set([
   "get_last_assistant_text",
   "get_tools",
   "get_commands",
+  "get_argument_completions",
   "extension_ui_response",
   "extension_ui_input",
 ]);
@@ -1245,7 +1246,8 @@ export class AgentSessionWrapper {
     return type === "prompt"
       || type === "steer"
       || type === "follow_up"
-      || type === "get_commands";
+      || type === "get_commands"
+      || type === "get_argument_completions";
   }
 
   private async withFinalIdleReset<T>(operation: () => Promise<T>): Promise<T> {
@@ -2283,6 +2285,17 @@ export class AgentSessionWrapper {
           active: active.has(t.name),
           declarationHidden: hidden.has(t.name),
         }));
+      }
+
+      case "get_argument_completions": {
+        const name = command.name;
+        const prefix = command.prefix;
+        if (typeof name !== "string" || typeof prefix !== "string") {
+          throw new Error("name and prefix must be strings");
+        }
+        const registered = this.inner.extensionRunner.getCommand(name);
+        const getCompletions = registered?.getArgumentCompletions;
+        return getCompletions ? await getCompletions(prefix) : null;
       }
 
       case "get_commands": {
@@ -4312,6 +4325,7 @@ export async function startRpcSession(
     const mcpHost = builtins?.mcpHost ?? subagentMcp?.mcpHost;
     const startupIssues = collectStartupIssues({
       diagnostics: services.diagnostics,
+      modelsJsonError: services.modelRuntime.getError(),
       extensions: services.resourceLoader.getExtensions(),
     });
     for (const issue of startupIssues) console.warn(`[pi-web] session ${inner.sessionId}: ${issue.message}`);

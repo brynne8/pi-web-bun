@@ -16,6 +16,8 @@ export interface ComposerKeyEvent {
 }
 
 export interface ComposerKeyDownDeps<SlashCommand = unknown, AtMatch = unknown, HashMatch = unknown> {
+  /** The extension slash-command argument list under the caret, when one can show. */
+  argumentCompletion?: ComposerArgumentCompletionDeps;
   isMobile: boolean;
   enterSendMode: "enter" | "ctrlEnter";
   isStreaming: boolean;
@@ -63,6 +65,22 @@ export interface ComposerKeyDownDeps<SlashCommand = unknown, AtMatch = unknown, 
   handleSend: (...args: never[]) => void;
 }
 
+export interface ComposerArgumentCompletionDeps {
+  /** The snapshot the caret's argument names, or null when the caret is outside one. */
+  snapshotForCaret(): string | null;
+  /** Whether a result list is showing for that snapshot. */
+  hasResults(snapshot: string): boolean;
+  /** Whether Escape belongs to the completion: a list showing, a request in flight, or one suppressed. */
+  ownsEscape(snapshot: string): boolean;
+  /** Keeps a dismissed snapshot from reopening until the caret leaves it. */
+  suppress(snapshot: string): void;
+  invalidate(): void;
+  items: Array<{ value: string; label: string }>;
+  activeIndex: number;
+  setActiveIndex(index: number | ((index: number) => number)): void;
+  apply(item: { value: string; label: string }): void;
+}
+
 export function handleComposerKeyDown<SlashCommand, AtMatch, HashMatch>(
   e: ComposerKeyEvent,
   deps: ComposerKeyDownDeps<SlashCommand, AtMatch, HashMatch>,
@@ -85,6 +103,38 @@ export function handleComposerKeyDown<SlashCommand, AtMatch, HashMatch>(
   if (acceptShortcut && (isComposing || recentlyComposed)) {
     if (recentlyComposed) e.preventDefault();
     return;
+  }
+
+  // An argument list the caret owns takes Escape before Esc can stop a run.
+  const argumentCompletion = deps.argumentCompletion;
+  if (argumentCompletion && e.key === "Escape" && !isComposing && !deps.extensionUiOpen) {
+    const snapshot = argumentCompletion.snapshotForCaret();
+    if (snapshot && argumentCompletion.ownsEscape(snapshot)) {
+      e.preventDefault();
+      argumentCompletion.suppress(snapshot);
+      argumentCompletion.invalidate();
+      return;
+    }
+  }
+
+  // The same list takes the arrows and Tab/Enter before any menu below.
+  if (argumentCompletion && !deps.extensionUiOpen && !isComposing) {
+    const snapshot = argumentCompletion.snapshotForCaret();
+    if (snapshot && argumentCompletion.hasResults(snapshot)) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const delta = e.key === "ArrowDown" ? 1 : -1;
+        argumentCompletion.setActiveIndex(
+          (index) => (index + delta + argumentCompletion.items.length) % argumentCompletion.items.length,
+        );
+        return;
+      }
+      if ((e.key === "Tab" || acceptShortcut) && argumentCompletion.items[argumentCompletion.activeIndex]) {
+        e.preventDefault();
+        argumentCompletion.apply(argumentCompletion.items[argumentCompletion.activeIndex]);
+        return;
+      }
+    }
   }
 
   if (deps.historyMenuOpen && !deps.extensionUiOpen && !isComposing) {

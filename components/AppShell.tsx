@@ -12,7 +12,7 @@ import type { ChatScrollPosition } from "@/lib/chat-scroll-position";
 import { TabBar, type Tab } from "./TabBar";
 import { sidebarOpenForBreakpoint, toggleSidebar } from "@/lib/sidebar-breakpoint";
 import { movePanelTab, orderPanelTabs } from "@/lib/panel-tab-order";
-import { openFileTab, saveFileViewerState, saveParkedFileViewerState, switchFileWorkspace, type ParkedFileWorkspace } from "./file-tab-state.ts";
+import { dropDeletedFileTabs, openFileTab, retargetFileTabId, retargetFileTabs, saveFileViewerState, saveParkedFileViewerState, switchFileWorkspace, type ParkedFileWorkspace } from "./file-tab-state";
 import type { ProjectTrustFailure } from "./ProjectTrustDialog";
 import { BranchNavigator, hasSessionBranches } from "./BranchNavigator";
 import { SystemPromptPanel } from "./SystemPromptPanel";
@@ -58,7 +58,7 @@ import { useAudio } from "@/hooks/useAudio";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
 import { sessionDisplayTitle } from "@/lib/session-fork-name";
-import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
+import { buildAtMentionText, buildAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import {
   claimExtensionAttentionNotification,
   shouldShowBrowserNotification,
@@ -808,8 +808,8 @@ export function AppShell() {
     [],
   );
 
-  const handleAtMentions = useCallback((relativePaths: string[]) => {
-    const mentions = buildFileAtMentionsText(relativePaths);
+  const handleAtMentions = useCallback((entries: Array<{ path: string; isDir: boolean }>) => {
+    const mentions = buildAtMentionsText(entries);
     if (mentions) chatInputRef.current?.insertText(mentions);
     if (isMobile) { setRightPanelOpen(false); setSidebarOpen(false); }
   }, [isMobile]);
@@ -1446,6 +1446,39 @@ export function AppShell() {
     if (isMobile) setSidebarOpen(false);
   }, [bgTasks, isMobile]);
 
+  // The explorer moved, renamed or deleted an entry: open tabs of it (or of
+  // anything below a folder) follow it or close, parked workspaces included.
+  const handleFileEntryMoved = useCallback((from: string, to: string) => {
+    setFileTabs((prev) => retargetFileTabs(prev, from, to));
+    setActiveFileTabId((id) => (id ? retargetFileTabId(id, from, to) : id));
+    setPanelTabOrder((order) => order.map((id) => retargetFileTabId(id, from, to)));
+    for (const [key, workspace] of fileWorkspaceStatesRef.current) {
+      fileWorkspaceStatesRef.current.set(key, {
+        ...workspace,
+        tabs: retargetFileTabs(workspace.tabs, from, to),
+        activeTabId: workspace.activeTabId ? retargetFileTabId(workspace.activeTabId, from, to) : null,
+      });
+    }
+  }, []);
+
+  const handleFileEntryDeleted = useCallback((deleted: string) => {
+    const remaining = dropDeletedFileTabs(fileTabs, deleted);
+    if (remaining !== fileTabs) {
+      setFileTabs(remaining);
+      setActiveFileTabId((id) => {
+        if (!id || remaining.some((tab) => tab.id === id) || !id.startsWith("file:")) return id;
+        return remaining.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? lastAgentTabId(agentTabs);
+      });
+      if (remaining.length === 0 && terminalTabs.length === 0 && agentTabs.length === 0) setRightPanelOpen(false);
+    }
+    for (const [key, workspace] of fileWorkspaceStatesRef.current) {
+      const tabs = dropDeletedFileTabs(workspace.tabs, deleted);
+      if (tabs === workspace.tabs) continue;
+      const activeTabId = tabs.some((tab) => tab.id === workspace.activeTabId) ? workspace.activeTabId : tabs.at(-1)?.id ?? null;
+      fileWorkspaceStatesRef.current.set(key, { ...workspace, tabs, activeTabId, open: workspace.open && activeTabId !== null });
+    }
+  }, [agentTabs, fileTabs, terminalTabs]);
+
   const handleOpenLinkedFile = useCallback((filePath: string, target?: FileLinkTarget) => {
     handleOpenFile(filePath, getFileName(filePath), { sourceSessionId: selectedSession?.id ?? null, target });
   }, [handleOpenFile, selectedSession?.id]);
@@ -1787,6 +1820,8 @@ export function AppShell() {
         selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
         onCwdChange={handleCwdChange}
         onOpenFile={handleOpenFile}
+        onFileEntryMoved={handleFileEntryMoved}
+        onFileEntryDeleted={handleFileEntryDeleted}
         onOpenTerminal={handleOpenTerminal}
         explorerRefreshKey={explorerRefreshKey}
         onExplorerRefresh={handleExplorerRefresh}
