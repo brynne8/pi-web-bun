@@ -3,7 +3,6 @@
 import { forwardRef, memo, useState, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef } from "react";
 import type { MouseEvent as ReactMouseEvent, RefObject } from "react";
 import { getFileIcon, FolderIcon } from "./FileIcons";
-import { FolderPlusIcon, MentionIcon } from "./SidebarIcons";
 import {
   encodeFilePathForApi,
   getFileDirectory,
@@ -1982,6 +1981,34 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       <input ref={uploadInputRef} type="file" multiple hidden onChange={handleUploadInput} />
       <input ref={uploadFolderInputRef} type="file" hidden onChange={handleUploadInput} {...FOLDER_INPUT_PROPS} />
       <div ref={aboveRef}>
+        {/* The upload's own progress, which is state rather than a notice: it
+            stays in the tree while it runs, at the cwd or in a folder. */}
+        {uploadBusy && (
+          <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
+            <div role="status" aria-live="polite" aria-label={uploadPhase === "checking" ? t("files.checking") : t("files.uploading", { progress: uploadProgress })}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 14, color: "var(--text-muted)" }}>
+                {uploadPhase === "checking" ? (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" style={{ animation: "spin 0.8s linear infinite" }} aria-hidden="true">
+                    <path d="M21 12a9 9 0 1 1-5.7-8.4" />
+                  </svg>
+                ) : (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 16V4" />
+                    <path d="m7 9 5-5 5 5" />
+                    <path d="M5 20h14" />
+                  </svg>
+                )}
+                {uploadPhase === "uploading" && <span style={{ fontSize: 10 }}>{uploadProgress}%</span>}
+              </div>
+              {uploadPhase === "uploading" && (
+                <div style={{ height: 3, marginTop: 4, overflow: "hidden", borderRadius: 2, background: "var(--border)" }}>
+                  <div style={{ width: `${uploadProgress}%`, height: "100%", background: "var(--text-muted)", transition: "width 120ms ease" }} />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {fileSearchOpen && (
           <div style={{ padding: "2px 8px 6px" }}>
             <div style={{ position: "relative" }}>
