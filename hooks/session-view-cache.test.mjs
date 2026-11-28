@@ -8,7 +8,7 @@ import { createJiti } from "jiti";
 // unchanged must keep the wider window — with `messages`, `entryIds`, and the
 // pagination cursor staying aligned both in hook state and in the cached view.
 const shimPath = fileURLToPath(new URL("./__fixtures__/react-hook-shim.mjs", import.meta.url));
-const jiti = createJiti(import.meta.url, { tsconfigPaths: true, alias: { react: shimPath } });
+const jiti = createJiti(import.meta.url, { tsconfigPaths: true, tryNative: false, alias: { react: shimPath } });
 const { renderHook } = await import(pathToFileURL(shimPath).href);
 const { useAgentSession } = await jiti.import("./useAgentSession.ts");
 const { deleteSessionViewSnapshot, getSessionViewSnapshot, setSessionViewSnapshot } = await jiti.import("@/lib/session-view-cache");
@@ -17,6 +17,10 @@ globalThis.document ??= Object.assign(new EventTarget(), { visibilityState: "vis
 globalThis.window ??= new EventTarget();
 globalThis.requestAnimationFrame ??= (fn) => setTimeout(fn, 0);
 globalThis.cancelAnimationFrame ??= (id) => clearTimeout(id);
+
+// A stub that outlives its file answers the next file's real request
+// (docs/agents/tests.md): every test puts the real one back.
+const realFetch = globalThis.fetch;
 
 const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 const settle = async () => { for (let index = 0; index < 10; index++) await new Promise((resolve) => setImmediate(resolve)); };
@@ -107,6 +111,7 @@ function setup() {
   const cleanup = () => {
     for (const source of sources) source.close();
     mock.timers.reset();
+    globalThis.fetch = realFetch;
     deleteSessionViewSnapshot("A");
   };
 

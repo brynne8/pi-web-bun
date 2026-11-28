@@ -16,10 +16,10 @@ test.after(() => {
   fs.rmSync(base, { recursive: true, force: true });
 });
 
-const jiti = createJiti(import.meta.url, { alias: { "@": process.cwd() }, interopDefault: true });
+const jiti = createJiti(import.meta.url, { alias: { "@": process.cwd() }, interopDefault: true, tryNative: false });
 const { POST } = await jiti.import("./[...path]/route.ts");
 const { encodeFilePathForApi } = await jiti.import("../../../lib/file-paths.ts");
-const { NextRequest } = await jiti.import("next/server");
+const { NextRequest } = await jiti.import("vinext/shims/server");
 
 function fixture(...extraRoots) {
   const root = fs.mkdtempSync(path.join(base, "project-"));
